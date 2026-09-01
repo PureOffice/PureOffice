@@ -1,0 +1,10 @@
+node_modules/
+oh_modules/
+build/
+hvigor/output/
+.hvigor/
+**/.test/
+oh-package-lock.json5
+local.properties
+.ohos/
+third_party/

@@ -1,0 +1,31 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "./.ohos/default_WineHua_RVwdLEoMMxAEucWW3N5BFF3ZUbxXV0JDDsGj3yoRFUs=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "00000019925D80B9B00A4F7EB96E01710867F5FAEF16EDAA43BCCEFE886442CCD39AD01DBCF2095E0B",
+          "profile": "./.ohos/default_WineHua_RVwdLEoMMxAEucWW3N5BFF3ZUbxXV0JDDsGj3yoRFUs=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "./.ohos/default_WineHua_RVwdLEoMMxAEucWW3N5BFF3ZUbxXV0JDDsGj3yoRFUs=.p12",
+          "storePassword": "0000001962D48F70338CB8A384B52432F6C11FF794D49CCDBB0A014C8B2132EFA84BDEB452F578F4D7"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "targetSdkVersion": "6.1.0(23)",
+        "compatibleSdkVersion": "6.1.0(23)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": { "nativeCompiler": "BiSheng" }
+      }
+    ],
+    "buildModeSet": [ { "name": "debug" }, { "name": "release" } ]
+  },
+  "modules": [ { "name": "entry", "srcPath": "./entry", "targets": [ { "name": "default", "applyToProducts": ["default"] } ] } ]
+}
