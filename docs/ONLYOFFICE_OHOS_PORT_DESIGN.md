@@ -98,11 +98,16 @@ ArkWebCore.hap (Chromium + CEF 合编产物)                 ← 系统引擎，
 ## 3. 总路线图（阶段划分）
 
 ```
-阶段 1  POC：排掉两大风险（阶段 1 通过才进阶段 2）
-  POC-1  系统 WebView 渲染编辑器 + window.Asc.* 桥可行性   ← 最大风险
-  POC-2  core 交叉编译到 arm64 OHOS（.so + NAPI）
-  POC-3  端到端整合：选 docx→core 实时转→WebView 渲染→编辑→保存
-  POC-4  壳方向探测：ArkUI 薄壳 vs Qt 壳（拿实证定 A/B）
+阶段 1  POC：排掉两大风险 —— **2026-09-03 完成 ✅（全部通过，进入阶段 2）**
+  POC-1  系统 WebView 渲染编辑器 + window.Asc.* 桥可行性   ✅（最大风险排掉）
+  POC-2  core 交叉编译到 arm64 OHOS（.so + NAPI）          ✅
+  POC-3  端到端整合：选 docx→core 实时转→WebView 渲染→编辑→保存  ✅（诊断完成，保存断点由 POC-5 链替代）
+  POC-4  壳方向探测：ArkUI 薄壳 vs Qt 壳（拿实证定 A/B）     ✅ **按规则直接选 B**（POC-1/3 判异步桥可行；POC-0 不插入）
+  POC-5  「编辑→保存」全开源链真机验证                     ✅
+         页面 BinaryFileWriter(DOCY) → AscSaveBridge → x2t doct_bin2docx → save.docx
+         验收：真机 asc_AddText 插入 POC5-1788365602126 → DOCY;v5;292662;+b64(390231B)
+         → x2t rc=0x0 → 26077B docx → recv 后 word/document.xml 含
+         POC5-1788365602126（编辑内容进成品）
 
 阶段 2  定壳 & 工程化（POC-1/3 产物 + POC-4 结论）
   2.1  确定壳（趋势 ArkTS；除非 POC-4 证明 Qt 明显更省）
@@ -117,6 +122,21 @@ ArkWebCore.hap (Chromium + CEF 合编产物)                 ← 系统引擎，
 ```
 
 **里程碑判定**：POC-1 若能跑通编辑器渲染并走通 `window.Asc.*` 主要回调 → 方案成立，进入 2。POC-1 失败 → 回到 2.1/3.x 重新评估桥的替代（例如用 ONLYOFFICE Document Server 的 HTTP/socket 模式替代 CEF 桥）。
+
+---
+
+**阶段 1 完成宣告（2026-09-03）**：功能可行性全部清零（POC-1/2/3/5 真机闭环；POC-4 依规则直选 B；POC-0【Electron 重路线】仅在同步桥不足时才插——已证异步桥足用，明确不做）。壳方向 = **ArkTS 薄壳包 ArkWeb（B 路线）**。POC-4 原第二试探线（Qt 嵌 ArkWeb surface）与 Electron 重路线均不再评估。
+
+### §3.1 阶段 2 迭代计划（2026-09-03 起，工程化）
+
+| 迭代 | 范围 | 内容 | 验收 |
+|---|---|---|---|
+| **迭代 1**（进行中） | 2.1+2.2+2.4 MVP | 壳层"打开用户文件"入口 → rawfileLoader 增加 `userfile/` 沙箱文件拦截（URL 参数化打开，替代硬编码 `_offline_` 内置文档）→ POC-5 探针改造为正式保存按钮（页内 `__poc_save` 全局函数）→ 部署脚本沉淀 `scripts/onlyoffice/` | 真机沙箱任意 docx 打开（内容指纹=该文件，非内置 demo）→ 编辑标记 → 保存按钮 → recv 验证 document.xml 含标记+原文件内容 |
+| **迭代 2** | 2.3 | 三件套 xlsx/pptx：cell/slide 页面资源、XLSY/PPTY → xlst_bin2xlsx / pptt_bin2pptx（convertershell 已含）真机验证 | 真机 xlsx/pptx 编辑→保存闭环 |
+| **迭代 3** | 2.2 补 | 生命周期：切后台/旋转/WebView 状态保持；长会话语义（多页/大文档 base64 过桥阈值评估）；打开/保存对话框走原生 | 桌面体验一致；大文档（≥10MB）打开+保存不崩 |
+| **后续** | 3.x | 产品化：文件管理/最近列表/触控手势；受约束能力降级（打印→PDF、剪贴板异步、拖拽→点选） | —— |
+
+> 迭代 1 唯一可能回退的切点：「真文件打开」若在拦截器/offline 模式受限，则单独扩一次小 POC（1-2 天），不阻塞其余切片。
 
 ---
 
@@ -151,6 +171,8 @@ ArkWebCore.hap (Chromium + CEF 合编产物)                 ← 系统引擎，
 ```
 - **性能要点**：编辑高频路径（逐键/选区/滚动/排版/Canvas 绘画）100% 在 sdkjs 内完成，**不经过桥**；桥只承担"文档级一次性 I/O"。唯一瓶颈是**大文档一次性过桥**（webview 的 runJavaScript 跨 IPC+复制），用"文件 URL / onInterceptRequest / 流式"规避。
 
+> **【2026-09-02 修正】保存段有重大更新**（POC-3 后的全源码分析）：「编辑后→docx」存在**全开源**官方链——sdkjs `AscCommonWord.BinaryFileWriter(模型)` 产出 `"DOCY;v5;<len>;"+base64` 二进制，native x2t `doct_bin2docx → BinDocxRW::CDocxSerializer`（纯 C++，无 V8）转出 docx。**无需**此前依赖的闭源 `saveDocumentToZip`/`Asc.Addons.ooxml` 注入，也无需服务器。详见 `docs/ONLYOFFICE_SAVE_CHAIN_REVISED.md`。对应新增验证项 **POC-5**（见 §5）。
+
 ### 4.3 组件划分（每个单一职责、接口清晰、可独立验证）
 | 单元 | 职责 | 依赖 | 验证方式 |
 |---|---|---|---|
@@ -169,9 +191,11 @@ ArkWebCore.hap (Chromium + CEF 合编产物)                 ← 系统引擎，
 
 ---
 
-## 5. POC 1-4 子方案
+## 5. POC 子方案与状态（1-5，2026-09-03 全部完成）
 
-### POC-1 —— WebView 渲染编辑器 + 桥可行性（最大风险，先做）
+> 状态速览：POC-1 ✅ / POC-2 ✅ / POC-3 ✅ / POC-4 ✅（规则直选 B，A 线与 POC-0 不再评估）/ POC-5 ✅（详见 `docs/ONLYOFFICE_SAVE_CHAIN_REVISED.md` §4，真机通过）。本节保留原子方案描述。
+
+### POC-1 —— WebView 渲染编辑器 + 桥可行性（最大风险，先做）【✅ 已通过】
 - **准备**: Linux 端用 core 把 `sample.docx` 预转成内部格式，连同 `sdkjs`+`web-apps` 打包进 HAP rawfile
 - **方法**: ArkTS `Web`/`ohos_nweb` 加载；`onInterceptRequest` 实现 `onlyoffice://`；`registerJavaScriptProxy` 注入最小 `window.Asc.*`
 - **通过标准**:
@@ -181,16 +205,16 @@ ArkWebCore.hap (Chromium + CEF 合编产物)                 ← 系统引擎，
   - **性能实测**：a) 逐回调频率 → 判定该"留 JS"还是"走桥"；b) 大文档打开耗时，验证"文件 URL / onInterceptRequest 喂内容、避免大字符串过桥"是否成立
 - **输出**: 桥改写工作量清单 + 方案可行性判定
 
-### POC-2 —— core 交叉编译到 arm64 OHOS
+### POC-2 —— core 交叉编译到 arm64 OHOS 【✅ 已通过：convertershell NAPI 26 库真机就位，docx→ODT rc=0】
 - **方法**: 用 OHOS NDK（BiSheng clang，`OPENHARMONY_NDK_ROOT` 指向 `/apps/harmony/sdk/default/openharmony/native`）交叉编译 `core`（先最小链路 x2t），`libs` → `.so`；NAPI 暴露 `convert(path)`
 - **通过标准**: NAPI 在真机把 `sample.docx` 转成 PDF/内部格式成功；验证 OHOS 沙箱下无 exec 段 mmap、可写文件、Boost/OpenSSL/ICU/Hunspell 依赖链交叉编译通过
 - **风险要点**: `NOEXEC_MMAP_ANALYSIS`（参照 wineohos）、`dlopen`、权限、`fork` 限制
 
-### POC-3 —— 端到端整合（全链路里程碑）
+### POC-3 —— 端到端整合（全链路里程碑）【✅ 已通过：诊断出保存断点=集成层职责，由 POC-5 全开源链替代；x2t docx→docx 重序列化 rc=0 zip=ok 实测】
 - 用户选 `sample.docx` → 真机 core 实时转内部格式 → WebView 渲染 → 编辑 → 保存
 - **通过标准**: 一个 docx 的"打开→看→改→存"在真机跑通
 
-### POC-4 —— 壳方向探测（决定阶段 2 走 A 还是 B）
+### POC-4 —— 壳方向探测（决定阶段 2 走 A 还是 B）【✅ 已定：按规则直选 B，A 线不试探】
 > 注：POC-1/3 若判异步桥可行，则 POC-4 直接选 B；若判"个别同步能力不可少"，则额外插入 **POC-0（可选）**——基于 `openharmony-sig/electron` 装一个空 Electron 壳 HAP 到真机，验证"能否以 Electron 形态加载 ONLYOFFICE web + IPC 桥"（即评估重路线 C 的实际成本与收益，再决定是否切换主线）。
 - 用 POC-1/3 产物分两条线试探：
   - ① ArkTS 薄壳包 WebView（B 雏形）

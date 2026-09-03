@@ -1,0 +1,31 @@
+diff --git a/Common/3dParty/harfbuzz/make.py b/Common/3dParty/harfbuzz/make.py
+index fbee78e9..30f4389e 100755
+--- a/Common/3dParty/harfbuzz/make.py
++++ b/Common/3dParty/harfbuzz/make.py
+@@ -6,6 +6,7 @@ sys.path.append("../../../../build_tools/scripts")
+ import base
+ 
+ def apply_patch(file, patch):
++  ensure_patch_preserved()
+   file_content = base.readFile(file)
+   patch_content = base.readFile(patch)
+   index1 = patch_content.find("<<<<<<<")
+@@ -16,6 +17,18 @@ def apply_patch(file, patch):
+   base.replaceInFile(file, file_content_old, file_content_new)
+   return
+ 
++def ensure_patch_preserved():
++  # POC-2 幂等化：apply_patch 以 #if 0/#else/#endif 包裹原内容；
++  # 若已打过（文件含标志串），先 git 恢复再重打，避免嵌套包裹。
++  f = "harfbuzz/src/hb-ft.cc"
++  if base.is_file(f) and base.is_dir("harfbuzz/.git"):
++    import subprocess
++    p = subprocess.run(["git", "checkout", "--", "src/hb-ft.cc"],
++                       cwd="harfbuzz", capture_output=True)
++    if p.returncode != 0:
++      raise RuntimeError("git checkout hb-ft.cc failed: " + p.stderr.decode())
++  return
++
+ def read_files(folder, addon=""):
+   ret_data = os.listdir(folder)
+   for i in range(len(ret_data)):

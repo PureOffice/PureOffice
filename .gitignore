@@ -7,4 +7,23 @@ hvigor/output/
 oh-package-lock.json5
 local.properties
 .ohos/
-third_party/
+# third_party 由四个 submodule 管理（core/sdkjs/web-apps/build_tools，官方 release/v9.4.0）
+
+# —— 生成产物（勿入库；可复现来源见 docs/ONLYOFFICE_OHOS_NEXT_STEPS.md §1）——
+__pycache__/
+*.pyc
+# convertershell NAPI 模块产物（hvigor/build_convertershell.sh 生成，99MB+）
+entry/src/main/cpp/types/libconvertershell/libs/
+# rawfile 编辑器运行时资源：pack 产物，python3 scripts/onlyoffice/pack_web.py 重生成
+entry/src/main/resources/rawfile/onlyoffice/.hvigor/
+entry/src/main/resources/rawfile/onlyoffice/fonts/
+entry/src/main/resources/rawfile/onlyoffice/sdkjs/
+entry/src/main/resources/rawfile/onlyoffice/webapps/
+entry/src/main/resources/rawfile/onlyoffice/themes.json
+entry/src/main/resources/rawfile/onlyoffice/plugins.json
+# 样本（sample.*）是测试资产，保留跟踪；document.json/editor.html/document.docx 已退役删除
+# native 构建产物/工具链拷贝
+entry/libs/
+entry/.cxx/
+# 构建与临时产物
+.temp/

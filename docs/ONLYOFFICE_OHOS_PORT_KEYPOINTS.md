@@ -1,0 +1,132 @@
+# ONLYOFFICE OHOS 移植 —— 方案关键点（不可变决策与实测数据流）
+
+- 日期：2026-09-03（迭代 1 闭环后定稿）
+- 作用：接手者的「不要推翻的东西」清单；与 `ONLYOFFICE_OHOS_PORT_DESIGN.md`（总设计）配合阅读
+
+---
+
+## 0. 一句话架构
+
+**ArkTS 薄壳（ArkUI）包系统 ArkWeb（Chromium 固件自带）→ 渲染 ONLYOFFICE web-apps/sdkjs 编辑器；华为不提供可嵌入 libcef，编辑器 90% 是 Web（web-apps），core(x2t) 作为 native .so 经 NAPI 供 ArkTS 调用，负责「Office 格式 ↔ 内部格式」转换。**
+
+## 1. 三条不可变约束（选型依据）
+
+1. **B 路线（系统 WebView）是唯一低成本路径**：OHOS 无「应用可链接的独立 libcef」（`chromium_cef` 仅合编进系统 ArkWebCore.hap，桥接层在 ArkWeb 实际路径不启用）；Electron 路径（`openharmony-sig/electron` → VSCodium 背书）可行但需自编译维护 Chromium 整线，且桥仍是异步 IPC——对 ONLYOFFICE 收益 ≈ 0。
+2. **异步桥是常驻形态**：`registerJavaScriptProxy`（JS→ArkTS）+ `runJavaScript`（ArkTS→JS）都是异步。ONLYOFFICE 桌面版同步 V8 原生桥（同步剪贴板/原生打印/拖拽/拼写）须重写为异步或降级——**打开/编辑/保存/导出不受影响（实测）**。
+3. **引擎版本随固件（SDK 6.1.0(23)），不可 pin/patch**；web-apps/sdkjs/core 三者在打包时对齐同一 ONLYOFFICE 版本——当前双仓库均 **release/v9.4.0**（`Serialize2.js` 与官方 master md5 一致：`2cfea82350fb91ae82db4ac38b1e73df`）。
+
+## 2. sdkjs ↔ core 分工（为什么 core 是必选项）
+
+- sdkjs(JS) **只认内部二进制格式**（DOCY/XLSY/PPTY 文档二进制）；core(x2t, C++) 负责 `docx ↔ DOCY` 等全部转换（桌面版调 `x2t` 独立转换器）。
+- 编辑的每个键击/选区/滚动/排版/Canvas 绘制 100% 在 sdkjs 内完成，**不过桥**；桥只承担「文档级一次性 I/O」。
+- web 构建的 sdkjs 无 `CDocument.fromZip`（官方源码树全库无定义，visio 除外）——**纯 Web 直开 docx/ZIP 不可行**，必须走 core 转换（本项目打开链已闭环）。
+
+## 3. DOCY 二进制家族（最核心的格式知识）
+
+| 变体 | 头格式 | 谁产出 | 谁能读 |
+|---|---|---|---|
+| **v5** | `DOCY;v5;<len>;` + base64（纯 ASCII 文本） | 页面 `BinaryFileWriter(模型).Write(false)`；x2t 的 **`.doct` 后缀是 PK zip 退化，不可用** | 页面 BinaryFileReader（v5 分支）/ x2t `doct_bin2docx`——**双端互认（保存链验证）** |
+| **v10** | `DOCY;v10;0;` + raw 二进制（**无 base64**） | x2t `docx2doct_bin`（`.bin` 后缀自动分派，core docx→内部格式的默认产物；DocumentServer 服务器同样产 v10） | 页面 BinaryFileReader 的 v10 分支（`c_nVersionNoBase64=10` 走 raw 直读）+ x2t 自读 |
+
+- 版本数字由 `getbase64DecodedData` 动态解析（`AscCommon.CurFileVersion`），写/读两侧都用同一套序列化表（`BinReaderWriterDefines.h`：`g_sFormatSignature="DOCY"`、`g_nFormatVersion=5`、`g_nFormatVersionNoBase64=10`）。
+- **页面拿到 v10 后，传给 `openDocument({bSerFormat:true, data})` 的 `data` 必须是 `Uint8Array`**（与 DocumentServer 前端 HTTP arraybuffer 形态一致）。传 binary string（atob 结果）时：一种运行 Read 静默返回 true 但模型为空（`cur` 停在头后 12、`pc=-1`），一种在 ReadMainTable 处**死循环卡死**（独立文档对象直读 45s 无返回）。**本坑实测两次形态，务必用 Uint8Array。**
+
+## 4. 打开链最终形态（迭代 1 已闭环）
+
+```
+用户文件 docx（PK 字节）
+  → 页面 openDocument hook 检出 PK && AscConvertBridge 就绪
+  → ascAbToB64：Uint8Array → base64（上桥，注册为 window.AscConvertBridge.convertDocxToDocy）
+  → ArkTS AscConvertProxy.convertDocxToDocy：
+       写沙箱 open-in.docx → x2tConvertSync(<Convert><m_sFileFrom>…</m_sFileFrom>
+                                  <m_sFileTo>…/open-in.bin</m_sFileTo></Convert>)
+       （.bin 后缀 → TCD_DOCX2DOCT_BIN；rc=0 成功 / 0x8004350 失败）
+       → 读回 open-in.bin(252713B) → bufToB64（base64 信封）
+  → runJavaScript(`window.__oobDocy('<b64>')`)
+  → 页面：atob → Uint8Array → e8.openDocument({bSerFormat:true, url:'', data:arr})
+  → BinaryFileReader 完整解析 → 8 页/俄语/表格渲染、无异常
+```
+
+- **传输铁律**：含任意字节的数据（v10 raw）ArkTS→页面**必须 base64 信封**（`bufToB64` ↔ 页面 `atob`）；raw 字符串直传会损坏（实测页面 FNV ≠ 磁盘）。`b64ToBuf`/`bufToB64` 为 ArkTS 手工实现（无内置 base64），在 EditorPage.ets。
+- **页面注入**（index.html）：打开任何编辑器之前设 `window.Asc.Addons.ooxml = true`（否则 `asc_isSupportFeature("ooxml")=false` → 误走 native-only `OpenDocument` TypeError）。
+
+## 5. 保存链最终形态（POC-5 / 迭代 1 均验证，详见 ONLYOFFICE_SAVE_CHAIN_REVISED.md）
+
+```
+页面模型 → BinaryFileWriter(模型).Write(false) → "DOCY;v5;<len>;"+base64
+  → window.AscSaveBridge.save(docy)（registerJavaScriptProxy）
+  → ArkTS AscSaveProxy：写 in.bin → x2tConvertSync(doct_bin2docx) → save.docx
+验收：asc_AddText('OOH-<ts>') 插入 → 最终 save.docx document.xml 同时含
+     OOH- 标记 + 原文内容（1017 w:t = 原文 1016 + 标记 1）
+```
+
+## 6. 格式↔后缀分派速查（x2t, cextracttools.cpp）
+
+| 源 | 后缀 | 转换器 | 产物 |
+|---|---|---|---|
+| docx | `.bin` | TCD_DOCX2DOCT_BIN | **v10 raw**（打开链用） |
+| docx | `.doct` | TCD_DOCX2DOCT | ⚠️ 实测输出 PK zip（退化），**不可用** |
+| DOCY | `.docx` | TCD_DOCT_BIN2DOCX | docx（保存链用） |
+| xlsx | `.bin`/`.xlst` | TCD_XLSX2XLST(_BIN) | XLSY-v10/v5（迭代 2） |
+| pptx | `.bin`/`.pptt` | TCD_PPTX2PPTT(_BIN) | PPTY（迭代 2） |
+| pdf 转换 | —— | doctrenderer 需 V8/fetch，当前未启用 | —— |
+
+## 7. 诊断探针体系（日常开发必备）
+
+- **页面侧**（index.html）：`window.__pf`（2000 条上限，主动 push `od:/ood:/p5:/f3:/o0:/seE:` 等关键事件；`seE` 为 sendEvent 捕获，**asc_onPaintTimer 已过滤防洪泛**——若需恢复注释处）。页面 `console.error` 经 EditorPage.onConsole 转 hilog（`[web]` 前缀，E 级稳定）。
+- **壳侧**（EditorPage.ets `startProbe()`）：每 2s `runJavaScript` 读页面状态 → 沙箱 `files/probe.txt` 单行覆盖。关键字段：`pf/pfTail`（pf 尾部 -400，解决 2000 截断）、`pages`（pc=Get_PagesCount、pr=绘制页、ld=IsLoadingDocument、mx=模型 Objects 数）、`title`、`tag`、`xhr`。
+- 常见判读：
+  - `ood:got len=252713 head=DOCY;v10;0;` = 转换+传输正常
+  - `p5:arr=252713` = Uint8Array 输入路径生效
+  - `o0:drw:false`（m_oLogicDocument 未建）在打开瞬间是**正常**的（InitEditor 在 openDocument 内才建模型）；`o0 = 独立 CDocument 直读 o3` 卡死即 v10 问题
+  - `f3:`（FNV-1a 32 位，页面 string 语义）对比哈希**必须用 node 同语义复算**（JS float 乘法溢出，Python 精确整数 hash 结果不同属正常假警报）
+
+## 8. 构建与部署（迭代 1 沉淀）
+
+```bash
+bash scripts/onlyoffice/deploy_ohos.sh --probe     # 打包+装机+重启+读探针（日常一条命令）
+```
+
+- **禁止 `hvigorw clean`**：会删 `build/core3d`（libx2t.a 等），native 链断，重建 10+ 分钟：
+  `python3 scripts/onlyoffice/core3d/gen_cmake.py && cmake -S build/core3d -B build/core3d/build -DCMAKE_TOOLCHAIN_FILE=<abs path>/scripts/onlyoffice/core3d/ohos-arm64.toolchain.cmake && cmake --build build/core3d/build -j$(nproc)`
+- **增量打包校准**：改 .ets 后行为没变 → `strings entry/build/.../entry-default-signed.hap | grep <新字符串>` 确认进包（踩坑：modules.abc 未刷新）。
+- hdc **多设备必须 `-t 192.168.1.8:33363`**；截图 `snapshot_display` 后缀必须 `.jpeg`。
+- 签名复用 wineohos 证书（build-profile.json5 signingConfigs）。
+
+## 9. 下一步（迭代 2/3）注意点
+
+- xlsx/pptx 打开链与 docx 同构：`fileType` 分派 → `XLSY;v10;0;`/`PPTY;v10;0;`（页面 reads 均走 Uint8Array 路径；`SerializeWriter.js:1067` 已见 `"PPTY;v"+c_nVersionNoBase64+";"` 头封装）。
+- 保存/报告回 x2t：`xlst_bin2xlsx`/`pptt_bin2pptx`（convertershell 26 库已含）。
+- 大文档（≥10MB）base64 过桥的阈值评估（迭代 3 范畴）。
+- 正式化时瘦身 index.html 诊断打点（保留 `__pf` 骨架即可）。
+
+## 10. 迭代 2 实测沉淀（2026-09-03 真机 192.168.1.8）—— 打开链 v11
+
+**Gateway 协议（webapps `apps/common/Gateway.js`）四个坑，必读：**
+1. 命令名是 **驼峰**：`openDocument` / `openDocumentFromBinary`（`commandMap` 精确匹配；全小写 miss——`go:"-"` 实测）。
+2. **jQuery `$me.trigger('xxx', data)` 会把「数组」展开为多参数**——`loadBinary` 只收到数组**首元素**（`type=[object Number]` → 字节全灭）。二进制数据必须包成**对象** `{bytes: arr}`（对象不展开）。
+3. **`openDocumentFromBinary` 有 postMessage 对象形态专路**（Gateway.js:187 `data.command==='openDocumentFromBinary'` → `handler.call(this, data.data)`）；`init` 可以继续用 JSON 字符串形态。
+4. **launch 等待条件勿含 `window.DE`**——`window.DE` 仅 DesktopEditors 原生渲染进程注入；WebView 恒缺 → 等待 500ms 死循环 → `init` 永不发出 → `loadConfig` 不跑 → toolbar/UI 永不构建（页面模型却可直连加载，极易误诊）。`LAUNCH_TICK {"de":false}` 即此。
+
+**打开链身份（三层 hook，缺一不可）：**
+- 实例层：`hookEditor(window.Asc.editor)` / `hookEditor(window.editor)`（800ms 轮询，两引用可能不同实例）。
+- **原型层**：`AscCommon.*EditorApi.prototype.openDocument`（遍历 `window.AscCommon` 枚举）——cell 的 `Viewport.getApi()` 实例有 **own `openDocument`**（实例层 hook 不到时由 `Object.getPrototypeOf(this)===SpreadsheetEditorApi.prototype` + `hasOwnProperty` 判定；`OELF2` 证据有 `sam=true pd2=1 own=true`）。
+- PK 检测**自行实现** `__isPK`（`AscCommon.checkOOXMLSignature` 只在 word 侧定义，cell/slide 恒 false）。
+
+**三层闸门（cell/slide 直连打开白屏主因，`cell/api.js:3362` `_openDocumentEndCallback`）：**
+```
+if (isDocumentLoadComplete || !ServerIdWaitComplete || !FontLoadWaitComplete) return;
+```
+- `ServerIdWaitComplete` 由 `asyncServerIdEndLoaded()`（apiBase:1487，dummy coauth 语义）置位。
+- `FontLoadWaitComplete` 由 `_loadFonts(fonts, cb)` 完成回调置位。
+- **页面 `__oobDocy` 已内置踢闸**（`asyncServerIdEndLoaded()` + `_loadFonts([], cb)`，均幂等）。
+- word 侧无此问题（word 的 contentReady 有旁路 `asyncImagesDocumentEndLoaded`（word/api.js:8135）。
+- 剩余断点（10/31 晨）：launch 空文档 + loadBinary 重开 → toolbar✅ 但 WorkbookView 停留旧空模型（cells 不画）；launch 只 init + loadBinary 首开 → grid✅ 但 toolbar 缺（toolbar 由 Gateway loadDocument 建）——**cell 单机不支持「二次打开」语义，需 patch cell api 使重开重建 WorkbookView（待办）**。
+
+**构建产物级：**
+- CSS：宿主 `lessc` 预编译 `resources/less/app.less` → `resources/css/app.css`（三编辑器；`precompile_css` in pack_web.py）。
+- `.wasm` → `application/wasm` MIME（rawfileLoader.ets）——fonts.js wasm 流式编译必需。
+- `PFLIM 400→15000` + `PFO_P1..P7` 分段（2500 字符各段）。
+- 诊断 fallback：web console 全量落盘 `files/web_console.txt`（EditorPage onConsole append；hilog 在部分环境抓不到 [web]）。
+
+**页面错误即弹窗干扰辨真伪**：`gwTest`（8B zeropad）曾污染诊断（cell 解析零 bytes → 弹窗）——**诊断注入别喂格式无效数据**。
