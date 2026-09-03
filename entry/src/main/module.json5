@@ -20,6 +20,9 @@
         "exported": true,
         "skills": [ { "entities": ["entity.system.home"], "actions": ["action.system.home"] } ]
       }
+    ],
+    "requestPermissions": [
+      { "name": "ohos.permission.INTERNET" }
     ]
   }
 }

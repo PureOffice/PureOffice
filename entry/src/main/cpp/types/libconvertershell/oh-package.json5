@@ -1,0 +1,8 @@
+{
+  "name": "convertershell",
+  "version": "1.0.0",
+  "description": "x2t converter NAPI module type package",
+  "main": "",
+  "types": "./index.d.ts",
+  "license": ""
+}

@@ -5,5 +5,7 @@
   "main": "",
   "author": "",
   "license": "",
-  "dependencies": {}
+  "dependencies": {
+    "convertershell": "file:./src/main/cpp/types/libconvertershell"
+  }
 }
