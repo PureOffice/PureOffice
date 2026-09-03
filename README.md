@@ -14,6 +14,7 @@
 | [docs/ONLYOFFICE_OHOS_PORT_DESIGN.md](docs/ONLYOFFICE_OHOS_PORT_DESIGN.md) | 总设计：为何走 B（CEF/Chromium 调研结论）、阶段路线图、POC 1-5 状态、风险表 |
 | [docs/ONLYOFFICE_OHOS_PORT_KEYPOINTS.md](docs/ONLYOFFICE_OHOS_PORT_KEYPOINTS.md) | **方案关键点**：DOCY v5/v10 家族、打开/保存链最终形态、传输规则、探针体系、构建部署细节与坑 |
 | [docs/ONLYOFFICE_SAVE_CHAIN_REVISED.md](docs/ONLYOFFICE_SAVE_CHAIN_REVISED.md) | 保存链全源码考古（为何不依赖 saveDocumentToZip/服务器） |
+| [docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md](docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md) | 正规化后的功能支持矩阵：已实现/降级/未实现能力 + 官方桥方法返回值契约 + 升级路线 |
 
 ## 快速开始
 
@@ -81,10 +82,23 @@ cmake --build build/core3d/build -j$(nproc)
 
 ## 当前任务状态
 
-- **迭代 1**（2.1+2.2+2.4 MVP）：✅ 完成（2026-09-03）—— 真文件打开/编辑/保存闭环 + 部署脚本沉淀
-- **迭代 2**（xlsx/pptx）：✅ 完成（2026-09-03）。**docx/xlsx/pptx 三格式「打开→渲染→编辑→保存」全部真机验证通过**（xlsx cells 渲染三修：loadBinary 统一拦截 PK→x2t、踢闸后 wb.resize 重绘、asc_setZoom 需 factor=1.0——详见 docs/KEYPOINTS §10 / NEXT_STEPS）。仓库已正规化：third_party 四库转 submodule（pin release/v9.4.0）、核心补丁集中在 scripts/onlyoffice/patches/、运行时产物（rawfile/onlyoffice 163MB 等）gitignore 由脚本重生成
-- **迭代 3**（生命周期/大文档阈值/原生对话框）：未开始
-- 遗留：index.html 内诊断打点（f3/o0/p5/pf 系）可留作调试通道，正式化时瘦身
+- **正规化（M1-M5）**：✅ 完成（2026-09-04，真机 192.168.1.8 验收）
+  - M1 官方桌面构建链（sdkjs `--desktop` 双清单 + web-apps grunt + loginpage 欢迎页）
+  - M2 桥（ascshim.js：`window.AscDesktopEditor` 201 方法 + 官方 shim + ArkTS 同步代理）
+  - M3 官方欢迎页 + docx 打开闭环 ✅
+  - M4 打开三格式（docx/xlsx/pptx）+ **保存闭环** ✅ —— 编辑 → `asc_nativeGetFileData`(DOCY;v10)
+    → x2t doct_bin2docx → save.docx 并回写源文件（编辑文本进 `word/document.xml`，真机核验）
+  - M5 清理 POC（探针/自测/AscSaveBridge/AscConvertBridge 退役）+ 功能矩阵
+    [docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md](docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md)
+  - 前期的 POC 迭代 1/2（v5/POC 链、v12 三格式）已被正规化链替代，此仓库以官方产物 + 少量
+    适配补丁为基线
+- **M6+ 待办**：模板库（LocalFileTemplates）、PDF/打印、全屏窗口管理、宏/插件/拼写/云存储等
+  （详见 FEATURE_MATRIX §6）
+- 引擎装配要点（维护者必读）：sdkjs 运行时 = min（sdk-all-min.js，核心+api）与 common
+  （sdk-all.js，Serialize2/History/GlobalLoaders）**双清单**，由官方 `loadSdk`（apiBase.js:293）
+  自动加载 —— **不要手工预载 sdk-all.js、不要往 sdk.min 清单加类文件**（CMemory/History 在
+  common 清单，加载顺序错误 = 字体链崩溃/文档打开静默失败）。`window.native` 保持未定义，
+  仅序列化期间临时挂 `Save_End`。
 
 ## 踩坑速查（本轮实测）
 
