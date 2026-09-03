@@ -5,62 +5,21 @@ import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { loadRaw } from '../common/rawfileLoader';
 import { x2tConvertSync, x2tVersion } from '../common/x2t';
+import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
 
-/**
- * 注册给页面 JS 的保存桥（window.AscSaveBridge.save(docy) -> Promise<number>）。
- * 页面侧 BinaryFileWriter(model).Write(false) 产出的 DOCY 串（"DOCY;v5;<len>;"+base64，
- * 与 core BinDocxRW::CDocxSerializer.loadFromFile 输入契约一致，纯 ASCII）。
- * 本端：写沙箱 in.bin（UTF-8 文本即 DOCY 原内容）→ x2t doct_bin2docx → out.docx → 校验 zip 头。
- * 转换走 fromDoctBin（CDocxSerializer，纯 C++ 无 V8）；checker 以文件头 "DOCY" 内容识别 →
- * AVS_OFFICESTUDIO_FILE_CANVAS_WORD → auto → TCD_DOCT_BIN2，扩展名不影响。
- * r 通过 asyncMethodList 走异步通道：页面端 .then 拿到 Promise 解决值。
- */
-class AscSaveProxy {
-  private targetPath: string;
+/** 页面 cache-bust：每次 rawfile 变更后递增（override rawfileLoader 剥离 query 的缓存） */
+const VERSION_BUMP = 58;
 
-  constructor(targetPath: string) {
-    this.targetPath = targetPath;
+/** 桌面命令处理器：loginpage sdk.command/open:recent → EditorPage 业务动作 */
+class ShellCommandHandler implements AscCommandHandler {
+  private owner: EditorPage;
+
+  constructor(owner: EditorPage) {
+    this.owner = owner;
   }
 
-  save(docy: string): Promise<number> {
-    return new Promise<number>((resolve) => {
-      try {
-        if (!docy || docy.length === 0) {
-          console.error('SAVE_BRIDGE_EMPTY');
-          resolve(0);
-          return;
-        }
-        const dir = this.targetPath.substring(0, this.targetPath.lastIndexOf('/'));
-        const inPath = dir + '/in.bin';
-        // DOCY 串为纯 ASCII（签名;v版本;长度; + base64 体），writeSync(string) 按 UTF-8 写，无失真
-        console.error('SAVE_BRIDGE_GOT len=' + docy.length + ' head=' + docy.substring(0, 20));
-        const f = fs.openSync(inPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
-        fs.writeSync(f.fd, docy);
-        fs.closeSync(f);
-        // x2t 单文件 DOCY → docx（doct_bin2docx → BinDocxRW::CDocxSerializer，纯 C++ 无 V8）
-        const xml = `<Convert><m_sFileFrom>${inPath}</m_sFileFrom><m_sFileTo>${this.targetPath}</m_sFileTo></Convert>`;
-        const rc = x2tConvertSync(xml);
-        console.error('SAVE_BRIDGE_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
-        if (rc !== 0) {
-          resolve(-1);
-          return;
-        }
-        // 校验 out.docx zip 头（0x50 0x4b）
-        const st = fs.statSync(this.targetPath);
-        const o = fs.openSync(this.targetPath, fs.OpenMode.READ_ONLY);
-        const mkBuf = new ArrayBuffer(4);
-        fs.readSync(o.fd, mkBuf);
-        fs.closeSync(o);
-        const mk = new Uint8Array(mkBuf);
-        console.error('SAVE_BRIDGE_OUT size=' + st.size + ' mk=0x'
-          + mk[0].toString(16).padStart(2, '0') + mk[1].toString(16).padStart(2, '0')
-          + (mk[0] === 0x50 && mk[1] === 0x4b ? ' zipok' : ' ZIPBAD'));
-        resolve(docy.length);
-      } catch (e) {
-        console.error('SAVE_BRIDGE_ERR ' + String(e));
-        resolve(-1);
-      }
-    });
+  onCommand(cmd: string, param: string): string {
+    return this.owner.onShellCommand(cmd, param);
   }
 }
 
@@ -114,122 +73,23 @@ function bufToB64(ab: ArrayBuffer): string {
   return out;
 }
 
-/**
- * 注册给页面 JS 的打开桥（window.AscConvertBridge.convertDocxToDocy(b64docx)）。
- * 页面 openDocument 钩子发现 PK(docx) 字节 → 本端：写沙箱 open-in.docx →
- * x2t docx2doct_bin（TCD_DOCX2DOCT_BIN，.bin 后缀自动分派；DOCY;v10;0;+raw 二进制）
- * → open-in.bin → base64 读回 → runJavaScript 回调页面 window.__oobDocy
- * → 页面 e.openDocument({bSerFormat:true, data:Uint8Array}) → BinaryFileReader 直读 DOCY
- * （Web 构建 OpenDocumentFromZip 的 CDocument.fromZip 在官方源码树也无定义，此路绕开；
- *  页面入口用 Uint8Array 输入路径，与 DocumentServer 前端 HTTP 下载形态一致）。
- */
-class AscConvertProxy {
-  private controller: webview.WebviewController;
-  private dir: string;
-
-  constructor(controller: webview.WebviewController, filesDir: string) {
-    this.controller = controller;
-    this.dir = filesDir;
-  }
-
-  convert(b64: string, ext: string): number {
-    try {
-      if (!b64 || b64.length === 0) {
-        console.error('CONV_BRIDGE_EMPTY');
-        return 0;
-      }
-      const ab = b64ToBuf(b64);
-      const extSafe = (ext === 'xlsx' || ext === 'pptx') ? ext : 'docx';
-      const inDocx = this.dir + '/open-in.' + extSafe; // 后缀决定 x2t 转换器（docx/xlsx/pptx -> *_bin）
-      const inBin = this.dir + '/open-in.bin';
-      const f = fs.openSync(inDocx, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
-      fs.writeSync(f.fd, ab);
-      fs.closeSync(f);
-      const xml = `<Convert><m_sFileFrom>${inDocx}</m_sFileFrom><m_sFileTo>${inBin}</m_sFileTo></Convert>`;
-      const rc = x2tConvertSync(xml);
-      console.error('CONV_BRIDGE_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
-      if (rc !== 0) {
-        console.error('CONV_BRIDGE_FAIL rc=' + rc);
-        this.controller.runJavaScript('window.__oobDocy && window.__oobDocy(null)', () => {
-        });
-        return -1;
-      }
-      const st = fs.statSync(inBin);
-      const o = fs.openSync(inBin, fs.OpenMode.READ_ONLY);
-      const buf = new ArrayBuffer(st.size);
-      fs.readSync(o.fd, buf);
-      fs.closeSync(o);
-      const docyB64 = bufToB64(buf);
-      console.error('CONV_BRIDGE_OK bin=' + st.size + ' b64=' + docyB64.length);
-      this.controller.runJavaScript('window.__oobDocy && window.__oobDocy(' + JSON.stringify(docyB64) + ')',
-        (err: BusinessError, res: string) => {
-          if (err) {
-            console.error('CONV_BRIDGE_CB_ERR ' + err.code + ' ' + err.message);
-          }
-        });
-      return 1;
-    } catch (e) {
-      console.error('CONV_BRIDGE_ERR ' + String(e));
-      return -1;
-    }
-  }
-}
-
 @Entry
 @Component
 struct EditorPage {
   controller: webview.WebviewController = new webview.WebviewController();
   private resourceManager: resourceManager.ResourceManager | undefined = undefined;
-  private savePath: string = '';
-  private ascSaveProxy: AscSaveProxy = new AscSaveProxy('');
-  private ascConvertProxy: AscConvertProxy | undefined = undefined;
+  private ascNative: AscNativeBridge | undefined = undefined;
   private hostFilesDir: string = '';
-  private probePath: string = '';
   private webLogPath: string = '';
-  private probeTimer: number = -1;
-  // 真机自动验证驱动（迭代1闭环自检）；正式产品入口为壳层按钮，可置 false
-  private autoTest: boolean = true;
+  // —— 官方打开链（M3）暂存：open:recent → x2t → base64，等页面 LocalStartOpen() 就绪注入 ——
+  private pendingOpenBase64: string = '';
+  private pendingOpenLen: number = 0;
+  private pendingOpenUrl: string = '';
+  private pendingOpenName: string = '';
+  // 当前打开文档名（M4 保存回写源文件用；不随 pendingOpenName 一次性清除）
+  private currentOpenName: string = '';
 
-  // 状态探针（诊断通道，不依赖 hilog）：每 2s 读页面 DOM 标记/模型就绪 → 沙箱 probe.txt。
-  //   页面侧标记由 index.html 探针（data-gi/go/lm/...）维护；model 存在性 = 文档打开完成。
-  private startProbe(): void {
-    if (this.probeTimer >= 0) {
-      return;
-    }
-    this.probeTimer = setInterval(() => {
-      const snap = "(function(){var g=document.documentElement;var e=window.Asc&&(window.Asc.editor||window.editor);" +
-        "var m=e&&e.WordControl?!!e.WordControl.m_oLogicDocument:false;" +
-        "var surl='-';try{surl=e&&e.CoAuthoringApi&&e.CoAuthoringApi._CoAuthoringApi?String(e.CoAuthoringApi._CoAuthoringApi._url):'-';}catch(x){surl='E';}" +
-        "var diof='-';try{diof=e&&e.DocInfo?String(e.DocInfo.get_OfflineApp()):'-';}catch(x){diof='E';}" +
-        "return JSON.stringify({fet:g.getAttribute('data-fet'),xhr:g.getAttribute('data-xhr'),xhr2:g.getAttribute('data-xhr2')," +
-        "dl:g.getAttribute('data-dl'),gi:g.getAttribute('data-gi'),go:g.getAttribute('data-go')," +
-        "dr:g.getAttribute('data-dr'),dcl:g.getAttribute('data-dcl'),rs:document.readyState," +
-        "lb:g.getAttribute('data-lb'),lc:g.getAttribute('data-lc'),lm:g.getAttribute('data-lm'),model:m," +
-        "msgepOK:g.getAttribute('data-msgepOK'),msgeprr:(g.getAttribute('data-msgeprr')||'-').slice(0,200)," +
-        "moep:g.getAttribute('data-moep'),moepLic:g.getAttribute('data-moepLic'),moepLicERR:(g.getAttribute('data-moepLicERR')||'').slice(0,120)," +
-        "mld2:g.getAttribute('data-mld2'),mld2OK:g.getAttribute('data-mld2OK'),mld2ERR:(g.getAttribute('data-mld2ERR')||'').slice(0,200)," +
-        "surl:surl,diof:diof,mload:g.getAttribute('data-mload')," +
-        "pf:(window.__pf||[]).join('|').slice(0,2000)," +
-        "pfTail:(window.__pf||[]).join('|').slice(-400)," +
-        "pages:(function(){var e=window.Asc&&(window.Asc.editor||window.editor);if(!e||!e.WordControl||!e.WordControl.m_oLogicDocument){return '-';}var d=e.WordControl.m_oLogicDocument;var pc=0;try{pc=d.Get_PagesCount?d.Get_PagesCount():-1;}catch(x){pc='E';}var p1=0;try{var dr=e.WordControl.m_oDrawingDocument; p1=(dr&&dr.pages&&dr.pages.length)||(dr&&dr.m_oPages&&dr.m_oPages.length)||0;}catch(x){p1='E';}var mx=-1,tx='-';try{var o=d.Objects;if(o){if(o instanceof Array){mx=o.length;}else{var k=0;for(var q in o){k++;}mx=k;}}}catch(x){mx='E';}tx='-';return JSON.stringify({pc:pc,pr:p1,ld:d.IsLoadingDocument?d.IsLoadingDocument():'-',mx:mx,tx:tx});})(),drk:(function(){var e=window.Asc&&(window.Asc.editor||window.editor);var dr=e&&e.WordControl?e.WordControl.m_oDrawingDocument:null;if(!dr){return '-';}var k=[];for(var q in dr){if(/page|draw|canvas|view|redraw|recalc|paint/i.test(q)){k.push(q+':'+(dr[q]&&dr[q].length!==undefined?dr[q].length:typeof dr[q]));}}return k.join('|');})(),dom:(function(){var out={css:document.styleSheets.length,bg:'',canv:[],sk:''};try{out.bg=getComputedStyle(document.body).backgroundColor;}catch(x){}try{out.canv=[].slice.call(document.querySelectorAll('canvas')).slice(0,6).map(function(c){try{var st=getComputedStyle(c);return c.width+'x'+c.height+'/'+st.display+st.visibility+':'+st.cssWidth;}catch(x){return 'E';}});}catch(x){}try{var l=document.querySelector('#editor-loading,#id-loading,.loading,html[data-loading]');out.sk=l?String((l||{}).id||(l.className||'')).slice(0,40):'-';}catch(x){}return JSON.stringify(out);})()," +
-        "title:document.title," +
-        "cell:(function(){var e9=window.Asc&&(window.Asc.editor||window.editor);if(!e9){return '-';}var out={};try{out.wb=e9.wb?'obj':'nil';}catch(x){out.wb='E';}try{out.wbn=e9.wb&&e9.wb.wsViews?Object.keys(e9.wb.wsViews).length:0;}catch(x){out.wbn='E';}try{out.zm=e9.wb&&e9.wb.defaults&&e9.wb.defaults.worksheetView?e9.wb.defaults.worksheetView.zoom:-1;}catch(x){out.zm='E';}try{out.ctrl=e9.controller?'obj':'nil';}catch(x){out.ctrl='E';}try{var cv=document.getElementById('editor_sdk');out.sdk=cv?(cv.offsetWidth+'x'+cv.offsetHeight):'nil';}catch(x){out.sdk='E';}try{var cw=document.getElementById('ws-canvas');out.cw=cw?(cw.offsetWidth+'x'+cw.offsetHeight):'nil';}catch(x){out.cw='E';}return JSON.stringify(out);})()," +
-        "tag:(document.body?document.body.innerText.substring(0,120):'')});})()";
-      this.controller.runJavaScript(snap, (err: BusinessError, res: string) => {
-        if (!err && res && res !== '') {
-          try {
-            const f = fs.openSync(this.probePath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
-            fs.writeSync(f.fd, new Date().toLocaleTimeString() + ' ' + res);
-            fs.closeSync(f);
-          } catch (e) {
-            // 探针写失败不影响主流程
-          }
-        }
-      });
-    }, 2000);
-  }
-
-  // —— 正式壳层功能：页面侧 window.OOHost（open/mark/save）统一驱动入口 ——
+  // —— 页面注入入口（runJavaScript）——
   private pageJS(fn: string): void {
     this.controller.runJavaScript(fn, (err: BusinessError, res: string) => {
       if (err) {
@@ -240,39 +100,254 @@ struct EditorPage {
 
   /** 当前编辑器文件类型（docx/xlsx/pptx）；决定页面（editor 应用目录）与转换桥后缀 */
   private docType: string = 'docx';
+  /** 桌面链：true 时初始页 = 官方 loginpage 欢迎页；false 回退 POC 直接编辑器测试页 */
+  private useDesktopHome: boolean = true;
 
-  private openSandbox(type?: string): void {
-    const t = type || this.docType;
-    // 真文件打开：userfile/ 前缀由 rawfileLoader 从沙箱 filesDir 读取（样本由 copySandboxSamples 同步）
-    this.pageJS("OOHost.open('http://localhost/userfile/sample." + t + "?v=' + Date.now())");
+  /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片 */
+  private homeUrl(): string {
+    return 'http://localhost/onlyoffice/index.html?v=' + VERSION_BUMP;
   }
 
-  private editorUrl(type: string): string {
+  /**
+   * 编辑器页 URL —— 官方编辑器应用页（apps/<app>/main/index.html，顶层加载；
+   * POC 打开链 v12 真机成功渲染的页面/构建组合）。页面经 Gateway init 后接收
+   * openDocumentFromBinary 字节（官方 api.js/Gateway/loadBinary 链）。
+   * 注：官方面向 API 调用方的桌面壳页（api/documents/index.html + iframe）组合已实测
+   * 到 openDocument 前链；引擎模型初始化依赖 B 架构运行时序，本阶段以顶层页打开（后续 M4+ 返回 iframe 结构）。
+   */
+  private editorUrl(type: string, title: string): string {
     const app = type === 'xlsx' ? 'spreadsheeteditor'
       : type === 'pptx' ? 'presentationeditor' : 'documenteditor';
-    return 'http://localhost/onlyoffice/webapps/apps/' + app + '/main/index.html?v=54&docType=' + type;
+    return 'http://localhost/onlyoffice/webapps/apps/' + app + '/main/index.html?v=' + VERSION_BUMP
+      + '&fileType=' + type + '&isDesktop=false&docType=' + type + '&lang=zh-CN&title=' + encodeURIComponent(title);
   }
 
-  /** 切换编辑器页面（word/xlsx/pptx 各一）并更新当前文件类型 */
-  private openEditorPage(type: string): void {
-    this.docType = type;
-    this.controller.loadUrl(this.editorUrl(type));
+  /**
+   * 官方桌面命令（loginpage sdk.command → AscNative.execCommand 与 command 两入口 → 本函数）。
+   *   open:recent —— 沙箱源文件 → x2t 转 doct_bin（DOCY;v10 二进制）→ base64 暂存 →
+   *                   loadUrl 官方编辑外壳，等 LocalStartOpen 就绪注入
+   *   create:new  —— 空文档（无字节），直接打开外壳（引擎 OfflineApp 空文档）
+   * 返回 'true'/'false'：loginpage 不依赖返回值（C++ 侧真正动作已由本函数执行）。
+   */
+  onShellCommand(cmd: string, param: string): string {
+    console.error('[ShellCommand] ' + cmd + ' ' + param.slice(0, 300));
+    if (cmd === 'open:recent') {
+      return this.openRecent(param);
+    }
+    if (cmd === 'create:new') {
+      // 官方 create:new 参数：'word'|'cell'|'slide'（新建卡片）或 {template:...}（模板卡）
+      const isCell = param.indexOf('cell') >= 0;
+      const isSlide = param.indexOf('slide') >= 0;
+      if (!isCell && !isSlide) {
+        return this.openNewFile('docx');
+      }
+      console.error('CREATE_NEW_UNSUPPORTED ' + param + ' (cell/slide 新建 M4)');
+      return 'false';
+    }
+    if (cmd === 'save:bin') {
+      return this.saveBinRaw(param);
+    }
+    // 其余桌面命令（open:folder / files:check / go:folder ...）M5 登记降级，当前 no-op
+    return 'true';
   }
 
-  private markDoc(): void {
-    this.pageJS('OOHost.mark()');
+  /** create:new（word）：空文档模板 → 与打开同管线注入（官方 C++ 对新建同样发 DocumentEndLoad） */
+  private openNewFile(ext: string): string {
+    try {
+      const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/templates/empty.docx') as Uint8Array;
+      const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+      console.error('CREATE_NEW empty.docx len=' + ab.byteLength);
+      return this.convertAndOpen(ab, ext, 'Unnamed.' + ext);
+    } catch (e) {
+      console.error('CREATE_NEW_ERR ' + String(e));
+      return 'false';
+    }
   }
 
-  private saveDoc(): void {
-    this.pageJS('OOHost.save()');
+  /** open:recent → 沙箱文件 x2t 转换 + 编辑器导航（转换器按输入扩展名自动选择，.bin 输出） */
+  private openRecent(param: string): string {
+    try {
+      const o = JSON.parse(param) as Record<string, Object>;
+      const path = String(o['path'] ?? '');
+      const name = String(o['name'] ?? '');
+      const typeNum = Number(o['type'] ?? 0);
+      let ext = '';
+      if (typeNum === 0x101) {
+        ext = 'xlsx';
+      } else if (typeNum === 0x81) {
+        ext = 'pptx';
+      } else {
+        ext = 'docx';
+      }
+      // 扩展名兜底（recents 模型缺 type 时从文件名取）
+      if (name.length > 0) {
+        const i = name.lastIndexOf('.');
+        if (i > 0 && (ext === '' || !name.startsWith(ext))) {
+          ext = (name.substring(i + 1) === 'xlsx' || name.substring(i + 1) === 'pptx')
+            ? name.substring(i + 1) : ext;
+        }
+      }
+      if (path.length === 0) {
+        console.error('OPEN_RECENT_NOPATH ' + param);
+        return 'false';
+      }
+      // 文件名以 path 尾部为准（loginpage recents 的 name 字段可能被截断/缺失）
+      const base = path.substring(path.lastIndexOf('/') + 1);
+      // 1. 读源文件字节
+      const st = fs.statSync(path);
+      const f = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      const ab = new ArrayBuffer(st.size);
+      fs.readSync(f.fd, ab);
+      fs.closeSync(f);
+      return this.convertAndOpen(ab, ext, base.length > 0 ? base : name);
+    } catch (e) {
+      console.error('OPEN_RECENT_ERR ' + String(e));
+      return 'false';
+    }
+  }
+
+  /**
+   * M4 保存链：ascshim checkSaveDocumentEvent 接管 → 官方 asc_nativeGetFileData
+   * （BinaryFileWriter 序列化当前模型 → DOCY;v10 原始字节，与打开链 in.bin 同格式）
+   * → base64 → execCommand('save:bin') 至此。本端：写沙箱 in.bin → x2t doct_bin2docx
+   * → save.docx（zip 头校验 0x50 0x4b）→ 回写当前源文件（重开 recents 即编辑后内容）。
+   */
+  private saveBinRaw(b64: string): string {
+    try {
+      if (b64.length === 0) {
+        console.error('SAVE_BIN_EMPTY');
+        return 'false';
+      }
+      const ab = b64ToBuf(b64);
+      const inP = this.hostFilesDir + '/in.bin';
+      const outP = this.hostFilesDir + '/save.docx';
+      const w = fs.openSync(inP, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+      fs.writeSync(w.fd, ab);
+      fs.closeSync(w);
+      // x2t doct_bin2docx（checker 以文件头 DOCY 内容识别，.bin 后缀无碍；POC 保存链实证）
+      const xml = `<Convert><m_sFileFrom>${inP}</m_sFileFrom><m_sFileTo>${outP}</m_sFileTo></Convert>`;
+      const rc = x2tConvertSync(xml);
+      console.error('SAVE_BIN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
+      if (rc !== 0) {
+        return 'false';
+      }
+      const st = fs.statSync(outP);
+      const o = fs.openSync(outP, fs.OpenMode.READ_ONLY);
+      const mkBuf = new ArrayBuffer(2);
+      fs.readSync(o.fd, mkBuf);
+      fs.closeSync(o);
+      const mk = new Uint8Array(mkBuf);
+      const zipOk = mk[0] === 0x50 && mk[1] === 0x4b;
+      console.error('SAVE_BIN_OUT size=' + st.size + ' mk=0x'
+        + mk[0].toString(16).padStart(2, '0') + mk[1].toString(16).padStart(2, '0')
+        + (zipOk ? ' zipok' : ' ZIPBAD'));
+      if (!zipOk) {
+        return 'false';
+      }
+      // 回写源文件（recents 重开即编辑后内容）
+      if (this.currentOpenName.length > 0) {
+        const srcP = this.hostFilesDir + '/' + this.currentOpenName;
+        const rd = fs.openSync(outP, fs.OpenMode.READ_ONLY);
+        const buf2 = new ArrayBuffer(st.size);
+        fs.readSync(rd.fd, buf2);
+        fs.closeSync(rd);
+        const s = fs.openSync(srcP, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+        fs.writeSync(s.fd, buf2);
+        fs.closeSync(s);
+        console.error('SAVE_BIN_BACK src=' + srcP + ' size=' + st.size);
+      }
+      return 'true';
+    } catch (e) {
+      console.error('SAVE_BIN_ERR ' + String(e));
+      return 'false';
+    }
+  }
+
+  /**
+   * 打开共用管线：x2t 转 doct_bin（DOCY;v10;0;+raw 二进制）→ base64 暂存 →
+   * 加载官方编辑外壳（LocalStartOpen 后经 DesktopOfflineAppDocumentEndLoad 注入）。
+   * 转换失败或文件不可读 → 不导航，留在欢迎页（避免官方壳报"打开文件错误"弹窗）。
+   */
+  private convertAndOpen(ab: ArrayBuffer, ext: string, name: string): string {
+    try {
+      const inP = this.hostFilesDir + '/open-in.' + ext;
+      const outP = this.hostFilesDir + '/open-in.bin';
+      const w = fs.openSync(inP, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+      fs.writeSync(w.fd, ab);
+      fs.closeSync(w);
+      // x2t 按输入扩展名自动选 *2doct_bin 转换器；.bin 输出后缀已实机验证（POC 打开链 v10）
+      const xml = `<Convert><m_sFileFrom>${inP}</m_sFileFrom><m_sFileTo>${outP}</m_sFileTo></Convert>`;
+      const rc = x2tConvertSync(xml);
+      console.error('OPEN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
+      if (rc !== 0) {
+        console.error('OPEN_X2T_FAIL ext=' + ext);
+        return 'false';
+      }
+      const st2 = fs.statSync(outP);
+      const ro = fs.openSync(outP, fs.OpenMode.READ_ONLY);
+      const buf = new ArrayBuffer(st2.size);
+      fs.readSync(ro.fd, buf);
+      fs.closeSync(ro);
+      this.pendingOpenBase64 = bufToB64(buf);
+      this.pendingOpenLen = st2.size;
+      this.pendingOpenUrl = this.hostFilesDir;
+      this.pendingOpenName = name;
+      this.currentOpenName = name;
+      console.error('OPEN_CONVERTED bin=' + st2.size + ' b64=' + this.pendingOpenBase64.length);
+      this.controller.loadUrl(this.editorUrl(ext, name));
+      return 'true';
+    } catch (e) {
+      console.error('OPEN_CONVERT_ERR ' + String(e));
+      return 'false';
+    }
+  }
+
+  /**
+   * LocalStartOpen 回调（引擎 isLoadFullApi && _isLoadedModules 完成时 sdkjs 调
+   * window.AscDesktopEditor.LocalStartOpen()；common/Local/common.js:64 —— 引擎已就绪）。
+   * 注入官方 api.js 字节通道：docEditor.openDocument({buffer})（api.js _openDocumentFromBinary
+   * → postMessage+transfer → Gateway openDocumentFromBinary → Main.js loadBinary
+   * → new Uint8Array → asc_openDocumentFromBytes —— 内部 checkStreamSignature 嗅探
+   * DOCY/DV5 签名，与官方 C++ DesktopOfflineAppDocumentEndLoad 同构）。
+   * 注：DesktopOfflineAppDocumentEndLoad 是编辑器 iframe 内 sdkjs 函数（顶层不可见）；
+   *     API 层字节传送是官方唯一的跨 frame 通道。
+   */
+  private onEditorReadyForDoc(): void {
+    if (this.pendingOpenBase64.length === 0) {
+      console.error('LSO_NO_PENDING (editor ready, no doc — create:new?)');
+      return;
+    }
+    // 页面 XHR 拉取沙箱 doct_bin（rawfileLoader 已拦 userfile/ → filesDir 返回真字节）→
+    // window.postMessage openDocumentFromBinary（官方 api.js/Gateway/loadBinary →
+    // asc_openDocumentFromBytes，checkStreamSignature 嗅探 DOCY 签名 —— 与桌面 C++
+    // DesktopOfflineAppDocumentEndLoad 同构）。
+    const js = '(function(){'
+      + 'try{var x=new XMLHttpRequest();'
+      + 'x.open("GET","http://localhost/userfile/open-in.bin?v="+Date.now(),true);'
+      + 'x.responseType="arraybuffer";'
+      + 'x.onload=function(){try{var ab=x.response;'
+      + 'if(!ab||!ab.byteLength){console.error("LSO_XHR_EMPTY st="+x.status);return;}'
+      + 'window.postMessage({command:"openDocumentFromBinary",data:ab},"*");'
+      + 'console.error("LSO_OPEN_DOCUMENT_OK len="+ab.byteLength);'
+      + '}catch(e){console.error("LSO_LOAD_ERR "+String(e));}};'
+      + 'x.onerror=function(){console.error("LSO_XHR_ERR st="+x.status);};'
+      + 'x.send(null);}catch(e){console.error("LSO_INJECT_ERR "+String(e));}})();';
+    this.controller.runJavaScript(js, (err: BusinessError, res: string) => {
+      if (err) {
+        console.error('LSO_INJECT_ERR ' + err.code + ' ' + err.message);
+      } else {
+        console.error('LSO_INJECT_OK ' + res);
+      }
+    });
+    this.pendingOpenBase64 = ''; // 一次性（下次打开重新转换）
+    this.pendingOpenLen = 0;
+    this.pendingOpenName = '';
   }
 
   aboutToAppear(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
     this.resourceManager = ctx.resourceManager;
     this.hostFilesDir = ctx.filesDir;
-    this.savePath = ctx.filesDir + '/save.docx';
-    this.probePath = ctx.filesDir + '/probe.txt';
     this.webLogPath = ctx.filesDir + '/web_console.txt';
     try {
       const f = fs.openSync(this.webLogPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
@@ -280,9 +355,7 @@ struct EditorPage {
     } catch (e) {
       // 忽略
     }
-    this.copySandboxSamples(); // 样本 docx/xlsx/pptx：rawfile → 沙箱 filesDir（userfile/ 链路；外部 hdc push 受 DAC 拒）
-    this.tryNativeSaveStep1(); // 临时 POC item1：native x2t docx->docx 保存转换实锤（验证后撤）
-    // 探针在 WebController 就绪后启动（onControllerAttached 里保底 startProbe）
+    this.copySandboxSamples(); // 样本 docx/xlsx/pptx：rawfile → 沙箱 filesDir（open 链走 userfile/；保存回写也落这里）
   }
 
   /** rawfile 样本复制到沙箱 filesDir（open 链走 userfile/ 前缀；编辑/转换产物也在 filesDir） */
@@ -303,260 +376,40 @@ struct EditorPage {
     }
   }
 
-  // 临时 POC item1：native x2t 把沙箱 docx 重序列化为 docx（保存=转换），真机验证 rc=0 + zip 头。
-  // 输入为原始 rawfile 文档（非编辑内容），仅证明 native x2t 转换核心对 docx->docx 真机可用。
-  // 走格式库重序列化，不依赖 V8（docx->PDF 那类 doctrenderer 依赖才卡）。
-  private tryNativeSaveStep1(): void {
-    const dir = this.savePath.substring(0, this.savePath.lastIndexOf('/'));
-    const inPath = dir + '/in.docx';
-    const outPath = dir + '/out.docx';
-    // A: 读 rawfile 原始 docx（Word 2007+ zip，27128B/PK 头），规整为干净 ArrayBuffer。
-    //    getRawFileContentSync 在部分 SDK 返回 Uint8Array；writeSync 拒 Uint8Array（POC-2 坑），
-    //    故此处统一规整：Uint8Array -> 拷贝其底层 buffer 的干净 ArrayBuffer。
-    let rawAb: ArrayBuffer = new ArrayBuffer(0);
-    try {
-      // getRawFileContentSync 真机返回 Uint8Array（rawfileLoader 同款用法）；writeSync 拒 Uint8Array，
-      // 故参照 rawfileLoader 规整为精确长度 ArrayBuffer 再写。
-      const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/document.docx') as Uint8Array;
-      rawAb = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
-      console.error('X2T_A_GET len=' + rawAb.byteLength);
-    } catch (e) {
-      console.error('X2T_A_ERR ' + String(e));
-      return;
-    }
-    // B: 写沙箱 in.docx
-    try {
-      const f = fs.openSync(inPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
-      const n = fs.writeSync(f.fd, rawAb);
-      fs.closeSync(f);
-      console.error('X2T_B_WRITE n=' + n + ' ver=' + x2tVersion());
-    } catch (e) {
-      console.error('X2T_B_ERR ' + String(e));
-      return;
-    }
-    // C: x2t docx->docx（重序列化，走格式库不依赖 V8）
-    try {
-      const xml = `<Convert><m_sFileFrom>${inPath}</m_sFileFrom><m_sFileTo>${outPath}</m_sFileTo></Convert>`;
-      const rc = x2tConvertSync(xml);
-      console.error('X2T_C_RC 0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
-    } catch (e) {
-      console.error('X2T_C_ERR ' + String(e));
-      return;
-    }
-    // D: 验证 out.docx zip 头（0x50 0x4b）
-    try {
-      const st = fs.statSync(outPath);
-      const o = fs.openSync(outPath, fs.OpenMode.READ_ONLY);
-      const mkBuf = new ArrayBuffer(4);
-      fs.readSync(o.fd, mkBuf);
-      fs.closeSync(o);
-      const mk = new Uint8Array(mkBuf);
-      const zipOk = (mk[0] === 0x50 && mk[1] === 0x4b);
-      console.error('X2T_D_OUT size=' + st.size + ' mk=0x' + mk[0].toString(16).padStart(2, '0')
-        + mk[1].toString(16).padStart(2, '0') + ' zip=' + zipOk);
-    } catch (e) {
-      console.error('X2T_D_ERR ' + String(e));
-    }
-  }
-
   build() {
     Column() {
-      // 壳层工具条（正式功能入口，逐轮替代探针自动执行）：
-      Row({ space: 8 }) {
-        Text('OO 文档编辑器 (POC→MVP)').fontSize(14).fontColor('#333').margin({ left: 8 })
-        Button('sample.docx', { type: ButtonType.Normal })
-          .fontSize(13).backgroundColor('#2563eb').fontColor(Color.White)
-          .onClick(() => this.openEditorPage('docx'))
-        Button('sample.xlsx', { type: ButtonType.Normal })
-          .fontSize(13).backgroundColor('#2563eb').fontColor(Color.White)
-          .onClick(() => this.openEditorPage('xlsx'))
-        Button('sample.pptx', { type: ButtonType.Normal })
-          .fontSize(13).backgroundColor('#2563eb').fontColor(Color.White)
-          .onClick(() => this.openEditorPage('pptx'))
-        Button('打开', { type: ButtonType.Normal })
-          .fontSize(13).backgroundColor('#0369a1').fontColor(Color.White)
-          .onClick(() => this.openSandbox())
-        Button('标记', { type: ButtonType.Normal })
-          .fontSize(13).backgroundColor('#059669').fontColor(Color.White)
-          .onClick(() => this.markDoc())
-        Button('保存', { type: ButtonType.Normal })
-          .fontSize(13).backgroundColor('#d97706').fontColor(Color.White)
-          .onClick(() => this.saveDoc())
-      }
-      .width('100%').height(40).backgroundColor('#f1f5f9')
-
       // 注意：?v=N 是对 ArkWeb http cache 的 cache-bust——rawfileLoader 已剥离 query，
       // 每次提升版本号强制再次取新页面（此 SDK 无 webview.CacheMode 枚举）。
-      // 初始页面按当前 docType（以后可改为 @State 响应式，当前用 loadUrl 切换）。
-      Web({ src: this.editorUrl(this.docType), controller: this.controller })
+      // 桌面链（M3）：初始页 = 官方 loginpage 欢迎页（产品主界面）；打开文档 → loadUrl 编辑器
+      Web({ src: this.useDesktopHome ? this.homeUrl() : this.editorUrl(this.docType, 'sample.docx'), controller: this.controller })
         .javaScriptAccess(true)
         .domStorageAccess(true)
         .fileAccess(true)
         .onInterceptRequest((event) => loadRaw(event.request, this.resourceManager!, this.hostFilesDir))
         .onControllerAttached(() => {
-          // 注意：不注入 AscDesktopEditor——sdk 初始化检测 window.AscDesktopEditor 决定走桌面还是
-          // web 路径（apiBase.js:_init），桌面路径要求 CreateEditorApi（native 负责），
-          // WebView 场景必须走 web 路径（当前真机已验证 web 路径可渲染）。
-          // 这里只注册保存桥：让页面 JS 经 runJavaScript/saveLogicDocumentToZip 产出的 zip 字节
-          // 通过 window.AscSaveBridge.save(b64) 回传 ArkTS 写沙箱，构成「编辑→保存」纯 JS 闭环。
-          // 注意：registerJavaScriptProxy 注册的对象要到页面 (re)load 才出现在 window，
-          // 故在 onControllerAttached（早于加载）注册才对本页生效。
-          this.ascSaveProxy = new AscSaveProxy(this.savePath);
-          this.controller.registerJavaScriptProxy(this.ascSaveProxy, 'AscSaveBridge', [], ['save']);
-          // 打开桥：docx/xlsx/pptx(PK) → x2t *_bin → DOCY/XLSY/PPTY → 页面 OpenDocumentFromBin（打开弧）
-          this.ascConvertProxy = new AscConvertProxy(this.controller, this.hostFilesDir);
-          this.controller.registerJavaScriptProxy(this.ascConvertProxy, 'AscConvertBridge', [], ['convert']);
-          this.startProbe(); // 页面 DOM 就绪后开始状态探针（写 probe.txt）
+          // 桌面链桥——window.AscNative（ascshim.js 里 await 它出现再装 window.AscDesktopEditor）。
+          // registerJavaScriptProxy 的对象要到页面 (re)load 才出现在 window，故在
+          // onControllerAttached（早于加载）注册才对本页生效。
+          // 同步方法表：'_call'（JS 端阻塞取返回——官方 CEF V8 语义）、'_onReady'（安装完成）
+          const nativeDispatch = new AscNativeDispatch(this.hostFilesDir);
+          nativeDispatch.setHandler(new ShellCommandHandler(this));
+          nativeDispatch.setLocalStartOpenHandler(() => {
+            this.onEditorReadyForDoc();
+          });
+          this.ascNative = new AscNativeBridge(nativeDispatch);
+          this.controller.registerJavaScriptProxy(this.ascNative, 'AscNative', ['_call', '_onReady'], []);
         })
         .onPageEnd(() => {
           // 用 console.error 而非 console.log：I 级日志随 app 切后台被丢弃，E 级稳定（与页面 [web] 同通道）
           console.error('PAGE_END url=' + this.controller.getUrl());
-          // 迭代1（正式功能化）：注入 window.OOHost 页面功能库（open/mark/save）。
-          //   POC-5「编辑→保存」全开源链从探针改为正式页面 API，由 ArkTS 壳层按钮驱动：
-          //     OOHost.open(fileUrl)   re-postMessage openDocument（Gateway→Main.js loadDocument→asc_LoadDocument）
-          //     OOHost.mark()          asc_AddText('OOH-<ts>') 编辑标记（验证「编辑」进成品）
-          //     OOHost.save()          BinaryFileWriter(模型).Write(false)→DOCY;v5; → AscSaveBridge.put
-          //   autoTest=true（当前真机验证期）：等模型就绪后自动走 打开→标记→保存 串行（按钮路径的同一函数）。
+          // 页面级错误采集（app 初始化失败时 onerror/unhandledrejection 是最直接证据）
           const inject = `(function(){
 if(window.__ooh_installed){return;}
 window.__ooh_installed=true;
-// XHR 自测（模拟 sdkjs asc_ajax 文档下载：GET + responseType=arraybuffer）。
-//   data-xhr=userfile 测试（沙箱真文件）；data-xhr2=拦截链对照。
-//   区分「XHR×拦截器不兼容」vs「编辑器下载链问题」。
-var xhrTest=function(url,tag){
-  try{
-    var x=new XMLHttpRequest();
-    x.open('GET',url,true);
-    x.responseType='arraybuffer';
-    x.onload=function(){document.documentElement.setAttribute('data-'+tag,
-      JSON.stringify({ok:1,status:x.status,size:x.response?x.response.byteLength:-1}));};
-    x.onerror=function(){document.documentElement.setAttribute('data-'+tag,JSON.stringify({ok:0,err:'onerror'}));};
-    var guard=setTimeout(function(){if(x.readyState<4){try{x.abort();}catch(e){}}
-      document.documentElement.setAttribute('data-'+tag,JSON.stringify({ok:0,err:'hang',rs:x.readyState}));},15000);
-    x.onloadend=function(){clearTimeout(guard);};
-    x.send(null);
-  }catch(e){document.documentElement.setAttribute('data-'+tag,JSON.stringify({ok:0,err:String(e)}));}
-};
-xhrTest('http://localhost/userfile/sample.docx?v='+Date.now(),'xhr');
-xhrTest('http://localhost/onlyoffice/document.docx?v='+Date.now(),'xhr2');
-var getModel=function(){
-  var e=window.Asc&&(window.Asc.editor||window.editor);
-  if(!e||!e.WordControl){return null;}
-  return e.WordControl.m_oLogicDocument;
-};
-window.OOHost={
-  // 打开链（直连 API，不经 Gateway/coauth——Gateway 路线触发 CoAuthoringDisconnect 实测）：
-  // 页面 fetch 沙箱文档字节 → e.openDocument({data:Uint8Array(PK)}) → hook 转 x2t → Uint8Array 打开。
-  // 打开链 v3：XHR 取 PK 字节 → postMessage openDocumentFromBinary（Gateway loadBinary
-  // = api.asc_openDocumentFromBytes(Uint8Array)）→ hook 拦 PK → x2t(*_bin) → __oobDocy
-  // Uint8Array 打开。Gateway 命令走 loadBinary 不经 docInfo.url（不触发在线 coauth），
-  // 且 loadDocument(_offline_) 已在 launch 建好 UI 链（toolbar）。
-  gwTest:function(){
-    // Gateway 分发诊断：手动发 openDocumentFromBinary（min PK 头）看 loadBinary 是否命中
-    try{
-      var pk=[0x50,0x4b,0x03,0x04,0x14,0x00,0x06,0x00];
-      window.postMessage(JSON.stringify({command:'openDocumentFromBinary', data:pk}),'*');
-      window.__pf.push('GW:testsent');
-    }catch(e){window.__pf.push('GW:testERR:'+String(e));}
-  },
-  open:function(fileUrl){
-    try{
-      var x=new XMLHttpRequest();
-      x.open('GET',fileUrl,true);
-      x.responseType='arraybuffer';
-      x.onload=function(){
-        if(!x.response||!x.response.byteLength){console.error('OOH_OPEN_EMPTY');return;}
-        try{
-          var u8=new Uint8Array(x.response);
-          var arr=Array.prototype.slice.call(u8);
-          // 数据必须包成 {bytes:arr} 对象：Gateway commandMap = $me.trigger('xxx', data)，
-          // jQuery.trigger 会把「数组」展开为多参数 → loadBinary 只收到数组首元素
-          // （实测 type=[object Number]，字节全灭）。对象包装不展开。
-          window.postMessage({command:'openDocumentFromBinary', data:{bytes:arr}},'*');
-          console.error('OOH_OPENED_BIN len='+u8.length);
-        }catch(xx){console.error('OOH_OPEN_ERR '+String(xx));}
-      };
-      x.onerror=function(){console.error('OOH_OPEN_NETERR');};
-      x.send(null);
-    }catch(x){console.error('OOH_OPEN2_ERR '+String(x));}
-  },
-  mark:function(){
-    try{
-      var e=window.Asc&&(window.Asc.editor||window.editor);
-      var m=getModel();
-      if(!m){console.error('OOH_MARK_NOMODEL');return;}
-      var tag='OOH-'+Date.now();
-      e.asc_AddText(tag);
-      console.error('OOH_MARKED '+tag);
-    }catch(x){console.error('OOH_MARK_ERR '+String(x));}
-  },
-  save:function(){
-    try{
-      var m=getModel();
-      if(!m){console.error('OOH_SAVE_NOMODEL');return;}
-      if(!window.native){window.native={Save_End:function(){}};}
-      // 按编辑器类型选序列化器：word=BinaryFileWriter(DOCY)；xlsx=cell 版；pptx=BinaryPPTYWriter（如有）
-      var w=null;
-      if(window.AscCommonWord&&window.AscCommonWord.BinaryFileWriter){w=new AscCommonWord.BinaryFileWriter(m);}
-      else if(window.AscCommonExcel&&window.AscCommonExcel.BinaryFileWriter){w=new AscCommonExcel.BinaryFileWriter(m);}
-      else {console.error('OOH_SAVE_NOWRITER');return;}
-      var docy=w.Write(false);
-      console.error('OOH_DOCY len='+docy.length+' head='+docy.substring(0,24));
-      window.AscSaveBridge.save(docy);
-    }catch(x){console.error('OOH_SAVE_ERR '+String(x));}
-  },
-  forcePaint:function(){
-    try{
-      var e=window.Asc&&(window.Asc.editor||window.editor);
-      if(!e){try{window.__pf.push('paint:noe');}catch(x){}return;}
-      // 尺寸修正链：初始 #editor 容器可能为 0x0（CSS 未就绪时测尺寸）→ canvas 0x0 白页；
-      // OnResize(true) 按容器重建 canvas 并全量重绘（等价官方 resize 事件入口）
-      try{if(e.Resize)e.Resize();}catch(z0){}
-      try{var wc=e.WordControl;if(wc&&wc.OnResize){wc.OnResize(true);}}catch(z1){}
-      try{if(e.asc_setZoom)e.asc_setZoom(1);}catch(z){}
-      try{window.__pf.push('paint:Resize');}catch(x){}
-    }catch(x){}
-  }
-};
-console.error('OOH_INSTALLED auto='+!!window.__ooh_autotest);
-// 页面级错误采集：app 初始化失败时 onerror/unhandledrejection 是最直接证据
-try{
-  var _er0=window.onerror;
-  window.onerror=function(msg,src,ln,cl,err){try{window.__pf.push('ERR:'+String(msg).slice(0,120)+'@'+String(src||'').slice(-40)+':'+ln);}catch(x){}if(_er0)return _er0.apply(this,arguments);return false;};
-  window.addEventListener('unhandledrejection',function(ev){try{window.__pf.push('UHR:'+String(ev.reason&&ev.reason.message||ev.reason).slice(0,120));}catch(x){}});
-}catch(e){}
-if(window.__ooh_autotest){
-  try{window.__pf.push('AT:on dt='+(window.__ooh_docType||'?'));}catch(e){}
-  // 自动验证驱动（无 getModel 轮询——模型就绪由页面稳定时序覆盖）：
-  // launch 空文档完成 (~5s) 后 open 真文件（PK→x2t→Uint8Array），再 标记→保存。
-  setTimeout(function(){
-    // hook 状态自查（open chain 前置诊断：openDocument 是否已被 hook / Gateway 是否可分发）
-    try{
-      var e4=window.Asc&&(window.Asc.editor||window.editor);
-      console.error('HK:'+(e4?(e4._podd2?1:'0'):'noe')+(window.Asc&&window.Asc.editor?'/A':'/a')+(window.editor?'/W':'/w'));
-    }catch(e){console.error('HKERR:'+String(e));}
-    // gwTest 已撤（8 字节零数据触发 cell 解析错误弹窗，污染诊断）
-  },5000);
-  setTimeout(function(){
-    // loading-mask 验证：官方 Main.js 在 layout:changed 后移除；若 app 初始化未完成会一直遮罩
-    try{var lm=document.getElementById('loading-mask');if(lm){lm.parentNode.removeChild(lm);window.__pf.push('mask:removed');}}catch(e){}
-    try{window.__pf.push('AT:open-start');}catch(e){}
-    window.OOHost.open('http://localhost/userfile/sample.'+(window.__ooh_docType||'docx')+'?v='+Date.now());
-  },9000);
-  setTimeout(function(){ window.OOHost.mark(); },14500);
-  setTimeout(function(){ window.OOHost.save(); },17500);
-  // canvas 渲染诊断：模型已载但画布空白时，强制 repaint（zoom/sel 触发重绘）观察是否恢复
-  setTimeout(function(){ window.OOHost.forcePaint(); },19500);
-  try{window.__pf.push('AT:kick dt='+(window.__ooh_docType||'docx'));}catch(e){}
-  console.error('OOH_TEST_KICKED dt='+(window.__ooh_docType||'docx'));
-}
+try{var _er0=window.onerror;window.onerror=function(msg,src,ln,cl,err){console.error('JSERR '+String(msg).slice(0,160)+' @'+String(src||'').slice(-40)+':'+ln);if(_er0)return _er0.apply(this,arguments);return false;};}catch(e){}
+try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR '+String(ev.reason&&ev.reason.message||ev.reason).slice(0,160));});}catch(e){}
 })();`;
-          if (this.autoTest) {
-            // 验证驱动开：先注入 autotest 标志 + 当前文件类型（页面轮询等模型就绪），再注入功能库
-            this.pageJS('window.__ooh_autotest=true;window.__ooh_docType="' + this.docType + '";' + inject);
-          } else {
-            this.pageJS(inject);
-          }
+          this.pageJS(inject);
         })
         .onErrorReceive((err: OnErrorReceiveEvent) => {
           console.error('Web error: ' + JSON.stringify(err));
