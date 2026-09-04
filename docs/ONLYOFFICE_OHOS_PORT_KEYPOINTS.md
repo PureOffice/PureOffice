@@ -130,3 +130,49 @@ if (isDocumentLoadComplete || !ServerIdWaitComplete || !FontLoadWaitComplete) re
 - 诊断 fallback：web console 全量落盘 `files/web_console.txt`（EditorPage onConsole append；hilog 在部分环境抓不到 [web]）。
 
 **页面错误即弹窗干扰辨真伪**：`gwTest`（8B zeropad）曾污染诊断（cell 解析零 bytes → 弹窗）——**诊断注入别喂格式无效数据**。
+
+## 11. 正规化打开链（2026-09-05 三格式全链复核沉淀）—— cell/slide DI 链 + 引擎闸门
+
+> §4 为 POC 链历史；本节为正规化链（M3-M7）最终形态。word（docx）走官方
+> `loadDocument({doc})` 即闭环；**cell/slide 必须走 ascshim DI 链**（官方
+> loadDocument 无服务器环境崩 'lang'）。
+
+**链路**：欢迎页 open:recent → ArkTS 沙箱读源文件 → x2t（源后缀分派
+docx2doct_bin / xlsx2xlst_bin / pptx2pptt_bin）→ base64 信封 → 页面
+`openDocumentFromBinary`（官方 Gateway 专路 → Main.loadBinary →
+asc_openDocumentFromBytes）。
+
+**cell/slide DI 链四个必修点（ascshim 3.4 段）**：
+1. `Main.loadConfig({config})` + **遍历 controllers 补发 loadConfig**（
+   Gateway.trigger('init') 非公开 API；word 无需补——LSO_INIT_ALL_OK n=0 佐证，
+   cell/slide 必须，否则 FormulaDialog 等 `appOptions.lang` 级联崩）。
+2. `Asc.asc_CDocInfo` 装配 + `api.asc_setDocInfo`——`put_Format` 必须与 URL
+   fileType 一致（XLSY/PPTY 签名校验，不符 "打开文件错误"）。
+3. `CDocsCoApi` 补 `onFirstLoadChangesEnd` dummy（docscoapi.js:187 auth 离线
+   分支；**必须在 asc_setDocInfo 前**）。
+4. 权限链（工具栏/菜单的 mode 电源）：先置 `_m.permissions`、`_m.document`、
+   `_m.appOptions.spreadsheet`，再构造 `asc_CAscEditorPermissions`
+   （Success/Edit/buildVersion=页面版本）`onEditorPermissions.call`，最后
+   `api.asc_getEditorPermissions()`。**⚠️ slide 的 onEditorPermissions 读
+   `this.document.info`（Main.js:1412 canFavorite）**——未设 `_m.document` →
+   崩 reading 'info' → 尾段 `asc_LoadDocument` 跳过 → 编辑器空白（UI 组件有、
+   画布空、载入遮罩挂）。cell 读 appOptions.spreadsheet.info、word 走
+   loadDocument（501 this.document=data.doc），二者无此问题。
+
+**引擎闸门（`_openDocumentEndCallback`，模型已装载但 GUI 定型"加载中"）**：
+- cell（cell/api.js:3362）：`!ServerIdWaitComplete` 等；
+- **slide（slide/api.js:5835）：ServerIdWaitComplete + ServerImagesWaitComplete
+  双闸**；
+- 服务器链这两个 flag 由 CoAuthoringApi 服务器通知置位，无服务器链永不发 →
+  **ascshim 0.95 段 wrap `Gateway.on('opendocumentfrombinary')`，在字节注入
+  返回后踢闸**：`asyncServerIdEndLoaded`（apiBase:1486 基类公共方法）+ slide
+  另踢 `asyncImagesDocumentEndLoaded`（slide 专有，api.js:5775）；
+- 判据：日志 `PROF_GW_BIN → PROF_KICK_SERVERID（→ PROF_KICK_IMAGES）→
+  PROF_GW_BIN_DONE` 全序即打开链完成。
+
+**判据坑**：PROF_SNAP 的 main/api/ViewsTb/ctrlTb 判据系 cell 语义（wbModel 等），
+word/pptx 下恒 false 属探针局限，非功能异常——以截图/产物为准。
+
+**样本教训**：samples/sample.pptx 原为 POC2 极简产物（`<p:spPr/>` 无坐标、
+bodyPr 空 → 引擎渲染堆字形），已重制为带 xfrm/off/ext/bodyPr 的规范布局
+（4958B）；「渲染内容怪异」先验样本结构再疑引擎。

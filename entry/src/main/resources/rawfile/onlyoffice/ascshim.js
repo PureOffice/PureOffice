@@ -2,6 +2,186 @@
 (function() {
   'use strict';
 
+  // ---- 0.9 cell 打开剖面（PROF，xlsx 打开 40-60s 诊断）：loading-mask 在 SSE
+  //      Main.onLaunch 链尾移除（Main.js:2559 $('#loading-mask').hide().remove()），
+  //      用户感知"打开完成"= 其消失；工具栏 el=#toolbar（view/Toolbar.js:135）。
+  //      打点：PROF_BOOT（shim 首行）→ PROF_HOOKED → PROF_LAUNCH_START/DONE（onLaunch
+  //      wrap；loading 属 promise 尾 → STATE 轮询补足）→ PROF_STATE 变化（lm/wbModel/
+  //      tbDOM/tbView）。时间戳由 ArkTS 落盘统一加（onConsole T<ms> 前缀），此处只打事件。
+  //      仅 cell 页启用（word 已达标，避免日志杂音）。 ----
+  (function() {
+    var _pn = (window.location || {}).pathname || '';
+    if (_pn.indexOf('/spreadsheeteditor/') >= 0) {
+      try {
+        console.error('PROF_BOOT');
+        var _pollN = 0;
+        var _prev = '';
+        (function _pfPoll() {
+          try {
+            var _M = window.SSE && window.SSE.controllers && window.SSE.controllers.Main;
+            var _api = _M && _M.api;
+            var _lm = document.getElementById('loading-mask');
+            var _tb = document.getElementById('toolbar');
+            // 工具栏 view 类是 SSE.Views.Toolbar（复数，view/Toolbar.js:133 —— 非 SSE.view）
+            var _tv = !!(window.SSE && window.SSE.Views && window.SSE.Views.Toolbar);
+            var _cur = 'lm=' + (_lm ? 1 : 0) + ' wbModel=' + (!!(_api && _api.wbModel) ? 1 : 0)
+              + ' tbDOM=' + (_tb ? 1 : 0) + ' tbView=' + (_tv ? 1 : 0);
+            if (_cur !== _prev) { console.error('PROF_STATE ' + _cur); _prev = _cur; }
+          } catch (e) { console.error('PROF_POLL_ERR ' + String(e)); }
+          if (++_pollN < 240) { setTimeout(_pfPoll, 500); }   // 上限 120s
+        })();
+        (function _pfHook() {
+          try {
+            var _M2 = window.SSE && window.SSE.controllers && window.SSE.controllers.Main;
+            if (_M2 && _M2.prototype && typeof _M2.prototype.onLaunch === 'function') {
+              if (!_M2.prototype.__pfHook) {
+                var _old = _M2.prototype.onLaunch;
+                _M2.prototype.onLaunch = function() {
+                  console.error('PROF_LAUNCH_START');
+                  var r;
+                  try { r = _old.apply(this, arguments); }
+                  catch (e2) { console.error('PROF_LAUNCH_EXC ' + String(e2)); throw e2; }
+                  console.error('PROF_LAUNCH_DONE');
+                  return r;
+                };
+                _M2.prototype.__pfHook = true;
+                console.error('PROF_HOOKED');
+              }
+            } else { setTimeout(_pfHook, 200); }
+          } catch (e) {}
+        })();
+      } catch (e) {}
+    }
+  })();
+
+  // ---- 0.95 打开链引擎适配（Gateway 层官方公开 API）：wrap Common.Gateway.on ——
+  //      各编辑器 Main.js 在 onLaunch 里 Gateway.on('opendocumentfrombinary', loadBinary)
+  //      注册，Gateway.js _onMessage dispatch → trigger → localHandler。此 wrap 100% 可达
+  //      （独立于 *SE.controllers.Main.prototype 结构）；回调被调用即字节传到了 Main。 ----
+  (function() {
+    var _pn2 = (window.location || {}).pathname || '';
+    if (_pn2.indexOf('/spreadsheeteditor/') >= 0 || _pn2.indexOf('/presentationeditor/') >= 0) {
+      (function _hGW() {
+        try {
+          var G = window.Common && window.Common.Gateway;
+          if (!G || typeof G.on !== 'function') { setTimeout(_hGW, 250); return; }
+          if (!G.__profff) {
+            G.__profff = true;
+            var _oldOn = G.on;
+            G.on = function(event, handler) {
+              if (event === 'opendocumentfrombinary') {
+                var _h = function(data) {
+                  console.error('PROF_GW_BIN len=' + (data && data.byteLength));
+                  var r;
+                  try { r = handler.call(this, data); }
+                  catch (e2) { console.error('PROF_GW_BIN_EXC ' + String(e2)); throw e2; }
+                  // —— 引擎适配（POC 踢闸的正规化落位）：cell/slide 走 DI 链（asc_setDocInfo）
+                  // 打开，协同引擎从不初始化 → 服务器链 asyncServerIdEndLoaded() 永不触发
+                  // （apiBase.js:1968 onFirstLoadChangesEnd 服务器专路）→ ServerIdWaitComplete
+                  // 永 false → _openDocumentEndCallback 门槛（cell/api.js:3362 / slide
+                  // api.js:5835 / word:8224）永不过 → isDocumentLoadComplete 永 false →
+                  // GUI 完成链（loading 移除/工具栏/渲染视图）永不驱动（引擎模型已装载但
+                  // 页面永久定格"加载中"）。此踢闸 = 字节注入返回后补发"服务器首载完成"
+                  // 通知（官方公共 API；与服务器链 CoAuthoringApi.onFirstLoadChangesEnd
+                  // 同语义）。slide 另有 images 闸门（ServerImagesWaitComplete，slide
+                  // api.js:5835）→ 一并补发 asyncImagesDocumentEndLoaded（slide 专有；
+                  // cell/word 无此闸门）。
+                  try {
+                    var _m = window.SSE && window.SSE.controllers && window.SSE.controllers.Main
+                      || window.PE && window.PE.controllers && window.PE.controllers.Main;
+                    var _ed = _m && _m.api;
+                    if (!_ed) {
+                      _ed = window.Asc && (window.Asc.editor || window.editor);
+                    }
+                    if (_ed && typeof _ed.asyncServerIdEndLoaded === 'function' && !_ed.ServerIdWaitComplete) {
+                      _ed.asyncServerIdEndLoaded();
+                      console.error('PROF_KICK_SERVERID (engine adapt)');
+                    }
+                    if (_ed && typeof _ed.asyncImagesDocumentEndLoaded === 'function' && !_ed.ServerImagesWaitComplete) {
+                      _ed.asyncImagesDocumentEndLoaded();
+                      console.error('PROF_KICK_IMAGES (engine adapt)');
+                    }
+                  } catch (kx) { console.error('PROF_KICK_ERR ' + String(kx)); }
+                  console.error('PROF_GW_BIN_DONE');
+                  return r;
+                };
+                console.error('PROF_GW_ON_BIN_HOOKED');
+                return _oldOn.call(G, event, _h);
+              }
+              return _oldOn.call(G, event, handler);
+            };
+          }
+        } catch (e) { console.error('PROF_GW_ERR ' + String(e)); }
+      })();
+      // 0.95b 引擎回调探针：wrap api.asc_registerCallback → asc_on* 事件触发打点。
+      // 字节装载后引擎走了哪些回调（尤其 ContentReady/OpenDocumentProgress/EndAction/
+      // LongAction）——GUI/loading 链靠这些驱动，缺哪个即卡点。
+      (function _hCB() {
+        try {
+          var M = window.SSE && window.SSE.controllers && window.SSE.controllers.Main;
+          var api = M && M.api;
+          if (!api || typeof api.asc_registerCallback !== 'function') { setTimeout(_hCB, 250); return; }
+          if (!api.__cbHooked) {
+            api.__cbHooked = true;
+            var _reg = api.asc_registerCallback;
+            api.asc_registerCallback = function(evt, fn) {
+              var _wrapped = function() {
+                if (String(evt).indexOf('DocumentContentReady') >= 0
+                  || String(evt).indexOf('OpenDocumentProgress') >= 0
+                  || String(evt).indexOf('EndAction') >= 0
+                  || String(evt).indexOf('LongAction') >= 0
+                  || String(evt).indexOf('DocumentReady') >= 0
+                  || String(evt).indexOf('DocumentName') >= 0) {
+                  console.error('PROF_CB ' + evt);
+                }
+                return fn.apply(this, arguments);
+              };
+              return _reg.call(this, evt, _wrapped);
+            };
+            console.error('PROF_CB_HOOKED');
+          }
+        } catch (e) {}
+      })();
+      (function _hLB() {
+        try {
+          var M = window.SSE && window.SSE.controllers && window.SSE.controllers.Main;
+          if (!M) { setTimeout(_hLB, 250); return; }
+          if (M.prototype && typeof M.prototype.loadBinary === 'function' && !M.prototype.__lbHooked) {
+            M.prototype.__lbHooked = true;
+            var _olb = M.prototype.loadBinary;
+            M.prototype.loadBinary = function(data) {
+              console.error('PROF_LB_IN len=' + (data && data.byteLength));
+              var r;
+              try { r = _olb.call(this, data); }
+              catch (e3) { console.error('PROF_LB_EXC ' + String(e3)); throw e3; }
+              console.error('PROF_LB_OUT');
+              return r;
+            };
+            console.error('PROF_LB_HOOKED');
+            return;
+          }
+          var _api = M.api;
+          if (_api && typeof _api.asc_openDocumentFromBytes === 'function' && !_api.__dfbHooked) {
+            _api.__dfbHooked = true;
+            var _o2 = _api.asc_openDocumentFromBytes;
+            _api.asc_openDocumentFromBytes = function(data) {
+              console.error('PROF_DFB_IN len=' + (data && data.byteLength));
+              var r;
+              try { r = _o2.apply(this, arguments); }
+              catch (e4) { console.error('PROF_DFB_EXC ' + String(e4)); throw e4; }
+              console.error('PROF_DFB_OUT');
+              return r;
+            };
+            console.error('PROF_DFB_HOOKED');
+            return;
+          }
+          setTimeout(_hLB, 250);
+        } catch (e) {}
+      })();
+    }
+  })();
+
+
   // ---- 0. 字体注册表注入（早于 sdk-all.js 加载；Externals.js:636 checkAllFonts 唯一入口） ----
   //      __fonts_files/__fonts_infos 契约（POC 实证）：Emumerator checkAllFonts 读
   //      window["__fonts_files"]（undefined → 无字体 → 无法渲染）；官方 AllFonts.js 只
@@ -22,6 +202,7 @@
 
   var INSTALL = function() {
     if (installed) return; installed = true;
+    try { console.error('ASC_INSTALL path=' + window.location.pathname); } catch (bx) {}
 
     // ---- 1. CEF 202 方法 → AscNative（ArkTS proxy 同步桥） ----
     window.__ascDesktopEditorMethods = {};
@@ -711,6 +892,8 @@
     // ---- 3.55b 欢迎页 m7open 验收段：?m7open=<name>（如 m7-open-test.docx / sample.xlsx）——
     //      欢迎页面加载就绪后自动发官方 open:recent（路径 = 沙箱 filesDir/<name>），等价
     //      「打开本地文件 → 用户点选该文件」；与 3.55 m7auto 配套做全自动开关验收链。 ----
+    try { console.error('M7OPEN_COND search=' + window.location.search + ' flag=' + window.__m7open
+      + ' sdk=' + typeof (window.sdk && window.sdk.command) + ' asc=' + !!window.AscNative); } catch (cb) {}
     if (/[?&]m7open=([^&]+)/.test(window.location.search) && !window.__m7open) {
       var _m7f = (String(window.location.search).match(/[?&]m7open=([^&]+)/) || [])[1];
       _m7f = decodeURIComponent(_m7f);
@@ -730,6 +913,8 @@
               return;
             }
           } catch (x) { console.error('M7OPEN_ERR ' + String(x)); }
+          // 窗口说明（2026-09-04 回退）：loginpage 正常 1-2s 就绪（实测），20×600ms=12s 足够；
+          // 曾放大至 250 次（150s）拖延主线程加重白屏——已回退。
           if (++_t2 < 20) { setTimeout(_try2, 600); }
           else { console.error('M7OPEN_TIMEOUT'); }
         };
@@ -847,6 +1032,27 @@
                 _m.loadConfig({config: _cfg.editorConfig});
                 console.error('LSO_LC_OK ec=' + (typeof _m.editorConfig) + ' lang=' + ((_m.editorConfig || {}).lang)
                   + ' cfgLang=' + _cfg.editorConfig.lang + ' user=' + (typeof _m.appOptions.user));
+                // 全 controller init 补齐（2026-09-04，.lang 级联崩溃根因）：3.4 只直调
+                // Main.loadConfig，Gateway('init') 从未触发 → 其他 controller 的 init 链
+                // （Gateway.on('init') 注册，如 FormulaDialog.js:177 loadConfig）全部饿死 →
+                // FormulaDialog.appOptions 未初始化 → applyModeCommonElements → FormulaDialog.
+                // setApi 内 appOptions.lang 读崩（"reading 'lang'"）。Gateway.trigger 非公开
+                // API（Gateway.js 无 trigger 暴露）→ 遍历 controller 表补发 loadConfig
+                // （官方 init 协议对每 controller 同构；Main 二次调用幂等）。
+                try {
+                  var _app2 = _m.getApplication();
+                  var _nInit = 0;
+                  for (var cName in (window.SSE && window.SSE.controllers || {})) {
+                    try {
+                      var _ci = _app2.getController(cName);
+                      if (_ci && typeof _ci.loadConfig === 'function') {
+                        _ci.loadConfig({config: _cfg.editorConfig});
+                        _nInit++;
+                      }
+                    } catch (cc) {}
+                  }
+                  console.error('LSO_INIT_ALL_OK n=' + _nInit);
+                } catch (iax) { console.error('LSO_INIT_ALL_ERR ' + String(iax)); }
               } catch (le) {
                 console.error('LSO_LC_ERR ' + String(le));
               }
@@ -878,10 +1084,88 @@
                   _di2.put_Lang('zh-CN');
                   _di2.put_Mode('edit');
                   _di2.put_CoEditingMode('fast');
+                  // CDocsCoApi 离线 dummy 补丁（2026-09-04）：auth 离线分支（docscoapi.js:187
+                  // this.onFirstLoadChangesEnd()）在无服务器链必达；该方法本是外部注入
+                  // （服务器联机链由 CoAuthoringApi.onFirstLoadChangesEnd 呼应），我们的组合
+                  // 下缺失 → auth 报 "this.onFirstLoadChangesEnd is not a function"。
+                  // serverId 完成已由 Gateway 踢闸覆盖（asyncServerIdEndLoaded），此处
+                  // dummy 与官方 web 语义等价。**必须在 asc_setDocInfo/权限分发之前执行**
+                  //（CDocsCoApi.auth 由引擎链触发，晚补无效）。
+                  try {
+                    var _cda = window.AscCommon && window.AscCommon.CDocsCoApi;
+                    if (_cda && _cda.prototype
+                      && typeof _cda.prototype.onFirstLoadChangesEnd !== 'function') {
+                      _cda.prototype.onFirstLoadChangesEnd = function() {};
+                      console.error('LSO_CDA_FLC_PATCHED');
+                    }
+                  } catch (cda) { console.error('LSO_CDA_ERR ' + String(cda)); }
                   _m.api.asc_setDocInfo(_di2);
-                  _m.api.asc_getEditorPermissions();
+                  // 权限链三刀（工具栏/文档 holder 的 mode 电源，2026-09-04）：
+                  // ① Main.permissions（loadDocument Main.js:571-575 同义）；
+                  // ② asc_getEditorPermissions 引擎回调（asc_onGetEditorPermissions）只在
+                  //    服务器 license 回调（CoAuthoringApi.onLicense → isOnLoadLicense）后
+                  //    发送——**无服务器链永不发送** → 注册回调也触发不了；
+                  // ③ = 直接构造 asc_CAscEditorPermissions（Success 许可 + Edit 权限，
+                  //    页面版本一致避开 onServerVersion 版本弹窗）+ onEditorPermissions.call
+                  //    （→ applyModeCommonElements 1545 → Toolbar.setMode/DocumentHolder.setMode
+                  //    1645/1649 —— 文档/工具栏 isEdit 等全在此链分发）。
+                  // 历史症状：未设权限+引擎不发 → #toolbar 空、DocumentHolder
+                  // this.permissions.isEdit 崩（code.js:15325）。
+                  // slide onEditorPermissions 1412 读 this.document.info（canFavorite），官方
+                  // loadDocument:501 this.document = data.doc 供之；DI 链须同构设置——不设 →
+                  // pptx 权限分发崩 TypeError reading 'info' → 尾段 asc_LoadDocument 跳过 →
+                  // 编辑器空白（cell 读 appOptions.spreadsheet.info、word 走 loadDocument，
+                  // 二者无此问题）。
+                  _m.document = _cfg.document;
                   _m.appOptions.spreadsheet = _cfg.document;
-                  console.error('LSO_DIOPEN_OK url=' + _di2.get_Url());
+                  _m.permissions = {};
+                  if (_cfg.document && _cfg.document.permissions) {
+                    _m.permissions = window['_'] ? window['_'].extend(_m.permissions, _cfg.document.permissions)
+                      : (function (t) { for (var k in _cfg.document.permissions) { t[k] = _cfg.document.permissions[k]; } return t; })(_m.permissions);
+                  }
+                  try {
+                    if (typeof _m.onEditorPermissions === 'function'
+                      && window.AscCommon && window.AscCommon.asc_CAscEditorPermissions) {
+                      var _pageVer = '4.3.0';
+                      try {
+                        var _lm = _m.getApplication().getController('LeftMenu');
+                        var _av = _lm && _lm.leftMenu && _lm.leftMenu.getMenu('about')
+                          && _lm.leftMenu.getMenu('about').txtVersionNum;
+                        var _mv = String(_av || '').match(/^(\d+\.\d+\.\d+)/);
+                        if (_mv) { _pageVer = _mv[1]; }
+                      } catch (vb) {}
+                      var _perm = new window.AscCommon.asc_CAscEditorPermissions();
+                      _perm.setLicenseType(window.Asc.c_oLicenseResult.Success);
+                      _perm.setRights(window.Asc.c_oRights.Edit);
+                      _perm.setIsLight(false);
+                      _perm.setBuildVersion(_pageVer);
+                      // wrap 探针：onEditorPermissions 链内方法分段 ENTER 打点（定位崩前段）
+                      if (!_m.__permWrapped) {
+                        _m.__permWrapped = true;
+                        ['onServerVersion', 'onLanguageLoaded', 'applyModeCommonElements',
+                          'applyModeEditorElements', 'loadCoAuthSettings', 'onEditorPermissions'].forEach(function (mn) {
+                          var _m2 = _m[mn];
+                          if (typeof _m2 === 'function') {
+                            var _b = _m2.bind(_m);
+                            _m[mn] = function() {
+                              console.error('LSO_PERM_ENTER ' + mn);
+                              try { return _b.apply(_m, arguments); }
+                              catch (pp) {
+                                try { console.error('LSO_PERM_CB_ERR ' + mn + ' ' + (pp && pp.stack || String(pp))); } catch (z) {}
+                                throw pp;
+                              }
+                            };
+                          }
+                        });
+                      }
+                      _m.onEditorPermissions.call(_m, _perm);
+                      console.error('LSO_PERM_DISPATCH_OK ver=' + _pageVer);
+                    } else {
+                      console.error('LSO_PERM_DISPATCH_NOSUPPORT');
+                    }
+                  } catch (de) { console.error('LSO_PERM_DISPATCH_ERR ' + String(de)); }
+                  _m.api.asc_getEditorPermissions();
+                  console.error('LSO_DIOPEN_OK url=' + _di2.get_Url() + ' perms=' + (typeof _m.permissions));
                 }
               }
               console.error('LSO_DIRECT_INIT DONE key=' + _cfg.document.key + ' type=' + _cfg.documentType);
@@ -1121,8 +1405,14 @@
   };
 
   // AscNative 由 ArkWeb registerJavaScriptProxy('AscNative', ...) 注入；等待它出现
+  // （诊断：boot 打点 + 等待计数——区分"ascshim 未加载"与"AscNative 未注入"）
+  try { console.error('ASC_BOOT ' + (window.location.pathname || '') + ' rec=' + !!window.__lsoRecovered); } catch (bx) {}
   (function wait() {
-    if (window.AscNative) { INSTALL(); return; }
+    if (window.AscNative) { try { console.error('ASC_FOUND native=' + (typeof window.AscNative._call)); } catch (bx) {} INSTALL(); return; }
+    if (!wait.__log && (window.__lsoWaitN = (window.__lsoWaitN || 0) + 1) === 20) {
+      wait.__log = true;
+      console.error('ASC_WAITING_ASC (1s, no AscNative)');
+    }
     setTimeout(wait, 50);
   })();
 })();

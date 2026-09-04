@@ -8,10 +8,10 @@ import { x2tConvertSync, x2tVersion } from '../common/x2t';
 import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
 
 /** 页面 cache-bust：每次 rawfile 变更后递增（override rawfileLoader 剥离 query 的缓存） */
-const VERSION_BUMP = 60;
+const VERSION_BUMP = 65;
 /** M7 全自动验收开关：欢迎页自动 open:recent 该沙箱文件（配合 ascshim m7open 段）。
  *  生产置空即完全无感（ascshim m7open/m7auto 均按 URL 参数触发，无参数不生效）。 */
-const M7_TARGET = '';
+const M7_TARGET = ''; // 三格式回归归档；生产置空 = 自动打开/保存全链无感（m7auto 按 URL 参数触发）
 
 /** 桌面命令处理器：loginpage sdk.command/open:recent → EditorPage 业务动作 */
 class ShellCommandHandler implements AscCommandHandler {
@@ -96,6 +96,20 @@ struct EditorPage {
   /** M7：编辑页显示「导出」FAB（onPageEnd 按 URL 判断编辑器页） */
   @State exportVisible: boolean = false;
 
+  /** M7 诊断直达配额：onPageEnd 时打开样本（welcome 完成后才触发，避开加载竞争） */
+  private m7DirectQueued: boolean = false;
+
+  /** ArkTS 侧日志镜像到 webLogPath（与页面 [web] 日志同一文件/时间戳——诊断对齐用） */
+  private arkLog(msg: string): void {
+    try {
+      const f = fs.openSync(this.webLogPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.APPEND);
+      fs.writeSync(f.fd, 'T' + Date.now() + ' [arkts] ' + msg + '\n');
+      fs.closeSync(f);
+    } catch (e) {
+      // 日志落盘失败不影响主流程
+    }
+  }
+
   // —— 页面注入入口（runJavaScript）——
   private pageJS(fn: string): void {
     this.controller.runJavaScript(fn, (err: BusinessError, res: string) => {
@@ -126,8 +140,13 @@ struct EditorPage {
   private editorUrl(type: string, title: string): string {
     const app = type === 'xlsx' ? 'spreadsheeteditor'
       : type === 'pptx' ? 'presentationeditor' : 'documenteditor';
-    return 'http://localhost/onlyoffice/webapps/apps/' + app + '/main/index.html?v=' + VERSION_BUMP
+    let url = 'http://localhost/onlyoffice/webapps/apps/' + app + '/main/index.html?v=' + VERSION_BUMP
       + '&fileType=' + type + '&isDesktop=false&docType=' + type + '&lang=zh-CN&title=' + encodeURIComponent(title);
+    // M7 验收态：自动打开后追加 m7auto=1（ascshim：模型就绪→序列化→save:bin→x2t 落盘）
+    if (M7_TARGET.length > 0) {
+      url = url + '&m7auto=1';
+    }
+    return url;
   }
 
   /**
@@ -487,6 +506,14 @@ struct EditorPage {
     this.pendingOpenBase64 = ''; // 一次性（下次打开重新转换）
     this.pendingOpenLen = 0;
     this.pendingOpenName = '';
+    // cell 打开诊断（PROF 剖面配套）：注入 20s 后快照页面状态——区分"主线程卡死" vs
+    // "链未走完但页面活"；M7_TARGET（自动打开开关）非空才启用，生产无感。
+    // 注：claude 手写整行 JS（避免 TS 字符串拼接的引号坑）；判据 SSE.Views.Toolbar
+    //（view/Toolbar.js:133 复数 Views，非 SSE.view）。
+    if (M7_TARGET.length > 0) {
+      const snap = '(function(){try{if(1){var M=window.SSE&&window.SSE.controllers&&window.SSE.controllers.Main;var tb=document.getElementById("toolbar");var tv=window.SSE&&window.SSE.Views&&window.SSE.Views.Toolbar;var tc=window.SSE&&window.SSE.controllers&&window.SSE.controllers.Toolbar;console.error("PROF_SNAP now="+Date.now()+" main="+!!M+" api="+!!(M&&M.api)+" wbModel="+!!(M&&M.api&&M.api.wbModel)+" lm="+!!document.getElementById("loading-mask")+" tbDom="+!!tb+" tbLen="+(tb?tb.innerHTML.length:0)+" ViewsTb="+!!tv+" ctrlTb="+!!tc+" wb="+!!(M&&M.api&&M.api.wb));}}catch(e){console.error("PROF_SNAP_ERR "+String(e));}})();';
+      setTimeout(() => this.pageJS(snap), 10000);
+    }
   }
 
   /**
@@ -561,6 +588,13 @@ struct EditorPage {
       // 忽略
     }
     this.copySandboxSamples(); // 样本 docx/xlsx/pptx：rawfile → 沙箱 filesDir（open 链走 userfile/；保存回写也落这里）
+    // M7_TARGET 诊断直达（cell 收尾）：跳过 welcome（loginpage 全量渲染可达 60-90s，
+    // 且末轮设备状态出现 welcome 卡死）——启动即走打开链进编辑器页，PROF 剖面链
+    // （3.4 DI → Gateway 字节注入 → serverId 踢闸 → loading 移除 → 工具栏判据）全靠
+    // 编辑器页自身，无需 welcome/sdk。M7_TARGET 置空即生产无此路径。
+    // M7_DIRECT 前置：onPageEnd（welcome 完成）后触发 open（见 onPageEnd 分支）——
+    // 不能放此处 setTimeout 3s：与 welcome 慢加载（60s+）竞争会被覆盖。
+    this.m7DirectQueued = M7_TARGET.length > 0;
   }
 
   /** rawfile 样本复制到沙箱 filesDir（open 链走 userfile/ 前缀；编辑/转换产物也在 filesDir） */
@@ -610,6 +644,19 @@ struct EditorPage {
           // M7：「导出」FAB 仅编辑器页显示（URL 含 /main/index.html；欢迎页/新建向导页隐藏）
           const cu = this.controller.getUrl();
           this.exportVisible = cu.indexOf('/main/index.html') >= 0;
+          // M7 诊断直达：welcome（首页）完成加载后触发样本打开（等待 welcome 不再与 loadUrl 竞争）
+          if (this.m7DirectQueued && cu.indexOf('/main/index.html') < 0) {
+            this.m7DirectQueued = false;
+            try {
+              const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/' + M7_TARGET) as Uint8Array;
+              const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+              const ext = M7_TARGET.substring(M7_TARGET.lastIndexOf('.') + 1).toLowerCase();
+              this.arkLog('M7_DIRECT_OPEN ' + M7_TARGET + ' len=' + ab.byteLength);
+              this.convertAndOpen(ab, ext, M7_TARGET);
+            } catch (e) {
+              this.arkLog('M7_DIRECT_ERR ' + String(e));
+            }
+          }
           // 页面级错误采集（app 初始化失败时 onerror/unhandledrejection 是最直接证据）
           const inject = `(function(){
 if(window.__ooh_installed){return;}
@@ -626,10 +673,12 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           const line = event.message.getSourceId() + ':' + event.message.getLineNumber()
             + ' ' + event.message.getMessage();
           console.error('[web] ' + line);
-          // 诊断：web 控制台全量落设备文件（hilog 抓取在部分环境不可用，文件最可靠）
+          // 诊断：web 控制台全量落设备文件（hilog 抓取在部分环境不可用，文件最可靠）。
+          // 前缀 T<ms>：ArkTS 落盘时刻（同一设备同一时钟，与页面 PROF 事件顺序对齐，
+          // 时间剖面（cell 打开慢 PROF 诊断）用；事件间隔精度 ms 级足够。
           try {
             const f = fs.openSync(this.webLogPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.APPEND);
-            fs.writeSync(f.fd, line + '\n');
+            fs.writeSync(f.fd, 'T' + Date.now() + ' ' + line + '\n');
             fs.closeSync(f);
           } catch (e) {
             // 日志落盘失败不影响主流程

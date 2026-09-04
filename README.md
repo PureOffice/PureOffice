@@ -5,7 +5,7 @@
 ## 现状一句话
 
 「ArkTS 薄壳 + 系统 ArkWeb 渲染 ONLYOFFICE web 编辑器 + native core(x2t) 转换引擎」= **B 架构**。
-真机验证：`sample.docx`（俄语文本+表格，8 页）→ 打开渲染完整 → 自动插入 OOH 编辑标记 → 保存 → `save.docx` 内 document.xml **同时含编辑标记与原文内容**（1017 个 `<w:t>`，原文 1016 + 标记 1，增量精确）。
+真机验证（2026-09-05 三格式全链复核）：`docx/xlsx/pptx` **打开 → 渲染（菜单/工具栏/内容全覆盖）→ 编辑 → 保存 → 产物校验** 全部通过；保存链 document.xml 1017 个 `<w:t>` = 原文 1016 + 编辑标记 1（增量精确）。
 
 ## 关键文档
 
@@ -97,6 +97,10 @@ cmake --build build/core3d/build -j$(nproc)
   选择器 + 欢迎页「打开」FAB）、**保存三格式**（`save.<ext>` 自动选 doct/xlst/pptt 转换器；
   docx/xlsx/pptx 保存产物 zip 校验全过）、**导出/另存为**（系统保存对话框落盘，md5 与保存链一致）、
   recents 真数据（recents.json 驱动，打开即入列、重启持久）
+- **三格式全链复核 + cell/slide 收尾**：✅（2026-09-05 真机）—— docx/xlsx/pptx 打开/渲染/
+  保存/工具栏全链逐一验收（详见 FEATURE_MATRIX §5 验收记录）；cell/slide 打开链四修
+  （DI 链 `_m.document`/权限分发/Gateway 踢闸/CDocsCoApi dummy，见 KEYPOINTS §11）；
+  生产形态 = M7 自动验收常量置空，产品路径无测试痕迹
 - **M6+ 待办**：模板库（LocalFileTemplates）、PDF/打印、全屏窗口管理、宏/插件/拼写/云存储等
   （详见 FEATURE_MATRIX §6）
 - 引擎装配要点（维护者必读）：sdkjs 运行时 = min（sdk-all-min.js，核心+api）与 common

@@ -13,7 +13,7 @@
 |---|---|---|
 | 官方欢迎页（recents 面板 + 新建卡片） | ✅ | loginpage 官方产物；recents = 真数据（`LocalFileRecents` 返回沙箱 `recents.json`，打开过即入列） |
 | 打开本地文件（系统选择器） | ✅ | `open:folder`（loginpage「Open local file」官方命令）→ ArkTS `DocumentViewPicker.select`（docx/xlsx/pptx 过滤）→ 拷贝沙箱 → 现有 x2t 打开链；欢迎页左下「打开」FAB 即点即用 |
-| 打开 docx/xlsx/pptx | ✅ | recents → 沙箱源文件 → x2t docx2doct_bin 等 → 官方 `openDocumentFromBinary` → 引擎渲染 |
+| 打开 docx/xlsx/pptx | ✅ | recents → 沙箱源文件 → x2t（源后缀分派 docx2doct_bin/xlsx2xlst_bin/pptx2pptt_bin）→ 官方 `openDocumentFromBinary` → 引擎渲染（word 走官方 loadDocument；cell/slide 走 DI 链+Gateway 踢闸，2026-09-05 三格式全链复核） |
 | 编辑（文本/表格等） | ✅ | 官方编辑器全套 UI（工具栏/右侧栏/状态栏/缩放/分页） |
 | 保存（Ctrl+S / 自动保存） | ✅ | `asc_Save` 官方桌面协议骨架 → `asc_nativeGetFileData`（BinaryFileWriter → DOCY;v10）→ x2t 按目标后缀自动选 `doct_bin2docx`/`xlst_bin2xlsx`/`pptt_bin2pptx` → save.&lt;ext&gt; + 回写源文件；编辑内容进入 `word/document.xml`（真机核验） |
 | 导出 / 另存为 | ✅ | 编辑页左下「导出」按钮 → 自动触发官方保存 → 系统保存对话框（`DocumentViewPicker.save`）→ 写用户选定位置 |
@@ -91,6 +91,12 @@
   - **导出/另存为**：编辑页「导出」FAB → 系统「选择路径」对话框（文件名自动带出）→「保存」→ **Docs/sample.pptx 13392B 落盘，md5 与保存链产物完全一致（d74fe148…）**
   - **recents 真数据**：打开过的文件（sample.pptx/xlsx、m7-open-test.docx、Unnamed.docx）随重启持久显示
   - 注意：cell（xlsx）打开耗时 40-60s（wb/工具栏 GUI 懒建，v13 已知）；「正在保存文档」快速完成
+- 三格式全链复核（2026-09-05 真机 `a759995` 后）✅：**docx/xlsx/pptx 「打开→渲染→编辑→保存→产物 zip 校验」逐一通过**——
+  - **docx**：openDocumentFromBinary 252713B → 插入读回 OKИзменение → save.docx 33768B，document.xml 1017 w:t（原文 1016 + 编辑标记 1）；截图：全套菜单/工具栏/8 页内容正常
+  - **xlsx**：DI 链打开（POC-13 修复链）→ grid/工具栏/全部菜单选项卡正常（tbLen 629415）→ save.xlsx 22805B 含编辑内容
+  - **pptx**：本次两处修复后才全通——① DI 链补 `_m.document`（slide onEditorPermissions 读 this.document.info，未设 → 权限分发崩 → asc_LoadDocument 跳过 → 编辑器空白）；② slide 引擎 `_openDocumentEndCallback` 双闸门（serverId + images）→ Gateway 踢闸补 `asyncImagesDocumentEndLoaded`；save.pptx 布局/文本保留、zip 合法
+  - **工具栏达成根因**：cell/pptx 此前工具栏空白 = 权限链未分发（asc_onGetEditorPermissions 引擎回调仅服务器链发）→ 修复 = 直接构造 `asc_CAscEditorPermissions` + onEditorPermissions.call（详见 KEYPOINTS §11）
+  - 生产形态：M7_TARGET 置空后欢迎页/编辑器无任何自动测试痕迹（recents 真数据 + 四新建卡片 + 打开 FAB，截图确认）
 
 ## 6. 后续升级路线（建议次序）
 
