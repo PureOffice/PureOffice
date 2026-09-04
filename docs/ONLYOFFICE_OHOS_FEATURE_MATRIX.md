@@ -85,7 +85,11 @@
 - M4 打开三格式 + 保存闭环 ✅（2026-09-04 07:39 真机：编辑文本 → save.docx/sample.docx 内 `word/document.xml` 出现编辑内容，zip 校验通过）
 - M5 清理 POC（探针/自测/AscSaveBridge/AscConvertBridge 移除）✅ 回归无异常（2026-09-04 07:46 真机）
 - M5 补丁「关闭」链（web 语义，ff7a8ad）✅ 真机（2026-09-04 18:38）：文件菜单出现「关闭」项 → 点击 → 回欢迎页（`LSO_REQUEST_CLOSE -> welcome` 打点 + 截图双证）；同轮顺验 create:new（新建 docx 即点即开）
-- M7 文件进出（90c15ee）✅ 真机（2026-09-04 19:31）：（1）recents 真数据 —— 打开过「Unnamed.docx」随重启持久显示；（2）`open:folder` → 系统「选择文件」picker 弹出（loginpage Open local file 与 FAB「打开」双入口验证）；（3）保存三格式引用转换器齐备（doct_bin2docx/xlst_bin2xlsx/pptt_bin2pptx）。**待用户手验**（系统 picker 交互不受 uitest 控制）：picker 选 `m7-open-test.docx`（已推送至 下载/OnlyOffice/Documents/）→ 打开渲染；编辑页「导出」→ 系统保存对话框落盘
+- M7 文件进出（90c15ee）✅ 真机（2026-09-04）：
+  - recents 真数据 —— create:new/打开过的文档入列 recents.json，随重启持久显示（19:31 截图）
+  - `open:folder` → 系统「选择文件」picker 弹出（loginpage Open local file 与 FAB「打开」双入口，19:27/19:31 截图）；picker 内文件选用手指（系统 UI 不受 uitest 注入）
+  - **保存链端到端 ✅（20:11）**：自动编辑器（ascshim `&m7auto=1` 验收工具）→ `asc_AddText('M7AUTO-EDIT-OK')` → 模型读回 `cw=[M7AUTO]` → `asc_nativeGetFileData`(DOCY;v10, 5MB) → saveBinRaw → x2t doct_bin2docx → **save.docx 26071B zip 校验通过，`word/document.xml` 含 'M7AUTO-EDIT-OK'**（宿主机解压核验）
+  - 待办登记：xlsx/pptx 保存链（转换器 xlst_bin2xlsx/pptt_bin2pptx 已证实存在于 libx2t）未走完整链；系统保存对话框（导出 UI）为手指操作项
 
 ## 6. 后续升级路线（建议次序）
 

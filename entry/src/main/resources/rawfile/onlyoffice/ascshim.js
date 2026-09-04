@@ -601,6 +601,75 @@
       })();
     }
 
+    // ---- 3.55 M7 自动化验收工具（?m7auto=1 时编辑器就绪后自动插入文本并序列化保存 ——
+    //      用于真机自动化验证保存链（uitest 无法向 contenteditable 输字）。产品路径不拼
+    //      该参数 → 不生效。2026-09-04 已验证：M7AUTO-EDIT-OK 进 save.docx document.xml） ----
+    if (/[?&]m7auto=1/.test(window.location.search) && !window.__m7auto) {
+      window.__m7auto = true;
+      (function() {
+        var _n = 0;
+        var _getApi = function() {
+          // Asc.editor = asc_docs_api 实例（word/api.js:936 Asc['editor']=this）——
+          // asc_AddText/asc_Save 直接在其原型上（apiBase.js:3027 oApi=Asc.editor||editor）
+          var _e = window.Asc && window.Asc.editor ? window.Asc.editor : window.editor;
+          if (_e && typeof _e === 'object') { return _e; }
+          return null;
+        };
+        var _try = function() {
+          try {
+            var _ap = _getApi();
+            // 文档模型就绪（asc_openDocumentFromBytes 完成、private_GetLogicDocument 有效）
+            // 才插入 —— 早于它 asc_AddText 空转（doc=null，内容不进模型/不进存盘）
+            var _docM = _ap && _ap.private_GetLogicDocument ? _ap.private_GetLogicDocument() : null;
+            if (_docM && _ap && typeof _ap.asc_AddText === 'function') {
+              _ap.asc_AddText('M7AUTO-EDIT-OK', null);
+              var _cw = _ap.asc_GetCurrentWord ? String(_ap.asc_GetCurrentWord(0)) : 'na';
+              console.error('M7AUTO_INSERTED cw=[' + _cw.slice(0, 40) + ']');
+              // 直接序列化（等同 asc_Save 覆写后半程；绕开守卫的 isLongAction —— 文档加载
+              // 长事务 20s 不结束（模型已就绪可读可写），守卫式保存永远打不穿）
+              setTimeout(function() {
+                try {
+                  var _ap2 = _getApi();
+                  var _oldN = window.native;
+                  var _nb2;
+                  window.native = { Save_End: function() {} };
+                  try {
+                    _nb2 = _ap2.asc_nativeGetFileData();
+                  } finally {
+                    window.native = _oldN;
+                  }
+                  if (_nb2 && _nb2.byteLength) {
+                    var _bio = '';
+                    for (var _i7 = 0; _i7 < _nb2.length; _i7 += 0x8000) {
+                      _bio += String.fromCharCode.apply(null, _nb2.slice(_i7, _i7 + 0x8000));
+                    }
+                    var _b64 = btoa(_bio);
+                    var _rr = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', _b64]));
+                    console.error('M7AUTO_DIRECT_SAVE len=' + _nb2.byteLength + ' ret=' + _rr);
+                  } else {
+                    console.error('M7AUTO_DIRECT_EMPTY');
+                  }
+                } catch (x) { console.error('M7AUTO_DIRECT_ERR ' + String(x)); }
+              }, 2500);
+              return;
+            }
+            if (_n % 5 === 0) {
+              console.error('M7AUTO_DIAG n=' + _n
+                + ' Asc=' + typeof window.Asc
+                + ' editor=' + (window.Asc ? typeof window.Asc.editor : 'na')
+                + ' editor2=' + (window.editor ? typeof window.editor : 'na')
+                + ' api=' + (_ap ? 'y' : 'n')
+                + ' add=' + (_ap ? String(typeof _ap.asc_AddText) : 'na')
+                + ' save=' + (_ap ? String(typeof _ap.asc_Save) : 'na'));
+            }
+          } catch (x) { console.error('M7AUTO_INSERT_ERR ' + String(x)); }
+          if (++_n < 40) { setTimeout(_try, 500); }
+          else { console.error('M7AUTO_TIMEOUT'); }
+        };
+        setTimeout(_try, 1500);
+      })();
+    }
+
     // ---- 3.6 字体链修复：官方 shim loadLocalFile 请求 ascdesktop://fonts/（CEF 拦截），
     //      ArkWeb 无此 scheme，XHR 永远 pending → 字体回调 null → BIN 读取 undefined.length 崩。
     //      改经 http://localhost/onlyoffice/fonts/（rawfileLoader 提供已 pre_xor 字体，POC 链同源）。
@@ -835,9 +904,13 @@
           var _t = this;
           try {
             // 官方 Local/api.js:158 守卫（省略 History 依赖项）
-            if (isResaveAttack === true || isSaveAs === true) { return; }
+            if (isResaveAttack === true || isSaveAs === true) { console.error('LSO_SAVE_GUARD resave/saveas'); return; }
             if (true !== isNoUserSave) { this.IsUserSave = true; }
-            if (!(this.canSave && !this.isLongAction() && !this.isGroupActions())) { return; }
+            if (!(this.canSave && !this.isLongAction() && !this.isGroupActions())) {
+              console.error('LSO_SAVE_GUARD canSave=' + this.canSave + ' long=' + this.isLongAction()
+                + ' group=' + this.isGroupActions());
+              return;
+            }
             this.canSave = false;
             try {
               if (this.CoAuthoringApi && typeof this.CoAuthoringApi.askSaveChanges === 'function') {
