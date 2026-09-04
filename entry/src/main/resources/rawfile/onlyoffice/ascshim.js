@@ -650,13 +650,20 @@
                 // sendEvent('asc_onSaveDocument', DOCX bytes) → Main.onSaveDocumentBinary
                 // → Common.Gateway.saveDocument(data)（无服务器环境由 ascshim 覆写落盘）
                 canSaveDocumentToBinary: true,
+                // 「关闭」官方 web 链（M5 补丁，方案 C）：Main.js:504
+                //   canCloseEditor = customization.close.visible!==false && canRequestClose && !isDesktopApp
+                //   → FileMenu.js:542 web 分支注入「关闭」菜单项(action:'close-editor')
+                //   → LeftMenu.js:309 'close' → Main.js:1025 closeEditor → onRequestClose
+                //   → Gateway.requestClose()（ascshim 已覆写回欢迎页）
+                canRequestClose: true,
                 customization: {
                   about: false, feedback: {url: 'https://helpdesk.onlyoffice.com/?desktop=true'},
                   // web 语义"关闭/返回"：Main.js canBack = customization.goback.url 非空
                   // → 头部/文件菜单"返回"按钮 → goback → parent.location.href = url
                   //（web 编辑器层唯一的官方回欢迎页机制；Desktop 菜单"关闭文件"项待桌面
                   //  字体/native 通路三项补齐后再启用 isDesktopApp）。
-                  goback: {url: 'http://localhost/onlyoffice/index.html'}
+                  goback: {url: 'http://localhost/onlyoffice/index.html'},
+                  close: {visible: true, text: '关闭'}
                 }
               },
               document: {
@@ -873,6 +880,25 @@
         };
         console.error('LSO_SAVE_HOOKED');
       } catch (cbx) { console.error('LSO_SAVE_HOOK_ERR ' + String(cbx)); }
+    })();
+
+    // ---- 3.8.2b Gateway.requestClose 覆写（M5 方案 C「关闭」）：官方 web 链 onRequestClose
+    //      （文档已修改时先弹「放弃修改并离开」框）→ Common.Gateway.requestClose() —— web
+    //      语义为上报宿主壳关闭；本页即宿主 → 直接回官方欢迎页（与 goback 同构；不依赖
+    //      window.AscDesktopEditor，web 语义可用）。 ----
+    (function _hookGW() {
+      try {
+        var _g = window.Common && window.Common.Gateway;
+        if (!_g || typeof _g.requestClose !== 'function') { setTimeout(_hookGW, 200); return; }
+        if (!window.__lsoReqClose) {
+          window.__lsoReqClose = true;
+          _g.requestClose = function() {
+            console.error('LSO_REQUEST_CLOSE -> welcome');
+            try { window.location.href = 'http://localhost/onlyoffice/index.html'; } catch (e) { console.error('LSO_RC_ERR ' + String(e)); }
+          };
+          console.error('LSO_RC_HOOKED');
+        }
+      } catch (gx) { console.error('LSO_RC_HOOK_ERR ' + String(gx)); }
     })();
 
     // ---- 3.8.3 Gateway.saveDocument 落盘（保存链 M4）：官方 asc_onSaveDocument →

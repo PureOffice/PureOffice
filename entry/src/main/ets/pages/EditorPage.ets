@@ -8,7 +8,7 @@ import { x2tConvertSync, x2tVersion } from '../common/x2t';
 import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
 
 /** 页面 cache-bust：每次 rawfile 变更后递增（override rawfileLoader 剥离 query 的缓存） */
-const VERSION_BUMP = 59;
+const VERSION_BUMP = 60;
 
 /** 桌面命令处理器：loginpage sdk.command/open:recent → EditorPage 业务动作 */
 class ShellCommandHandler implements AscCommandHandler {
