@@ -261,6 +261,7 @@ export class AscNativeDispatch {
     // recents 契约（由 loginpage utils.js:405 parseRecent 单方消费，字段不可多不可少）：
     //   id(存为 fileid) / pin(置 pinid 符号) / path(绝对路径，名从路径尾截取)
     //   type(FileFormat 枚举整数: docx=0x41 xlsx=0x101 pptx=0x81) / modifyed(显示"最近打开")
+    // M7：真数据 —— EditorPage 打开文档时追加 filesDir/recents.json（打开过即"最近"）
     class RecentItem {
       id: number = 0;
       pin: number = 0;
@@ -268,19 +269,34 @@ export class AscNativeDispatch {
       type: number = 0;
       modifyed: string = '';
     }
-    const now = new Date().toLocaleString();
+    // M7 真数据：recents.json 不存在/空 → 空列表（loginpage 空 recents 时点「Open local file」
+    // 走官方直发分支 openFile(OPEN_FILE_FOLDER) → open:folder —— 免二次点击）
     const arr: RecentItem[] = [];
-    const put = (id: number, name: string, type: number): void => {
-      const item = new RecentItem();
-      item.id = id;
-      item.path = this.filesDir + '/' + name;
-      item.type = type;
-      item.modifyed = now;
-      arr.push(item);
-    };
-    put(1, 'sample.docx', 0x41);
-    put(2, 'sample.xlsx', 0x101);
-    put(3, 'sample.pptx', 0x81);
+    try {
+      const p = this.filesDir + '/recents.json';
+      const f = fs.openSync(p, fs.OpenMode.READ_ONLY);
+      const st = fs.statSync(p);
+      const txt = new ArrayBuffer(st.size);
+      fs.readSync(f.fd, txt);
+      fs.closeSync(f);
+      let txtStr = '';
+      const t8 = new Uint8Array(txt);
+      for (let i = 0; i < t8.length; i++) {
+        txtStr += String.fromCharCode(t8[i]);
+      }
+      const parsed = JSON.parse(txtStr) as Array<Record<string, Object>>;
+      const now = new Date().toLocaleString();
+      for (const r of parsed) {
+        const item = new RecentItem();
+        item.id = Number(r['id'] ?? 0);
+        item.path = String(r['path'] ?? '');
+        item.type = Number(r['type'] ?? 0x41);
+        item.modifyed = String(r['modifyed'] ?? now);
+        arr.push(item);
+      }
+    } catch (e) {
+      console.error('[AscNative:LocalFileRecents] no recents.json: ' + String(e));
+    }
     return JSON.stringify(arr);
   }
 

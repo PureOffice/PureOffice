@@ -2,7 +2,7 @@ import { webview } from '@kit.ArkWeb';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { resourceManager } from '@kit.LocalizationKit';
-import { fileIo as fs } from '@kit.CoreFileKit';
+import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { loadRaw } from '../common/rawfileLoader';
 import { x2tConvertSync, x2tVersion } from '../common/x2t';
 import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
@@ -88,6 +88,10 @@ struct EditorPage {
   private pendingOpenName: string = '';
   // 当前打开文档名（M4 保存回写源文件用；不随 pendingOpenName 一次性清除）
   private currentOpenName: string = '';
+  /** M7：当前打开文档扩展名（docx/xlsx/pptx）—— 保存链 save.<ext> 与导出文件名用 */
+  private currentOpenExt: string = 'docx';
+  /** M7：编辑页显示「导出」FAB（onPageEnd 按 URL 判断编辑器页） */
+  @State exportVisible: boolean = false;
 
   // —— 页面注入入口（runJavaScript）——
   private pageJS(fn: string): void {
@@ -144,6 +148,13 @@ struct EditorPage {
       console.error('CREATE_NEW_UNSUPPORTED ' + param + ' (cell/slide 新建 M4)');
       return 'false';
     }
+    if (cmd === 'open:folder') {
+      // M7：loginpage「Open local file」→ sdk.command('open:folder', path)（欢迎页按钮/拖放区
+      // "选择文件"；param 为 pinned 文件夹路径，桌面语义"打开文件夹位置"）。本机语义 = 系统
+      // 文件选择器选一个 docx/xlsx/pptx 打开（async 处理，命令先行受理）。
+      this.openLocalFile(param);
+      return 'true';
+    }
     if (cmd === 'save:bin') {
       return this.saveBinRaw(param);
     }
@@ -180,6 +191,98 @@ struct EditorPage {
     } catch (e) {
       console.error('CREATE_NEW_ERR ' + String(e));
       return 'false';
+    }
+  }
+
+  /**
+   * M7 打开真实文件：系统文件选择器（DocumentViewPicker）→ 选中 docx/xlsx/pptx
+   * → 字节交 convertAndOpen（写入沙箱 <name> + x2t + 编辑器导航）。
+   * 选择器授权 uri 仅临时可读 —— 字节读入内存即固化为沙箱文件，此后与源文件无关联
+   * （保存回写沙箱；"导出"经系统保存对话框写用户位置）。
+   */
+  private async openLocalFile(param: string): Promise<void> {
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      const dvp = new picker.DocumentViewPicker(ctx);
+      const opts = new picker.DocumentSelectOptions();
+      opts.maxSelectNumber = 1;
+      opts.fileSuffixFilters = ['.docx', '.xlsx', '.pptx'];
+      const uris = await dvp.select(opts);
+      if (uris.length === 0) {
+        console.error('OPEN_LOCAL_CANCEL');
+        return;
+      }
+      const uri = uris[0];
+      const st = fs.statSync(uri);
+      const f = fs.openSync(uri, fs.OpenMode.READ_ONLY);
+      const ab = new ArrayBuffer(st.size);
+      fs.readSync(f.fd, ab);
+      fs.closeSync(f);
+      // 文件名/扩展名：uri 尾段（Picker uri 通常带编码文件名；统计型 uri 兜底 docx）
+      const label = decodeURIComponent(uri.substring(uri.lastIndexOf('/') + 1));
+      let ext = '';
+      const dot = label.lastIndexOf('.');
+      if (dot > -1) {
+        ext = label.substring(dot + 1).toLowerCase();
+      }
+      if (ext !== 'docx' && ext !== 'xlsx' && ext !== 'pptx') {
+        console.error('OPEN_LOCAL_EXTBAD label=' + label + ' ext=' + ext);
+        return;
+      }
+      console.error('OPEN_LOCAL_OK label=' + label + ' uri=' + uri + ' size=' + st.size);
+      this.convertAndOpen(ab, ext, label);
+    } catch (e) {
+      console.error('OPEN_LOCAL_ERR ' + String(e));
+    }
+  }
+
+  /** recents.json：官方 LocalFileRecents 数据源（打开过的文档即"最近文件"） */
+  private readRecents(): Array<Record<string, Object>> {
+    try {
+      const p = this.hostFilesDir + '/recents.json';
+      const f = fs.openSync(p, fs.OpenMode.READ_ONLY);
+      const st = fs.statSync(p);
+      const txt = new ArrayBuffer(st.size);
+      fs.readSync(f.fd, txt);
+      fs.closeSync(f);
+      let txtStr = '';
+      const t8 = new Uint8Array(txt);
+      for (let i = 0; i < t8.length; i++) {
+        txtStr += String.fromCharCode(t8[i]);
+      }
+      return JSON.parse(txtStr) as Array<Record<string, Object>>;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /** 追加/置顶一条 recents（同 name 去重；type 为 loginpage FileFormat 枚举：docx=0x41 xlsx=0x101 pptx=0x81） */
+  private appendRecent(name: string, type: number): void {
+    try {
+      const p = this.hostFilesDir + '/recents.json';
+      let arr = this.readRecents().filter((r) => String(r['name'] ?? '') !== name);
+      let maxId = 0;
+      for (const r of arr) {
+        const id = Number(r['id'] ?? 0);
+        if (id > maxId) {
+          maxId = id;
+        }
+      }
+      const item: Record<string, Object> = {
+        'id': maxId + 1,
+        'pin': 0,
+        'name': name,
+        'path': this.hostFilesDir + '/' + name,
+        'type': type,
+        'modifyed': new Date().toLocaleString()
+      };
+      arr.unshift(item);
+      const w = fs.openSync(p, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+      fs.writeSync(w.fd, JSON.stringify(arr));
+      fs.closeSync(w);
+      console.error('RECENTS_APPEND name=' + name + ' type=0x' + type.toString(16) + ' n=' + arr.length);
+    } catch (e) {
+      console.error('RECENTS_APPEND_ERR ' + String(e));
     }
   }
 
@@ -238,8 +341,10 @@ struct EditorPage {
         return 'false';
       }
       const ab = b64ToBuf(b64);
+      // M7 三格式：目标后缀决定 x2t 转换器（doct_bin2docx / xlst_bin2xlsx / pptt_bin2pptx）
+      const extU = this.currentOpenExt.length > 0 ? this.currentOpenExt : 'docx';
       const inP = this.hostFilesDir + '/in.bin';
-      const outP = this.hostFilesDir + '/save.docx';
+      const outP = this.hostFilesDir + '/save.' + extU;
       const w = fs.openSync(inP, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
       fs.writeSync(w.fd, ab);
       fs.closeSync(w);
@@ -289,7 +394,18 @@ struct EditorPage {
    */
   private convertAndOpen(ab: ArrayBuffer, ext: string, name: string): string {
     try {
-      const inP = this.hostFilesDir + '/open-in.' + ext;
+      const extU = ext.toLowerCase();
+      // M7：源文件持久化到沙箱 <name>（openRecent 的来源 / 保存回写目标 / recents 条目；
+      // 系统选择器授权 uri 的读权限只保证 select 返回后短暂有效，字节落盘即固化）
+      const srcP = this.hostFilesDir + '/' + name;
+      try {
+        const w0 = fs.openSync(srcP, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+        fs.writeSync(w0.fd, ab);
+        fs.closeSync(w0);
+      } catch (pe) {
+        console.error('OPEN_SRC_WRITE_ERR ' + String(pe));
+      }
+      const inP = this.hostFilesDir + '/open-in.' + extU;
       const outP = this.hostFilesDir + '/open-in.bin';
       const w = fs.openSync(inP, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
       fs.writeSync(w.fd, ab);
@@ -299,7 +415,7 @@ struct EditorPage {
       const rc = x2tConvertSync(xml);
       console.error('OPEN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
       if (rc !== 0) {
-        console.error('OPEN_X2T_FAIL ext=' + ext);
+        console.error('OPEN_X2T_FAIL ext=' + extU);
         return 'false';
       }
       const st2 = fs.statSync(outP);
@@ -312,8 +428,12 @@ struct EditorPage {
       this.pendingOpenUrl = this.hostFilesDir;
       this.pendingOpenName = name;
       this.currentOpenName = name;
+      this.currentOpenExt = extU;
+      // M7：recents 真数据 —— 打开过即"最近"，type 按格式枚举上报
+      const typeNum = extU === 'xlsx' ? 0x101 : extU === 'pptx' ? 0x81 : 0x41;
+      this.appendRecent(name, typeNum);
       console.error('OPEN_CONVERTED bin=' + st2.size + ' b64=' + this.pendingOpenBase64.length);
-      this.controller.loadUrl(this.editorUrl(ext, name));
+      this.controller.loadUrl(this.editorUrl(extU, name));
       return 'true';
     } catch (e) {
       console.error('OPEN_CONVERT_ERR ' + String(e));
@@ -364,6 +484,66 @@ struct EditorPage {
     this.pendingOpenName = '';
   }
 
+  /**
+   * M7 导出（保存文件给用户）：触发官方 asc_Save（走覆写保存链 → 沙箱 save.<ext>）→
+   * 轮询产物 → 系统保存对话框（DocumentViewPicker.save）→ 写用户选定位置。
+   * 即"另存为"语义：编辑器内容在应用内的持久化（官方「保存」）+ 一份用户可得的文件。
+   */
+  private async exportCurrent(): Promise<void> {
+    try {
+      const extU = this.currentOpenExt.length > 0 ? this.currentOpenExt : 'docx';
+      // 1) 触发官方保存（升序：页面 Asc.editor.api.asc_Save == Ctrl+S，进 asc_Save 原型覆写链）
+      this.pageJS('(function(){try{var e=window.Asc&&window.Asc.editor;'
+        + 'if(e&&e.api&&typeof e.api.asc_Save==="function"){e.api.asc_Save();'
+        + 'console.error("LSO_EXPORT_SAVE_TRIGGER");}else{console.error("LSO_EXPORT_SAVE_NOSAVE");}}'
+        + 'catch(x){console.error("LSO_EXPORT_SAVE_ERR "+String(x));}})();');
+      // 2) 轮询沙箱 save.<ext>（保存链异步：序列化→x2t；最长 6s）
+      const outP = this.hostFilesDir + '/save.' + extU;
+      let data: ArrayBuffer | null = null;
+      for (let i = 0; i < 20; i++) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 300);
+        });
+        try {
+          const st = fs.statSync(outP);
+          if (st.size > 0) {
+            const f = fs.openSync(outP, fs.OpenMode.READ_ONLY);
+            const rbuf = new ArrayBuffer(st.size);
+            fs.readSync(f.fd, rbuf);
+            fs.closeSync(f);
+            data = rbuf;
+            break;
+          }
+        } catch (e) {
+          // save.<ext> 未生成（用户关闭保存/文档未保存过），继续等
+        }
+      }
+      if (data === null) {
+        console.error('EXPORT_NO_SAVE ext=' + extU);
+        return;
+      }
+      // 3) 系统保存对话框（用户选目录/文件）
+      const ctx = getContext(this) as common.UIAbilityContext;
+      const dvp = new picker.DocumentViewPicker(ctx);
+      const opts = new picker.DocumentSaveOptions();
+      const base = this.currentOpenName.length > 0 ? this.currentOpenName : ('Unnamed.' + extU);
+      opts.newFileNames = [base];
+      // 注：DocumentSaveOptions 无 fileSuffixFilters（仅 select 侧有）；newFileNames 已带后缀
+      const uris = await dvp.save(opts);
+      if (uris.length === 0) {
+        console.error('EXPORT_SAVE_CANCEL');
+        return;
+      }
+      const uri = uris[0];
+      const w = fs.openSync(uri, fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC | fs.OpenMode.CREATE);
+      fs.writeSync(w.fd, data);
+      fs.closeSync(w);
+      console.error('EXPORT_OK uri=' + uri + ' size=' + data.byteLength);
+    } catch (e) {
+      console.error('EXPORT_ERR ' + String(e));
+    }
+  }
+
   aboutToAppear(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
     this.resourceManager = ctx.resourceManager;
@@ -397,7 +577,7 @@ struct EditorPage {
   }
 
   build() {
-    Column() {
+    Stack() {
       // 注意：?v=N 是对 ArkWeb http cache 的 cache-bust——rawfileLoader 已剥离 query，
       // 每次提升版本号强制再次取新页面（此 SDK 无 webview.CacheMode 枚举）。
       // 桌面链（M3）：初始页 = 官方 loginpage 欢迎页（产品主界面）；打开文档 → loadUrl 编辑器
@@ -422,6 +602,9 @@ struct EditorPage {
         .onPageEnd(() => {
           // 用 console.error 而非 console.log：I 级日志随 app 切后台被丢弃，E 级稳定（与页面 [web] 同通道）
           console.error('PAGE_END url=' + this.controller.getUrl());
+          // M7：「导出」FAB 仅编辑器页显示（URL 含 /main/index.html；欢迎页/新建向导页隐藏）
+          const cu = this.controller.getUrl();
+          this.exportVisible = cu.indexOf('/main/index.html') >= 0;
           // 页面级错误采集（app 初始化失败时 onerror/unhandledrejection 是最直接证据）
           const inject = `(function(){
 if(window.__ooh_installed){return;}
@@ -450,8 +633,33 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
         })
         .width('100%')
         .layoutWeight(1)
+      // M7 FAB（左下角）：编辑页「导出」（另存为系统位置）；欢迎页「打开」（系统选择器直开）
+      if (this.exportVisible) {
+        Button('导出')
+          .fontSize(14)
+          .height(40)
+          .borderRadius(20)
+          .backgroundColor('#0a7d3e')
+          .fontColor(Color.White)
+          .margin({ left: 24, bottom: 24 })
+          .onClick(() => {
+            this.exportCurrent();
+          })
+      } else {
+        Button('打开')
+          .fontSize(14)
+          .height(40)
+          .borderRadius(20)
+          .backgroundColor('#0a7d3e')
+          .fontColor(Color.White)
+          .margin({ left: 24, bottom: 24 })
+          .onClick(() => {
+            this.openLocalFile('');
+          })
+      }
     }
     .width('100%')
     .height('100%')
+    .align(Alignment.BottomStart)
   }
 }
