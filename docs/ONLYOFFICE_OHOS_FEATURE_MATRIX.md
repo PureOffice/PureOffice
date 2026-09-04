@@ -81,6 +81,7 @@
 - M1 官方构建链 ✅ / M2 桥 ✅ / M3 欢迎页+docx 打开 ✅（2026-09-04 上午，真机 192.168.1.8）
 - M4 打开三格式 + 保存闭环 ✅（2026-09-04 07:39 真机：编辑文本 → save.docx/sample.docx 内 `word/document.xml` 出现编辑内容，zip 校验通过）
 - M5 清理 POC（探针/自测/AscSaveBridge/AscConvertBridge 移除）✅ 回归无异常（2026-09-04 07:46 真机）
+- M5 补丁「关闭」链（web 语义，ff7a8ad）✅ 真机（2026-09-04 18:38）：文件菜单出现「关闭」项 → 点击 → 回欢迎页（`LSO_REQUEST_CLOSE -> welcome` 打点 + 截图双证）；同轮顺验 create:new（新建 docx 即点即开）
 
 ## 6. 后续升级路线（建议次序）
 
