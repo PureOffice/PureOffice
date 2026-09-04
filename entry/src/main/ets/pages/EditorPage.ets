@@ -9,6 +9,9 @@ import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common
 
 /** 页面 cache-bust：每次 rawfile 变更后递增（override rawfileLoader 剥离 query 的缓存） */
 const VERSION_BUMP = 60;
+/** M7 全自动验收开关：欢迎页自动 open:recent 该沙箱文件（配合 ascshim m7open 段）。
+ *  生产置空即完全无感（ascshim m7open/m7auto 均按 URL 参数触发，无参数不生效）。 */
+const M7_TARGET = '';
 
 /** 桌面命令处理器：loginpage sdk.command/open:recent → EditorPage 业务动作 */
 class ShellCommandHandler implements AscCommandHandler {
@@ -109,7 +112,8 @@ struct EditorPage {
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片 */
   private homeUrl(): string {
-    return 'http://localhost/onlyoffice/index.html?v=' + VERSION_BUMP;
+    return 'http://localhost/onlyoffice/index.html?v=' + VERSION_BUMP
+      + (M7_TARGET.length > 0 ? '&m7open=' + encodeURIComponent(M7_TARGET) : '');
   }
 
   /**
@@ -274,7 +278,8 @@ struct EditorPage {
         'name': name,
         'path': this.hostFilesDir + '/' + name,
         'type': type,
-        'modifyed': new Date().toLocaleString()
+        // loginpage 显示时间戳：toLocaleString() 在 zh locale 输出非 ASCII 导致面板乱码
+        'modifyed': new Date().toISOString().replace('T', ' ').substring(0, 19)
       };
       arr.unshift(item);
       const w = fs.openSync(p, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
@@ -563,7 +568,7 @@ struct EditorPage {
     if (!this.resourceManager) {
       return;
     }
-    for (const name of ['sample.docx', 'sample.xlsx', 'sample.pptx']) {
+    for (const name of ['sample.docx', 'sample.xlsx', 'sample.pptx', 'm7-open-test.docx']) {
       try {
         const raw = this.resourceManager.getRawFileContentSync('onlyoffice/' + name) as Uint8Array;
         const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;

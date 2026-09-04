@@ -106,6 +106,9 @@ export class AscNativeDispatch {
       switch (name) {
         // ===== 核心：本机已实现 =====
         // 文件系统
+        case 'getFilesDir':
+          // M7 验收工具（m7open）：欢迎页自动打开沙箱文件需要绝对路径（open:recent 的 path）
+          return this.filesDir;
         case 'IsLocalFile':
           return this.isLocalFile(args);
         case 'LocalFileRecents':

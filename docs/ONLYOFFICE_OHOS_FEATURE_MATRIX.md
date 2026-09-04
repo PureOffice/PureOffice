@@ -85,11 +85,12 @@
 - M4 打开三格式 + 保存闭环 ✅（2026-09-04 07:39 真机：编辑文本 → save.docx/sample.docx 内 `word/document.xml` 出现编辑内容，zip 校验通过）
 - M5 清理 POC（探针/自测/AscSaveBridge/AscConvertBridge 移除）✅ 回归无异常（2026-09-04 07:46 真机）
 - M5 补丁「关闭」链（web 语义，ff7a8ad）✅ 真机（2026-09-04 18:38）：文件菜单出现「关闭」项 → 点击 → 回欢迎页（`LSO_REQUEST_CLOSE -> welcome` 打点 + 截图双证）；同轮顺验 create:new（新建 docx 即点即开）
-- M7 文件进出（90c15ee）✅ 真机（2026-09-04）：
-  - recents 真数据 —— create:new/打开过的文档入列 recents.json，随重启持久显示（19:31 截图）
-  - `open:folder` → 系统「选择文件」picker 弹出（loginpage Open local file 与 FAB「打开」双入口，19:27/19:31 截图）；picker 内文件选用手指（系统 UI 不受 uitest 注入）
-  - **保存链端到端 ✅（20:11）**：自动编辑器（ascshim `&m7auto=1` 验收工具）→ `asc_AddText('M7AUTO-EDIT-OK')` → 模型读回 `cw=[M7AUTO]` → `asc_nativeGetFileData`(DOCY;v10, 5MB) → saveBinRaw → x2t doct_bin2docx → **save.docx 26071B zip 校验通过，`word/document.xml` 含 'M7AUTO-EDIT-OK'**（宿主机解压核验）
-  - 待办登记：xlsx/pptx 保存链（转换器 xlst_bin2xlsx/pptt_bin2pptx 已证实存在于 libx2t）未走完整链；系统保存对话框（导出 UI）为手指操作项
+- M7 文件进出（90c15ee + c590e15）✅ 真机全闭环（2026-09-04）：
+  - **打开**：`open:folder`（loginpage Open local file 官方命令 + FAB「打开」双入口）→ 系统「选择文件」picker 弹出；**外部文件 m7-open-test.docx → 渲染「M7-OPEN-TEST from external file」（第1页/共1页截图）**；三格式字节注入齐备（docx 756B/xlsx 50545B/pptx via LSO_OPEN_OK）
+  - **保存三格式**：自动验收工具（`&m7auto=1` 仅显式带参触发）→ 序列化（DOCY/XLSY/PPTY;v10）→ saveBinRaw → x2t 按目标后缀选转换器 → **docx 26071B（document.xml 含 'M7AUTO-EDIT-OK'）/ xlsx 22810B（workbook+sheet1 合法）/ pptx 13392B（slide1 合法）**，全部 zip 校验通过
+  - **导出/另存为**：编辑页「导出」FAB → 系统「选择路径」对话框（文件名自动带出）→「保存」→ **Docs/sample.pptx 13392B 落盘，md5 与保存链产物完全一致（d74fe148…）**
+  - **recents 真数据**：打开过的文件（sample.pptx/xlsx、m7-open-test.docx、Unnamed.docx）随重启持久显示
+  - 注意：cell（xlsx）打开耗时 40-60s（wb/工具栏 GUI 懒建，v13 已知）；「正在保存文档」快速完成
 
 ## 6. 后续升级路线（建议次序）
 
