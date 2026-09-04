@@ -8,7 +8,7 @@ import { x2tConvertSync, x2tVersion } from '../common/x2t';
 import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
 
 /** 页面 cache-bust：每次 rawfile 变更后递增（override rawfileLoader 剥离 query 的缓存） */
-const VERSION_BUMP = 58;
+const VERSION_BUMP = 59;
 
 /** 桌面命令处理器：loginpage sdk.command/open:recent → EditorPage 业务动作 */
 class ShellCommandHandler implements AscCommandHandler {
@@ -147,7 +147,26 @@ struct EditorPage {
     if (cmd === 'save:bin') {
       return this.saveBinRaw(param);
     }
-    // 其余桌面命令（open:folder / files:check / go:folder ...）M5 登记降级，当前 no-op
+    if (cmd === 'go:folder') {
+      // 官方桌面"返回"（FileMenu 返回到文档列表）→ Desktop.process('goback')
+      console.error('GOBACK -> welcome');
+      this.controller.loadUrl(this.homeUrl());
+      return 'true';
+    }
+    if (cmd === 'editor:event') {
+      // 官方桌面"关闭文件"（FileMenu miExit → file:exit → Desktop.js:640）
+      try {
+        const oe = JSON.parse(param) as Record<string, Object>;
+        if (String(oe['action']) === 'file:close') {
+          console.error('CLOSE_FILE -> welcome');
+          this.controller.loadUrl(this.homeUrl());
+        }
+      } catch (e) {
+        console.error('EDITOR_EVENT_ERR ' + String(e));
+      }
+      return 'true';
+    }
+    // 其余桌面命令（open:folder / files:check ...）M5 登记降级，当前 no-op
     return 'true';
   }
 
@@ -319,8 +338,9 @@ struct EditorPage {
     }
     // 页面 XHR 拉取沙箱 doct_bin（rawfileLoader 已拦 userfile/ → filesDir 返回真字节）→
     // window.postMessage openDocumentFromBinary（官方 api.js/Gateway/loadBinary →
-    // asc_openDocumentFromBytes，checkStreamSignature 嗅探 DOCY 签名 —— 与桌面 C++
-    // DesktopOfflineAppDocumentEndLoad 同构）。
+    // asc_openDocumentFromBytes，checkStreamSignature 嗅探 DOCY 签名 —— web/服务器链，
+    // 与 3.7 web 语义（编辑器页删除 AscDesktopEditor）配套；桌面 doffline 链路待桌面
+    // 字体/native 通路三件套齐备后再启用）。
     const js = '(function(){'
       + 'try{var x=new XMLHttpRequest();'
       + 'x.open("GET","http://localhost/userfile/open-in.bin?v="+Date.now(),true);'
