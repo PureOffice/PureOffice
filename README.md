@@ -15,6 +15,7 @@
 | [docs/ONLYOFFICE_OHOS_PORT_KEYPOINTS.md](docs/ONLYOFFICE_OHOS_PORT_KEYPOINTS.md) | **方案关键点**：DOCY v5/v10 家族、打开/保存链最终形态、传输规则、探针体系、构建部署细节与坑 |
 | [docs/ONLYOFFICE_SAVE_CHAIN_REVISED.md](docs/ONLYOFFICE_SAVE_CHAIN_REVISED.md) | 保存链全源码考古（为何不依赖 saveDocumentToZip/服务器） |
 | [docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md](docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md) | 正规化后的功能支持矩阵：已实现/降级/未实现能力 + 官方桥方法返回值契约 + 升级路线 |
+| [docs/ONLYOFFICE_OHOS_PRODUCT_ROADMAP.md](docs/ONLYOFFICE_OHOS_PRODUCT_ROADMAP.md) | 产品化路线图：P0/P1/P2 差距清单（文件进出/文档管理/恢复/合规等）+ M7-M9 建议里程碑 |
 
 ## 快速开始
 
