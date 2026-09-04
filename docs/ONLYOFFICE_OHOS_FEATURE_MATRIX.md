@@ -11,10 +11,13 @@
 
 | 能力 | 状态 | 说明 |
 |---|---|---|
-| 官方欢迎页（recents 面板 + 新建卡片） | ✅ | loginpage 官方产物；recents 由 `LocalFileRecents` 返回沙箱样本 |
+| 官方欢迎页（recents 面板 + 新建卡片） | ✅ | loginpage 官方产物；recents = 真数据（`LocalFileRecents` 返回沙箱 `recents.json`，打开过即入列） |
+| 打开本地文件（系统选择器） | ✅ | `open:folder`（loginpage「Open local file」官方命令）→ ArkTS `DocumentViewPicker.select`（docx/xlsx/pptx 过滤）→ 拷贝沙箱 → 现有 x2t 打开链；欢迎页左下「打开」FAB 即点即用 |
 | 打开 docx/xlsx/pptx | ✅ | recents → 沙箱源文件 → x2t docx2doct_bin 等 → 官方 `openDocumentFromBinary` → 引擎渲染 |
 | 编辑（文本/表格等） | ✅ | 官方编辑器全套 UI（工具栏/右侧栏/状态栏/缩放/分页） |
-| 保存（Ctrl+S / 自动保存） | ✅ | `asc_Save` 官方桌面协议骨架 → `asc_nativeGetFileData`（BinaryFileWriter → DOCY;v10）→ x2t doct_bin2docx → save.docx + 回写源文件；编辑内容进入 `word/document.xml`（真机核验） |
+| 保存（Ctrl+S / 自动保存） | ✅ | `asc_Save` 官方桌面协议骨架 → `asc_nativeGetFileData`（BinaryFileWriter → DOCY;v10）→ x2t 按目标后缀自动选 `doct_bin2docx`/`xlst_bin2xlsx`/`pptt_bin2pptx` → save.&lt;ext&gt; + 回写源文件；编辑内容进入 `word/document.xml`（真机核验） |
+| 导出 / 另存为 | ✅ | 编辑页左下「导出」按钮 → 自动触发官方保存 → 系统保存对话框（`DocumentViewPicker.save`）→ 写用户选定位置 |
+| 分享 | 降级 | SDK 无 ShareKit（@ohos.share 缺失）—— 登记 P1：SDK 升级后接 `systemShare` |
 | 新建空白 docx | ✅ | create:new（word）→ 官方空文档（`word/document/editor.js` getEmpty + bSerFormat 补丁） |
 | 缩放/状态栏/多视图 | ✅ | 官方 UI 原生实现（100% 起点，Factor 1.0 语义） |
 | 多页视图（新建提示） | ✅ | 官方功能（无 UI 依赖） |
@@ -82,6 +85,7 @@
 - M4 打开三格式 + 保存闭环 ✅（2026-09-04 07:39 真机：编辑文本 → save.docx/sample.docx 内 `word/document.xml` 出现编辑内容，zip 校验通过）
 - M5 清理 POC（探针/自测/AscSaveBridge/AscConvertBridge 移除）✅ 回归无异常（2026-09-04 07:46 真机）
 - M5 补丁「关闭」链（web 语义，ff7a8ad）✅ 真机（2026-09-04 18:38）：文件菜单出现「关闭」项 → 点击 → 回欢迎页（`LSO_REQUEST_CLOSE -> welcome` 打点 + 截图双证）；同轮顺验 create:new（新建 docx 即点即开）
+- M7 文件进出（90c15ee）✅ 真机（2026-09-04 19:31）：（1）recents 真数据 —— 打开过「Unnamed.docx」随重启持久显示；（2）`open:folder` → 系统「选择文件」picker 弹出（loginpage Open local file 与 FAB「打开」双入口验证）；（3）保存三格式引用转换器齐备（doct_bin2docx/xlst_bin2xlsx/pptt_bin2pptx）。**待用户手验**（系统 picker 交互不受 uitest 控制）：picker 选 `m7-open-test.docx`（已推送至 下载/OnlyOffice/Documents/）→ 打开渲染；编辑页「导出」→ 系统保存对话框落盘
 
 ## 6. 后续升级路线（建议次序）
 

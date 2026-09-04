@@ -93,6 +93,9 @@ cmake --build build/core3d/build -j$(nproc)
     [docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md](docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md)
   - 前期的 POC 迭代 1/2（v5/POC 链、v12 三格式）已被正规化链替代，此仓库以官方产物 + 少量
     适配补丁为基线
+- **M7 文件进出**：✅ 实现（2026-09-04，`90c15ee`）—— 打开本地文件（系统选择器链 + 欢迎页
+  「打开」FAB）、保存三格式（`save.<ext>` 自动选 doct/xlst/pptt 转换器）、导出/另存为（系统保存
+  对话框）、recents 真数据（recents.json）。系统 picker 内选文件动作待真机手指验收（uitest 无权限）
 - **M6+ 待办**：模板库（LocalFileTemplates）、PDF/打印、全屏窗口管理、宏/插件/拼写/云存储等
   （详见 FEATURE_MATRIX §6）
 - 引擎装配要点（维护者必读）：sdkjs 运行时 = min（sdk-all-min.js，核心+api）与 common
