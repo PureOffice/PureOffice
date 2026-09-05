@@ -31,7 +31,7 @@ cmake -S build/core3d -B build/core3d/build \
   -DCMAKE_TOOLCHAIN_FILE=$PWD/scripts/onlyoffice/core3d/ohos-arm64.toolchain.cmake
 cmake --build build/core3d/build -j$(nproc)
 
-# 2) 一键：生成 ascshim + 空模板 + HAP 打包 + 装机 + 重启
+# 2) 一键：增量装配（ascshim/空模板/注入 webapps/字体）+ HAP 打包 + 装机 + 重启
 OHOS_DEV=<ip:port> bash scripts/onlyoffice/deploy_ohos.sh
 
 # 3) 自动验收（可选）：启动带 m7accept 参数 → 自动打开样本并验证打开/保存链
@@ -56,7 +56,7 @@ scripts/onlyoffice/
   desktop/src/*.js                # 页面适配层（桥/打开/保存/欢迎页）
   make_empty_templates.py         # 新建空模板（empty.docx/xlsx/pptx）
   build_editors_ohos.py           # 装配：webapps/sdkjs/fonts/index.html/smoke/version.json
-  deploy_ohos.sh                  # 打包+安装+重启
+  deploy_ohos.sh                  # 一键增量：装配(ascshim/模板/注入) + 打包 + 安装 + 重启
   smoke/                          # 验收样本与诊断脚本（samples/ 子目录）
 docs/                             # 设计/关键点/功能矩阵/合规方案（见下表）
 ```
@@ -80,8 +80,8 @@ hdc -t <ip:port> shell snapshot_display -f /data/local/tmp/s.jpeg && hdc -t <ip:
 2. **改动未见效**：先确认进包（`strings HAP | grep <新字符串>`）——.ets 增量可能不刷新。
 3. **openDocument 字节必须 Uint8Array**——string 传入得到空模型或卡死。
 4. **ArkTS→页面传二进制必须 base64 信封**——runJavaScript 走字符串会损坏 NUL 字节。
-5. **产物不入库**：rawfile 运行时资源（webapps/sdkjs/fonts/…）是构建产物，由
-   `grunt-build.sh` 重生成；ascshim.js 与模板为生成产物入库跟踪。
+5. **产物不入库**：rawfile 运行时资源（webapps/sdkjs/fonts/ascshim.js/index.html/…）
+   全是构建产物，`grunt-build.sh` / `deploy_ohos.sh` 重生成；仅空模板与样本保留跟踪。
 6. **sdkjs 双清单**：核心（sdk-all-min.js）与 common（sdk-all.js）由官方 loadSdk 自动加载，
    勿手工预载/向清单加类文件（加载顺序错误 = 字体链崩溃/打开静默失败）。
 
