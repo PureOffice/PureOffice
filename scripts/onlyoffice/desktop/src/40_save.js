@@ -231,6 +231,11 @@
         if (_d && _d.className.indexOf('devider') >= 0) { _d.style.display = 'none'; }
         var _s = document.querySelector('.tool-menu a[action="settings"]');
         if (_s && _s.closest) { _s.closest('.menu-item').style.display = 'none'; }
+        // 「模板」页隐藏（2026-09-05 用户决策）：官方模板列表走桌面原生桥
+        // sdk.LocalFileTemplates()（模板文件为加密名，名称/预览映射在原生层）——
+        // 离线 web 语义无此数据，恒"未找到结果"。同云服务/设置（空入口）处理。
+        var _t = document.querySelector('.tool-menu a[action="templates"]');
+        if (_t && _t.closest) { _t.closest('.menu-item').style.display = 'none'; }
       };
       var _wobs = new MutationObserver(_whide);
       if (document.body) {

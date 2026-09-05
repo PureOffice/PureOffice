@@ -329,4 +329,20 @@ release 升级会冻结）；构建切官方 --desktop 语义；B 架构补 nati
 - Header.js:798 `this.branding = this.options.customization`；
   :886-888 `branding.logo.visible===false → #header-logo.addClass('hidden')`。
 - 修法：ascshim `editorConfig.customization` 加 `logo: {visible: false}`（与
-  goback/close 同机制，非 DOM hack）。真机✓（工具栏最左只有打开/撤销/重做）。
+  goback/close 同机制，非 DOM hack）。真机✓（工具栏最左只有打开/撤销/重做）。## 16. 欢迎页导航精简终态（2026-09-05，#68 同批，1.4 真机✓）
+
+欢迎页（loginpage）左侧导航隐藏三项——均为「官方语义未接入的入口/或纯装饰」：
+- **云服务**（`#idx-sidebar-portals`，panelconnect 灌入 providers/添加云 + 其后 devider
+  分隔线）：桌面云连接功能，离线无 providers 恒空；一起隐藏防孤线残留。
+- **设置**（`.tool-menu a[action="settings"]` 父 menu-item）：官方设置面板
+  （语言/主题等），本产品定为默认 zh-CN 且无桌面设置存储。
+- **模板**（`.tool-menu a[action="templates"]`，2026-09-05 用户反馈"模板页没东西"
+  后决策隐藏）：官方模板列表走桌面原生桥 `window.sdk.LocalFileTemplates()`；
+  离线 web 语义无此桥 → 恒「未找到结果」。官方模板资源在
+  `third_party/desktop-apps/common/templates/<LANG>/`（EN 19M，文件为**加密编码名**
+  的 .dotx 等，如 `[32]I5UWM5…======.dotx`——名称/预览映射在原生层，离线取不到；
+  故即使拷贝文件，列表也只会是编码怪名——完整实现无收益，用户决策隐藏）。
+
+实现：40_save.js §3.10 MutationObserver（panels.js $(document).ready 渲染后隐藏、
+防 re-render 弹回；`.closest('.menu-item')` 精确到项，不动其余入口——官方无配置
+开关，模板静态渲染，故适配层处理）。欢迎页当前 nav：主页 / 打开本地文件。
