@@ -180,7 +180,14 @@
                 //   → Gateway.requestClose()（ascshim 已覆写回欢迎页）
                 canRequestClose: true,
                 customization: {
-                  about: false, feedback: {url: 'https://helpdesk.onlyoffice.com/?desktop=true'},
+                  // about 与反馈入口：左菜单「支持」(tipSupport 'Feedback & Support') 渲染
+                  // 条件 = feedback.url 非空（LeftMenu.js:117）——离线单机无 helpdesk 语义，
+                  // 2026-09-05 用户：隐藏（无用）。about:false 同（官方语义）。
+                  about: false, feedback: false,
+                  // 文件菜单「帮助」（Main.js:1759 canHelp=help!==false）与「提出功能建议」
+                  //（Main.js:1766 canSuggest=suggestFeature!==false）——离线单机无 docs/
+                  // 功能建议服务，2026-09-05 用户：去掉（官方语义开关，非 UI hack）。
+                  help: false, suggestFeature: false,
                   // web 语义"关闭/返回"：Main.js canBack = customization.goback.url 非空
                   // → 头部/文件菜单"返回"按钮 → goback → parent.location.href = url
                   //（web 编辑器层唯一的官方回欢迎页机制；Desktop 菜单"关闭文件"项待桌面
@@ -192,7 +199,12 @@
                   // Header.js:798 this.branding = this.options.customization；
                   // :886-888 branding.logo.visible===false → #header-logo.addClass('hidden')
                   logo: {visible: false},
-                  close: {visible: true, text: '关闭'}
+                  close: {visible: true, text: '关闭'},
+                  // 关闭自动保存（2026-09-05 用户：桌面使用习惯=用户主动保存，不应
+                  // "有修改就自动保存"——autosave 是 Web 服务器版语义；桌面版无）。
+                  // 官方语义：ReviewChanges.js:897 customization.autosave===false →
+                  // settings-autosave 初始 0（仅 localStorage 无缓存时）。
+                  autosave: false
                 }
               },
               document: {
@@ -433,3 +445,4 @@
     //      安装步骤 + EditorPage smoke 的 AI 探针（git 历史可查）。
 
     // ---- 3.11（已撤回，见 3.10 说明）。
+

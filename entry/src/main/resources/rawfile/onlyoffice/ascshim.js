@@ -103,6 +103,21 @@
   //      toolbar 轮询）——凭界面元素/定时器判状态的旧做法，按稳定化计划（2026-09-05）
   //      移除；文档就绪判据以官方 asc_onDocumentContentReady 为权威事件（见 30_open/40_save）。
 
+  // ---- 自动保存：默认不开启（2026-09-05 用户决策：支持自动保存，但默认关——用户可在
+  //      高级设置自行开启，且官方语义为全局持久）。此处只在「从未设置过」时补默认 0
+  //      （开关首次显现=关）；用户切过（0/1）则不覆盖——尊重用户全局选择。引擎侧初始值
+  //      另由 customization.autosave=false（Main.js:1899 null 分支）兜底。三编辑器前缀
+  //      已实测：de=documenteditor / sse=spreadsheet / pe=presentation（Main.js:1436/1030/1004）。
+  try {
+    var _asa = ['de', 'sse', 'pe'];
+    for (var _ai = 0; _ai < _asa.length; _ai++) {
+      try {
+        var _key = _asa[_ai] + '-settings-autosave';
+        if (localStorage.getItem(_key) === null) { localStorage.setItem(_key, '0'); }
+      } catch (e) {}
+    }
+  } catch (e) {}
+
   // ---- 页面公共工具：Uint8Array → base64（0x8000 分块 btoa，避免大缓冲 apply 栈爆；
   //      2026-09-05 审查收敛：30_open m7auto / 40_save asc_Save / 40_save saveDocument
   //      三处重复实现至此单点） ----
@@ -538,6 +553,55 @@
       };
     }
 
+    // ---- 2.6 recents 删除/清除后页面刷新（2026-09-05 fix「从列表中删除无效」）----
+    // 官方面板动作链：Remove from list → sdk.LocalFileRemoveRecent(fileid)；Clear →
+    //   sdk.LocalFileRemoveAllRecents()。官方桌面 C++ 删除成功后重灌 Recents_Dump
+    //   （window.onupdaterecents）刷新面板；B 架构无 C++ → 本段在原生命令返回成功
+    //   （ascBridge 真删 recents.json）后调 sdk.LocalFileRecents()（native 返回最新
+    //   清单）→ window.onupdaterecents / sdk.fire → 官方面板刷新（2.5 桥转发链）。
+    // 时机：sdk 由 loginpage 页面脚本创建（ascshim 先载）→ 轮询等待（60s 上限，超时
+    //   静默 —— 功能本体（真删）不受影响，仅面板刷新缺席）。
+    (function () {
+      var _ppe = (window.location || {}).pathname || '';
+      if (_ppe.indexOf('/onlyoffice/index.html') < 0) { return; }
+      var _nre = 0;
+      var _wrapSdkRec = function() {
+        try {
+          var _s = window.sdk;
+          if (!_s || typeof _s.LocalFileRemoveRecent !== 'function' || typeof _s.LocalFileRecents !== 'function') {
+            if ((_nre = (_nre || 0) + 1) < 300) { setTimeout(_wrapSdkRec, 200); return; }
+            return;
+          }
+          if (window.__lsoSdkRecentsWrapped) { return; }
+          window.__lsoSdkRecentsWrapped = true;
+          var _refres = function() {
+            try {
+              var _d = _s.LocalFileRecents();
+              var _arr = typeof _d === 'string' ? JSON.parse(_d) : (_d || []);
+              if (window.onupdaterecents) { window.onupdaterecents(_arr); }
+              else if (_s.fire) { _s.fire('onupdaterecents', _arr); }
+            } catch (rf) { console.error('LSO_RECENTS_REFRESH_ERR ' + String(rf)); }
+          };
+          var _rmr = _s.LocalFileRemoveRecent;
+          _s.LocalFileRemoveRecent = function(id) {
+            var _r = _rmr.apply(this, arguments);
+            if (_r === '1' || _r === 1 || _r === true) { _refres(); }
+            return _r;
+          };
+          var _ral = _s.LocalFileRemoveAllRecents;
+          if (typeof _ral === 'function') {
+            _s.LocalFileRemoveAllRecents = function() {
+              var _r2 = _ral.apply(this, arguments);
+              if (_r2 === '1' || _r2 === 1 || _r2 === true) { _refres(); }
+              return _r2;
+            };
+          }
+          console.error('LSO_SDK_RECENTS_WRAPPED');
+        } catch (sx) {}
+      };
+      _wrapSdkRec();
+    })();
+
     // ---- 3. 官方 InitJSContext shim（原始 Extract） ----
     window.AscDesktopEditor.CreateEditorApi = function(api) {
     api && api.asc_registerCallback('asc_onGetEditorPermissions', function(e) { window.AscDesktopEditor.CheckCloudFeatures(e.asc_getLicenseType()); });
@@ -914,7 +978,14 @@
                 //   → Gateway.requestClose()（ascshim 已覆写回欢迎页）
                 canRequestClose: true,
                 customization: {
-                  about: false, feedback: {url: 'https://helpdesk.onlyoffice.com/?desktop=true'},
+                  // about 与反馈入口：左菜单「支持」(tipSupport 'Feedback & Support') 渲染
+                  // 条件 = feedback.url 非空（LeftMenu.js:117）——离线单机无 helpdesk 语义，
+                  // 2026-09-05 用户：隐藏（无用）。about:false 同（官方语义）。
+                  about: false, feedback: false,
+                  // 文件菜单「帮助」（Main.js:1759 canHelp=help!==false）与「提出功能建议」
+                  //（Main.js:1766 canSuggest=suggestFeature!==false）——离线单机无 docs/
+                  // 功能建议服务，2026-09-05 用户：去掉（官方语义开关，非 UI hack）。
+                  help: false, suggestFeature: false,
                   // web 语义"关闭/返回"：Main.js canBack = customization.goback.url 非空
                   // → 头部/文件菜单"返回"按钮 → goback → parent.location.href = url
                   //（web 编辑器层唯一的官方回欢迎页机制；Desktop 菜单"关闭文件"项待桌面
@@ -926,7 +997,12 @@
                   // Header.js:798 this.branding = this.options.customization；
                   // :886-888 branding.logo.visible===false → #header-logo.addClass('hidden')
                   logo: {visible: false},
-                  close: {visible: true, text: '关闭'}
+                  close: {visible: true, text: '关闭'},
+                  // 关闭自动保存（2026-09-05 用户：桌面使用习惯=用户主动保存，不应
+                  // "有修改就自动保存"——autosave 是 Web 服务器版语义；桌面版无）。
+                  // 官方语义：ReviewChanges.js:897 customization.autosave===false →
+                  // settings-autosave 初始 0（仅 localStorage 无缓存时）。
+                  autosave: false
                 }
               },
               document: {
@@ -1167,6 +1243,7 @@
     //      安装步骤 + EditorPage smoke 的 AI 探针（git 历史可查）。
 
     // ---- 3.11（已撤回，见 3.10 说明）。
+
   // ---- 3.8.4 序列化公共工具：asc_nativeGetFileData 需要 window.native.Save_End 存在
   //      （官方 Local/api.js 依赖），但全局挂 stub 会让 editorscommon loadScript 走
   //      "本地加载已成功"假分支（onSuccess 直接返回 → 模块缺失 → 文档打不开）——
@@ -1208,6 +1285,18 @@
         try {
           // 官方 Local/api.js:158 守卫（省略 History 依赖项）
           if (isResaveAttack === true || isSaveAs === true) { console.error('LSO_SAVE_GUARD resave/saveas'); return; }
+          // 新建文档无保存目标（2026-09-05 用户语义确认）：autosave 直接短路——
+          // 既不序列化（5MB 空转）也不回写（无 target）；用户保存（!isNoUserSave）
+          // 走正常链（无身份 → ArkTS 弹另存为）。目标判定 = save:type 同步询问
+          //（EditorPage 单点状态；页面无本地推断——避免两头状态不同步的失效窗口）。
+          if (true === isNoUserSave) {
+            var _st = 'sandbox';
+            try { _st = String(window.AscNative && window.AscNative._call('save:type', []) || 'sandbox'); } catch (stx) {}
+            if ('none' === _st) {
+              console.error('LSO_AUTOSAVE_SKIP (no save target)');
+              return;
+            }
+          }
           if (true !== isNoUserSave) { this.IsUserSave = true; }
           if (!(this.canSave && !this.isLongAction() && !this.isGroupActions())) {
             console.error('LSO_SAVE_GUARD canSave=' + this.canSave + ' long=' + this.isLongAction()
@@ -1227,8 +1316,18 @@
             });
             var _r2 = '';
             if (_nbin && _nbin.byteLength) {
-              _r2 = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_nbin)]));
-              console.error('LSO_NATIVE_SAVE len=' + _nbin.byteLength + ' ret=' + _r2);
+              // 2026-09-05：第三参 = 用户保存标志（isNoUserSave 取反）——引擎桌面语义
+              // autosave（打开/变更自动保存，isNoUserSave=true）不触发「最近使用」补录
+              //（新建窗口未保存也从列表干净）；用户主动保存（Ctrl+S/保存按钮）才补录。
+              var _userSave = true === isNoUserSave ? 0 : 1;
+              _r2 = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_nbin), _userSave]));
+              console.error('LSO_NATIVE_SAVE len=' + _nbin.byteLength + ' user=' + _userSave + ' ret=' + _r2);
+              // 复位官方「正在保存文档…」状态（2026-09-05 用户反馈：状态栏永久停留——
+              // askSaveChanges 建立保存中状态，官方服务器链由 saveDocument 完成回调驱动
+              // _onSaveCallback 复位；本地链无完成通道 → 同步落盘返回后直接复位）。
+              try {
+                if (typeof _t._onSaveCallback === 'function') { _t._onSaveCallback(null); }
+              } catch (scx) {}
             } else {
               console.error('LSO_NATIVE_SAVE_EMPTY');
             }
@@ -1287,8 +1386,11 @@
         try {
           var _u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
           if (_u8.length > 200 * 1024 * 1024) { console.error('LSO_SAVEDOC_TOOBIG ' + _u8.length); return; }
-          var _r = window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_u8)]);
+          var _r = window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_u8), 1]); // 用户保存语义（recents 补录，2026-09-05）
           console.error('LSO_SAVEDOC_CALL ret=' + String(_r).slice(0, 60));
+          try {
+            if (typeof window.editor && window.editor._onSaveCallback === 'function') { window.editor._onSaveCallback(null); }
+          } catch (scx2) {}
         } catch (se) { console.error('LSO_SAVEDOC_ERR ' + String(se)); }
       };
     }
@@ -1405,6 +1507,32 @@
         // 离线 web 语义无此数据，恒"未找到结果"。同云服务/设置（空入口）处理。
         var _t = document.querySelector('.tool-menu a[action="templates"]');
         if (_t && _t.closest) { _t.closest('.menu-item').style.display = 'none'; }
+        // 「最近使用文件」面板隐藏（2026-09-05 用户决策：暂不支持——B 架构文件位置为
+        // picker 授权型 uri，授权会被回收（重启/会话过期）——「最近使用」路径语义不
+        // 成立，半支持暴露假路径；面板=#box-recent（含标题+列表）。代码（recents.ets/
+        // 打开链）保留，待持久文件位置机制后恢复。
+        var _rb = document.getElementById('box-recent');
+        if (_rb) { _rb.style.display = 'none'; }
+        // 拖放功能块整体隐藏（2026-09-05 用户：『将文件拖拽到此处，或』+「选择文件」
+        // 按钮无意义（浏览器拖放不触发文件打开；打开入口保留左侧菜单）——DOM=官方
+        // DnDFileZone 渲染的 .dnd-zone。
+        var _dz = document.querySelector('.dnd-zone');
+        if (_dz) { _dz.style.display = 'none'; }
+        // 新建文档入口 2×2 网格（2026-09-05 用户：4 个入口一行排列过挤，改两行）。
+        // 官方 .document-creation-grid 为 flex 一行（item 固定 172×172、gap 32）；
+        // 用 inline 改（同 dnd-zone——<style> 注入按源顺序层叠，ascshim 头部引入在
+        // 官方 <style> 之前会被官方 display:flex 覆盖；且本段必须置于 _whide 内由
+        // MutationObserver 反复执行——一次性执行时网格尚未渲染，2026-09-05 实测两坑）。
+        var _g = document.querySelector('.document-creation-grid');
+        if (_g) {
+          _g.style.display = 'grid';
+          _g.style.gridTemplateColumns = 'repeat(2, 172px)';
+          _g.style.gap = '16px 32px';
+          // grid 的 justify-content 默认 start（左对齐）——官方 flex 版居中来自
+          // media 规则 justify-content:center，改 grid 后需显式补（2026-09-05
+          // 用户：还原（非最大化）窗口网格不居中，最大化居中是因为中央列宽差异掩盖）。
+          _g.style.justifyContent = 'center';
+        }
       };
       var _wobs = new MutationObserver(_whide);
       if (document.body) {

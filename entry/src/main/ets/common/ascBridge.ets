@@ -14,7 +14,7 @@
 // 未注入时降级 console.error（hilog）。
 // ============================================================================
 
-import { readRecents, RecentItem } from './recents';
+import { readRecents, removeRecent, clearRecents, RecentItem } from './recents';
 import { bufToB64 } from './bytes';
 
 /** LocalFileRecents 输出形状（loginpage parseRecent 消费的 5 字段，与 RecentItem 同构） */
@@ -57,7 +57,7 @@ export class AscNativeBridge {
 /** 业务回调接口：EditorPage 注入，处理"桌面命令"类动作（打开/新建文件等） */
 export interface AscCommandHandler {
   /** 处理桌面命令；返回 JSON 编码结果（'true'/'""'/对象） */
-  onCommand(cmd: string, param: string): string;
+  onCommand(cmd: string, param: string, userFlag?: number): string;
 }
 
 /** 请求分派中心 */
@@ -85,6 +85,13 @@ export class AscNativeDispatch {
     this.localStartOpenCb = cb;
   }
 
+  /** 保存目标读取（页面 asc_Save 经 save:type 同步询问）：
+   *  'none'（新建无身份：autosave 跳过/用户保存→另存为）| 'sandbox' | 'uri' */
+  private saveTargetReader: (() => string) | null = null;
+  setSaveTargetReader(fn: (() => string) | null): void {
+    this.saveTargetReader = fn;
+  }
+
   /** rawfile 读取（EditorPage 注入 getRawFileContentSync；null = 桥未接 → '""'）。
    *  LoadFontBase64 依赖（2026-09-05 中文方块根因修复，见 loadFontBase64）。 */
   private rawRead: ((path: string) => Uint8Array | null) | null = null;
@@ -95,8 +102,10 @@ export class AscNativeDispatch {
   private execCommand(args: BridgeArgs): string {
     const cmd = typeof args[0] === 'string' ? (args[0] as string) : '';
     const param = typeof args[1] === 'string' ? (args[1] as string) : '';
+    // 第三参 = 用户保存标志（1 用户保存 / 0 autosave；ascshim 40_save 传；缺省 1 兜底）
+    const userFlag = typeof args[2] === 'number' ? args[2] : 1;
     this.log('[AscNative:execCommand] ' + cmd + ' ' + param.slice(0, 200));
-    return this.handler ? this.handler.onCommand(cmd, param) : 'true';
+    return this.handler ? this.handler.onCommand(cmd, param, userFlag) : 'true';
   }
 
   invoke(name: string, args: BridgeArgs): string {
@@ -110,9 +119,26 @@ export class AscNativeDispatch {
           // 官方：判断下载的临时文件是否为本地文件（桌面模式恒 "local"）
           return 'true';
         case 'LocalFileRecents':
-          return this.localFileRecents();
+          // 2026-09-05 用户决策：暂不支持「最近使用文件」——B 架构文件位置是 picker
+          // 授权型 uri（授权会被回收），列表路径语义不成立；面板已 UI 隐藏（40_save
+          // 3.10）。数据端同步封闭（recents.json 读写保留，待持久位置机制再恢复）。
+          return '[]';
+        case 'save:type':
+          // v2 保存目标询问（页面 asc_Save 同步调用；缺省 'sandbox' 兜底——页面侧
+          // autosave 短路只认 'none'，取不到时放行不丢数据）
+          return this.saveTargetReader ? this.saveTargetReader() : 'sandbox';
         case 'LocalFileRemoveRecent':
+          // 官方面板「从列表中移除」→ sdk.LocalFileRemoveRecent(fileid) → 本 case。
+          // 2026-09-05：原硬编码 '1'（假成功、列表永远清不掉——用户实测）——真删除
+          // （按 id，recents.json 去条；删除后页面侧 ascshim 2.6 会 fire onupdaterecents
+          // 刷新面板，见 20_bridge 2.6 段）。
+          return removeRecent(this.filesDir, Number(typeof args[0] === 'object'
+            ? (args[0] as Record<string, Object>)['id'] ?? 0
+            : args[0] ?? 0)) ? '1' : '0';
         case 'LocalFileRemoveAllRecents':
+          // 官方面板「清除」→ sdk.LocalFileRemoveAllRecents() → 本 case（全清 + 同上刷新）
+          this.log('LocalFileRemoveAllRecents');
+          return clearRecents(this.filesDir) ? '1' : '0';
         case 'LocalFileRemoveRecover':
         case 'LocalFileRemoveAllRecovers':
           return '1';

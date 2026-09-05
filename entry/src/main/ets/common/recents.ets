@@ -62,6 +62,52 @@ export function readRecents(filesDir: string): RecentItem[] | null {
   }
 }
 
+/**
+ * 删除一条最近记录（按 id——官方面板「从列表中移除」sdk.LocalFileRemoveRecent(fileid)
+ * 的 fileid 即本 id；2026-09-05 此前 ascBridge 硬编码返回 '1' 假成功 → 列表从不清除）。
+ * 返回 false：文件损坏（拒绝覆盖，同 readRecents 保护）或写失败。
+ */
+export function removeRecent(filesDir: string, id: number): boolean {
+  try {
+    const arr = readRecents(filesDir);
+    if (arr === null) {
+      return false;
+    }
+    const next = arr.filter((r) => r.id !== id);
+    if (next.length !== arr.length || arr.length === 0) {
+      return writeRecents(filesDir, next);
+    }
+    return true; // 无此 id：列表本就无它（幂等）
+  } catch (e) {
+    return false;
+  }
+}
+
+/** 清空整个「最近使用」列表（官方面板「清除」→ sdk.LocalFileRemoveAllRecents() → 本函数） */
+export function clearRecents(filesDir: string): boolean {
+  try {
+    const arr = readRecents(filesDir);
+    if (arr === null) {
+      return false;
+    }
+    return writeRecents(filesDir, []);
+  } catch (e) {
+    return false;
+  }
+}
+
+/** 写回 recents.json（removeRecent/clearRecents 共用；损坏/空清单写 '[]'） */
+function writeRecents(filesDir: string, arr: RecentItem[]): boolean {
+  try {
+    const f = fs.openSync(filesDir + RECENTS_FILE, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+    fs.writeSync(f.fd, JSON.stringify(arr));
+    fs.closeSync(f);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 /** appendRecent 写入格式：UTC 秒精度 "YYYY-MM-DD HH:MM:SS"（loginpage 显示兼容） */
 function modifyedNow(): string {
   return new Date().toISOString().replace('T', ' ').substring(0, 19);

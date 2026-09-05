@@ -39,6 +39,18 @@
         try {
           // 官方 Local/api.js:158 守卫（省略 History 依赖项）
           if (isResaveAttack === true || isSaveAs === true) { console.error('LSO_SAVE_GUARD resave/saveas'); return; }
+          // 新建文档无保存目标（2026-09-05 用户语义确认）：autosave 直接短路——
+          // 既不序列化（5MB 空转）也不回写（无 target）；用户保存（!isNoUserSave）
+          // 走正常链（无身份 → ArkTS 弹另存为）。目标判定 = save:type 同步询问
+          //（EditorPage 单点状态；页面无本地推断——避免两头状态不同步的失效窗口）。
+          if (true === isNoUserSave) {
+            var _st = 'sandbox';
+            try { _st = String(window.AscNative && window.AscNative._call('save:type', []) || 'sandbox'); } catch (stx) {}
+            if ('none' === _st) {
+              console.error('LSO_AUTOSAVE_SKIP (no save target)');
+              return;
+            }
+          }
           if (true !== isNoUserSave) { this.IsUserSave = true; }
           if (!(this.canSave && !this.isLongAction() && !this.isGroupActions())) {
             console.error('LSO_SAVE_GUARD canSave=' + this.canSave + ' long=' + this.isLongAction()
@@ -58,8 +70,18 @@
             });
             var _r2 = '';
             if (_nbin && _nbin.byteLength) {
-              _r2 = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_nbin)]));
-              console.error('LSO_NATIVE_SAVE len=' + _nbin.byteLength + ' ret=' + _r2);
+              // 2026-09-05：第三参 = 用户保存标志（isNoUserSave 取反）——引擎桌面语义
+              // autosave（打开/变更自动保存，isNoUserSave=true）不触发「最近使用」补录
+              //（新建窗口未保存也从列表干净）；用户主动保存（Ctrl+S/保存按钮）才补录。
+              var _userSave = true === isNoUserSave ? 0 : 1;
+              _r2 = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_nbin), _userSave]));
+              console.error('LSO_NATIVE_SAVE len=' + _nbin.byteLength + ' user=' + _userSave + ' ret=' + _r2);
+              // 复位官方「正在保存文档…」状态（2026-09-05 用户反馈：状态栏永久停留——
+              // askSaveChanges 建立保存中状态，官方服务器链由 saveDocument 完成回调驱动
+              // _onSaveCallback 复位；本地链无完成通道 → 同步落盘返回后直接复位）。
+              try {
+                if (typeof _t._onSaveCallback === 'function') { _t._onSaveCallback(null); }
+              } catch (scx) {}
             } else {
               console.error('LSO_NATIVE_SAVE_EMPTY');
             }
@@ -118,8 +140,11 @@
         try {
           var _u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
           if (_u8.length > 200 * 1024 * 1024) { console.error('LSO_SAVEDOC_TOOBIG ' + _u8.length); return; }
-          var _r = window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_u8)]);
+          var _r = window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_u8), 1]); // 用户保存语义（recents 补录，2026-09-05）
           console.error('LSO_SAVEDOC_CALL ret=' + String(_r).slice(0, 60));
+          try {
+            if (typeof window.editor && window.editor._onSaveCallback === 'function') { window.editor._onSaveCallback(null); }
+          } catch (scx2) {}
         } catch (se) { console.error('LSO_SAVEDOC_ERR ' + String(se)); }
       };
     }
@@ -236,6 +261,32 @@
         // 离线 web 语义无此数据，恒"未找到结果"。同云服务/设置（空入口）处理。
         var _t = document.querySelector('.tool-menu a[action="templates"]');
         if (_t && _t.closest) { _t.closest('.menu-item').style.display = 'none'; }
+        // 「最近使用文件」面板隐藏（2026-09-05 用户决策：暂不支持——B 架构文件位置为
+        // picker 授权型 uri，授权会被回收（重启/会话过期）——「最近使用」路径语义不
+        // 成立，半支持暴露假路径；面板=#box-recent（含标题+列表）。代码（recents.ets/
+        // 打开链）保留，待持久文件位置机制后恢复。
+        var _rb = document.getElementById('box-recent');
+        if (_rb) { _rb.style.display = 'none'; }
+        // 拖放功能块整体隐藏（2026-09-05 用户：『将文件拖拽到此处，或』+「选择文件」
+        // 按钮无意义（浏览器拖放不触发文件打开；打开入口保留左侧菜单）——DOM=官方
+        // DnDFileZone 渲染的 .dnd-zone。
+        var _dz = document.querySelector('.dnd-zone');
+        if (_dz) { _dz.style.display = 'none'; }
+        // 新建文档入口 2×2 网格（2026-09-05 用户：4 个入口一行排列过挤，改两行）。
+        // 官方 .document-creation-grid 为 flex 一行（item 固定 172×172、gap 32）；
+        // 用 inline 改（同 dnd-zone——<style> 注入按源顺序层叠，ascshim 头部引入在
+        // 官方 <style> 之前会被官方 display:flex 覆盖；且本段必须置于 _whide 内由
+        // MutationObserver 反复执行——一次性执行时网格尚未渲染，2026-09-05 实测两坑）。
+        var _g = document.querySelector('.document-creation-grid');
+        if (_g) {
+          _g.style.display = 'grid';
+          _g.style.gridTemplateColumns = 'repeat(2, 172px)';
+          _g.style.gap = '16px 32px';
+          // grid 的 justify-content 默认 start（左对齐）——官方 flex 版居中来自
+          // media 规则 justify-content:center，改 grid 后需显式补（2026-09-05
+          // 用户：还原（非最大化）窗口网格不居中，最大化居中是因为中央列宽差异掩盖）。
+          _g.style.justifyContent = 'center';
+        }
       };
       var _wobs = new MutationObserver(_whide);
       if (document.body) {

@@ -14,7 +14,13 @@ HAP="$ROOT/entry/build/default/outputs/default/entry-default-signed.hap"
 # 工具链/设备环境（可用环境变量覆盖；默认值=当前开发机路径）
 HDC="${OHOS_HDC:-/apps/harmony/sdk/default/openharmony/toolchains/hdc}"
 HVIGORW="${OHOS_HVIGORW:-/apps/harmony/bin/hvigorw}"
-DEV="${OHOS_DEV:-192.168.1.8:33363}"
+# 目标设备必须显式指定，无默认值（2026-09-05 用户要求：默认 192.168.1.8 导致
+# 忘设 OHOS_DEV 时静默装错设备；用法前缀：OHOS_DEV=192.168.1.4:44959 bash deploy_ohos.sh）
+DEV="${OHOS_DEV:-}"
+if [ -z "$DEV" ]; then
+  echo "错误：未指定目标设备。用法：OHOS_DEV=<ip:port> bash $0" >&2
+  exit 1
+fi
 BUNDLE=app.hackeris.winehua
 
 cd "$ROOT"

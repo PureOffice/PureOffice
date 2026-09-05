@@ -126,6 +126,55 @@
       };
     }
 
+    // ---- 2.6 recents 删除/清除后页面刷新（2026-09-05 fix「从列表中删除无效」）----
+    // 官方面板动作链：Remove from list → sdk.LocalFileRemoveRecent(fileid)；Clear →
+    //   sdk.LocalFileRemoveAllRecents()。官方桌面 C++ 删除成功后重灌 Recents_Dump
+    //   （window.onupdaterecents）刷新面板；B 架构无 C++ → 本段在原生命令返回成功
+    //   （ascBridge 真删 recents.json）后调 sdk.LocalFileRecents()（native 返回最新
+    //   清单）→ window.onupdaterecents / sdk.fire → 官方面板刷新（2.5 桥转发链）。
+    // 时机：sdk 由 loginpage 页面脚本创建（ascshim 先载）→ 轮询等待（60s 上限，超时
+    //   静默 —— 功能本体（真删）不受影响，仅面板刷新缺席）。
+    (function () {
+      var _ppe = (window.location || {}).pathname || '';
+      if (_ppe.indexOf('/onlyoffice/index.html') < 0) { return; }
+      var _nre = 0;
+      var _wrapSdkRec = function() {
+        try {
+          var _s = window.sdk;
+          if (!_s || typeof _s.LocalFileRemoveRecent !== 'function' || typeof _s.LocalFileRecents !== 'function') {
+            if ((_nre = (_nre || 0) + 1) < 300) { setTimeout(_wrapSdkRec, 200); return; }
+            return;
+          }
+          if (window.__lsoSdkRecentsWrapped) { return; }
+          window.__lsoSdkRecentsWrapped = true;
+          var _refres = function() {
+            try {
+              var _d = _s.LocalFileRecents();
+              var _arr = typeof _d === 'string' ? JSON.parse(_d) : (_d || []);
+              if (window.onupdaterecents) { window.onupdaterecents(_arr); }
+              else if (_s.fire) { _s.fire('onupdaterecents', _arr); }
+            } catch (rf) { console.error('LSO_RECENTS_REFRESH_ERR ' + String(rf)); }
+          };
+          var _rmr = _s.LocalFileRemoveRecent;
+          _s.LocalFileRemoveRecent = function(id) {
+            var _r = _rmr.apply(this, arguments);
+            if (_r === '1' || _r === 1 || _r === true) { _refres(); }
+            return _r;
+          };
+          var _ral = _s.LocalFileRemoveAllRecents;
+          if (typeof _ral === 'function') {
+            _s.LocalFileRemoveAllRecents = function() {
+              var _r2 = _ral.apply(this, arguments);
+              if (_r2 === '1' || _r2 === 1 || _r2 === true) { _refres(); }
+              return _r2;
+            };
+          }
+          console.error('LSO_SDK_RECENTS_WRAPPED');
+        } catch (sx) {}
+      };
+      _wrapSdkRec();
+    })();
+
     // ---- 3. 官方 InitJSContext shim（原始 Extract） ----
 @@SHIM@@
 

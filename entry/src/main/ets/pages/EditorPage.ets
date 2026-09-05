@@ -1,6 +1,7 @@
 import { webview } from '@kit.ArkWeb';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
+import { promptAction } from '@kit.ArkUI';
 import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { loadRaw } from '../common/rawfileLoader';
@@ -54,6 +55,18 @@ struct EditorPage {
 
   /** M7 诊断直达配额：onPageEnd 时打开样本（welcome 完成后才触发，避开加载竞争） */
   private m7DirectQueued: boolean = false;
+  /** 启动清 webview 缓存 guard（2026-09-05：once per app 启动） */
+  private cacheCleared: boolean = false;
+  /**
+   * 保存目标（单一事实源）——页面 asc_Save 经 save:type 同步询问本值：
+   *   'none'    —— 新建（无文件身份）：用户保存=弹另存为；autosave=跳过
+   *   'sandbox' —— 打开的文件：保存写回沙箱源文件（recents 路径）
+   *   'uri'     —— 用户另存为的真实位置：保存写回 uri（+沙箱镜像兜底）
+   * 页面 asc_Save 经 save:type 同步询问本值（40_save 无本地状态）；
+   * 用户另存为成功后 'none' → 'uri'（会话内唯一演进点）。
+   */
+  private saveTarget: string = 'none';
+  private savePath: string = '';
 
   /**
    * 统一日志入口（ArkTS 侧 → web_console.txt 镜像，与页面 [web] 日志同文件/时间戳）。
@@ -113,7 +126,11 @@ struct EditorPage {
       : type === 'pptx' ? 'presentationeditor' : 'documenteditor';
     let url = 'http://localhost/onlyoffice/webapps/apps/' + app + '/main/index.html?v=' + this.pageVer
       + '&fileType=' + type + '&isDesktop=false&docType=' + type + '&lang=zh-CN&title=' + encodeURIComponent(title)
-      ;
+      // sid=每次打开唯一化（2026-09-05 修复「关闭文档后再新建显示旧内容」：相同 URL 的
+      // 二次导航 ArkWeb 复用引擎实例——页面事件照常（LSO_OPEN_DOCUMENT_OK 收到新模板
+      // 字节 len=1086）但旧文档模型残留（真机实锤：新建 Unnamed 显示 demo-cn 7 页
+      // 内容）；sid 强制全新导航。禁止回退为固定 URL（v= 仅防 HTTP 缓存，不防复用）。
+      + '&sid=' + Date.now();
     // M7 验收态：自动打开后追加 m7auto=1（ascshim：模型就绪→序列化→save:bin→x2t 落盘）
     if (this.m7Target.length > 0) {
       url = url + '&m7auto=1';
@@ -128,7 +145,7 @@ struct EditorPage {
    *   create:new  —— 空文档（无字节），直接打开外壳（引擎 OfflineApp 空文档）
    * 返回 'true'/'false'：loginpage 不依赖返回值（C++ 侧真正动作已由本函数执行）。
    */
-  onShellCommand(cmd: string, param: string): string {
+  onShellCommand(cmd: string, param: string, userFlag: number = 1): string {
     this.arkLog('[ShellCommand] ' + cmd + ' ' + param.slice(0, 300));
     if (cmd === 'open:recent') {
       return this.openRecent(param);
@@ -150,12 +167,27 @@ struct EditorPage {
       return 'true';
     }
     if (cmd === 'save:bin') {
-      return this.saveBinRaw(param);
+      // userFlag=1 用户主动保存（补录 recents）/ 0 autosave（不补录——2026-09-05）
+      return this.saveBinRaw(param, userFlag > 0);
     }
     if (cmd === 'go:folder') {
       // 官方桌面"返回"（FileMenu 返回到文档列表）→ Desktop.process('goback')
       this.arkLog('GOBACK -> welcome');
       this.controller.loadUrl(this.homeUrl());
+      return 'true';
+    }
+    if (cmd === 'files:explore') {
+      // 官方面板「在文件夹中显示」→ sdk.execCommand('files:explore', {path,id,hash})
+      // B 架构无系统级「文件管理器定位文件」API（桌面 C++ OpenDir 等价物）——降级为
+      // toast 显示文件绝对路径（用户可在系统文件管理/导出中按路径查找；2026-09-05）
+      try {
+        const fp = JSON.parse(param) as Record<string, Object>;
+        const p = String(fp['path'] ?? '');
+        this.arkLog('FILES_EXPLORE path=' + p);
+        promptAction.showToast({ message: '文件位置：' + p, duration: 3000 });
+      } catch (e) {
+        this.arkLog('FILES_EXPLORE_ERR ' + String(e));
+      }
       return 'true';
     }
     if (cmd === 'editor:event') {
@@ -183,7 +215,11 @@ struct EditorPage {
       const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/templates/empty.' + ext) as Uint8Array;
       const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
       this.arkLog('CREATE_NEW empty.' + ext + ' len=' + ab.byteLength);
-      return this.convertAndOpen(ab, ext, 'Unnamed.' + ext);
+      // 新建（未保存）不进「最近使用」——官方桌面语义：recents=打开过的文件；
+      // 未保存的新建无独立文件身份，点开即编辑 — 2026-09-05 修复（原 convertAndOpen
+      // 无条件 appendRecent，创建一轮就把 Unnamed.* 堆进 recents，用户实测质疑）
+      // 2026-09-05 根因修正：newDoc=true（零状态空文档，无模板文件/无写入源）
+      return this.convertAndOpen(ab, ext, 'Unnamed.' + ext, false, true);
     } catch (e) {
       this.arkLog('CREATE_NEW_ERR ' + String(e));
       return 'false';
@@ -227,7 +263,8 @@ struct EditorPage {
         return;
       }
       this.arkLog('OPEN_LOCAL_OK label=' + label + ' uri=' + uri + ' size=' + ab.byteLength);
-      this.convertAndOpen(ab, ext, label);
+      // userUri=系统选择器真实位置——保存目标=用户原文件（覆盖式保存，2026-09-05）
+      this.convertAndOpen(ab, ext, label, true, false, uri);
     } catch (e) {
       this.arkLog('OPEN_LOCAL_ERR ' + String(e));
     }
@@ -270,7 +307,8 @@ struct EditorPage {
         this.arkLog('OPEN_RECENT_READERR ' + path);
         return 'false';
       }
-      return this.convertAndOpen(ab, ext, base.length > 0 ? base : name);
+      // userUri=recents 记录的真实位置（uri→保存覆盖用户文件；历史沙箱路径→兼容）
+      return this.convertAndOpen(ab, ext, base.length > 0 ? base : name, true, false, path);
     } catch (e) {
       this.arkLog('OPEN_RECENT_ERR ' + String(e));
       return 'false';
@@ -283,7 +321,65 @@ struct EditorPage {
    * → base64 → execCommand('save:bin') 至此。本端：写沙箱 in.bin → x2t doct_bin2docx
    * → save.docx（zip 头校验 0x50 0x4b）→ 回写当前源文件（重开 recents 即编辑后内容）。
    */
-  private saveBinRaw(b64: string): string {
+  /**
+   * 另存为（新文件首次保存）：系统保存对话框（DocumentViewPicker.save）→ 用户选位置/
+   * 文件名 → 字节落盘（uri 写）→ 沙箱同步（后续保存=覆盖；重开链路径稳定）→
+   * recents 补录 + isNewUnsaved 复位。取消 → 不动（未保存状态保留）。
+   */
+  private async doSaveAs(outBuf: ArrayBuffer): Promise<void> {
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      const dvp = new picker.DocumentViewPicker(ctx);
+      const opts = new picker.DocumentSaveOptions();
+      const defName = this.currentOpenName.length > 0 ? this.currentOpenName : 'Unnamed.' + this.currentOpenExt;
+      opts.newFileNames = [defName];
+      const uris = await dvp.save(opts);
+      if (!uris || uris.length === 0) {
+        this.arkLog('SAVE_AS_CANCEL');
+        return;
+      }
+      const uri = uris[0];
+      const ok = writeFileBuf(uri, outBuf);
+      this.arkLog('SAVE_AS_WRITE uri=' + uri + ' ok=' + ok + ' size=' + outBuf.byteLength);
+      if (!ok) {
+        this.arkLog('SAVE_AS_WRITE_ERR ' + uri);
+        return;
+      }
+      this.savePath = uri; // 身份=真实位置（后续保存覆盖写它；工作副本由保存链同步）
+      // 文件身份 = 用户选择的位置（recents path=真实 uri——2026-09-05 用户：
+      // 「选了桌面路径列表还显示沙箱路径」）；文件名以 uri 尾段为准
+      const base = decodeURIComponent(uri.substring(uri.lastIndexOf('/') + 1));
+      if (base.length > 0) {
+        this.currentOpenName = base;
+        const dot = base.lastIndexOf('.');
+        if (dot > 0) {
+          const e2 = base.substring(dot + 1).toLowerCase();
+          if (e2 === 'docx' || e2 === 'xlsx' || e2 === 'pptx') {
+            this.currentOpenExt = e2;
+          }
+        }
+      }
+      // 身份演进（saveTarget 单点）：'none' → 'uri'——页面经 save:type 同步询问即命中。
+      // 不写沙箱镜像：用户数据只存用户选择的位置（重开后由打开链自动建立工作副本）。
+      this.saveTarget = 'uri';
+      if (this.currentOpenName.length > 0) {
+        const typeNum = this.currentOpenExt === 'xlsx' ? RECENT_TYPE_XLSX
+          : this.currentOpenExt === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
+        // path=真实保存位置（uri）；重开走 readFileBuf(uri)（picker 授权持久）
+        if (appendRecent(this.hostFilesDir, this.currentOpenName, uri, typeNum)) {
+          this.arkLog('RECENTS_APPEND_SAVEAS name=' + this.currentOpenName + ' path=' + uri);
+        }
+      }
+    } catch (e) {
+      this.arkLog('SAVE_AS_ERR ' + String(e));
+    }
+  }
+
+  /**
+   * @param userSaved 用户主动保存（true=补录 recents）/ autosave（false=只落盘不打扰
+   * 「最近使用」；2026-09-05 新建即 autosave 的连锁修正）
+   */
+  private saveBinRaw(b64: string, userSaved: boolean = true): string {
     try {
       if (b64.length === 0) {
         this.arkLog('SAVE_BIN_EMPTY');
@@ -318,14 +414,49 @@ struct EditorPage {
       if (!zipOk) {
         return 'false';
       }
-      // 回写源文件（recents 重开即编辑后内容）
+      // 新文件首次保存 = 另存为（官方桌面语义：无文件身份 → 弹系统保存对话框选位置；
+      // 2026-09-05 用户「点保存应弹保存位置，却直接保存了」）。x2t 产物 outBuf 交接给
+      // doSaveAs（async：dvp.save → uri 落盘 + 沙箱同步 + recents + 复位 isNewUnsaved）。
+      // 对话框异步期间先回 'true'（保存受理）；取消=未保存（isNewUnsaved 仍 true，
+      // 下次保存再弹）。
+      // v2 保存决策（单一事实源 saveTarget）：
+      if (userSaved && this.saveTarget === 'none') {
+        // 新建无身份 + 用户保存 → 弹另存为（async：dvp.save → uri 落盘 → 'none'→'uri'）
+        this.arkLog('SAVE_AS_DIALOG name=' + this.currentOpenName);
+        this.doSaveAs(outBuf);
+        return 'true';
+      }
       if (this.currentOpenName.length > 0) {
+        if (this.saveTarget === 'uri' && this.savePath.length > 0) {
+          // 已另存为：覆写真实位置 + 沙箱镜像同步（镜像不参与 recents，仅重开兜底）
+          const okUri = writeFileBuf(this.savePath, outBuf);
+          this.arkLog('SAVE_BIN_URI ok=' + okUri + ' uri=' + this.savePath + ' size=' + outBuf.byteLength);
+          if (!okUri) {
+            this.arkLog('SAVE_BIN_URI_ERR ' + this.savePath);
+            return 'false';
+          }
+        }
+        // 引擎工作副本同步（打开/另存为后重开链以最新内容起步；不参与 recents/用户
+        // 数据——用户文件=savePath（uri 或沙箱工作副本，2026-09-05）
         const srcP = this.hostFilesDir + '/' + this.currentOpenName;
         if (!writeFileBuf(srcP, outBuf)) {
           this.arkLog('SAVE_BIN_BACK_ERR src=' + srcP);
           return 'false';
         }
         this.arkLog('SAVE_BIN_BACK src=' + srcP + ' size=' + outBuf.byteLength);
+        // 保存成功 = 文件身份成立（官方桌面语义：保存后的文件进「最近使用」；
+        // 新建在打开链已禁 recents（convertAndOpen addRecent=false）——用户保存即补录；
+        // appendRecent 同名去旧置顶，已打开文件的保存同样刷新置顶。
+        // 仅用户保存补录（自动保存/autosave 不打扰列表——2026-09-05 用户实测后修正）。
+        if (userSaved) {
+          const saveType = this.currentOpenExt === 'xlsx' ? RECENT_TYPE_XLSX
+            : this.currentOpenExt === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
+          // recents.path：真实位置优先（uri），否则沙箱（打开链/兼容）
+          const recentPath = this.saveTarget === 'uri' ? this.savePath : srcP;
+          if (appendRecent(this.hostFilesDir, this.currentOpenName, recentPath, saveType)) {
+            this.arkLog('RECENTS_APPEND_SAVE name=' + this.currentOpenName);
+          }
+        }
       }
       return 'true';
     } catch (e) {
@@ -339,15 +470,26 @@ struct EditorPage {
    * 官方编辑外壳（LocalStartOpen 就绪后经 onEditorReadyForDoc 注入）。
    * 转换失败或文件不可读 → 不导航，留在欢迎页（避免官方壳报"打开文件错误"弹窗）。
    */
-  private convertAndOpen(ab: ArrayBuffer, ext: string, name: string): string {
+  /**
+   * @param addRecent 是否写入「最近使用」（打开=写入；新建=不写，2026-09-05）
+   * @param newDoc  新建语义（2026-09-05 根因修正「创建≠打开文件」）：不落模板源文件、
+   *                currentOpenName 置空（无文件身份——官方桌面语义：新建即零状态，保存
+   *                首次=另存为；此前把新建当「打开模板文件」导致保存/recents 路径/未保存
+   *                语义全部错位）
+   */
+  private convertAndOpen(ab: ArrayBuffer, ext: string, name: string, addRecent: boolean = true,
+    newDoc: boolean = false, userUri?: string): string {
     try {
       const extU = ext.toLowerCase();
       // M7：源文件持久化到沙箱 <name>（openRecent 的来源 / 保存回写目标 / recents 条目；
       // 系统选择器授权 uri 的读权限只保证 select 返回后短暂有效，字节落盘即固化）
-      const srcP = this.hostFilesDir + '/' + name;
-      if (!writeFileBuf(srcP, ab)) {
-        this.arkLog('OPEN_SRC_WRITE_ERR ' + srcP);
-        return 'false';
+      // 2026-09-05：newDoc（创建新文档）跳过——无文件身份（name 仅作引擎标题）
+      if (!newDoc) {
+        const srcP = this.hostFilesDir + '/' + name;
+        if (!writeFileBuf(srcP, ab)) {
+          this.arkLog('OPEN_SRC_WRITE_ERR ' + srcP);
+          return 'false';
+        }
       }
       // 临时文件本轮 TRUNC 重写（打开链字节在 onEditorReadyForDoc 派发完才由页面拉取；
       // 不主动删除——清理时序与页面 XHR 存在竞态，2026-09-05 已修）
@@ -370,16 +512,41 @@ struct EditorPage {
         return 'false';
       }
       this.pendingOpenFile = true;
-      this.currentOpenName = name;
-      this.currentOpenExt = extU;
-      // M7：recents 真数据 —— 打开过即"最近"，type 按格式枚举上报（单一实现见 recents.ets）
-      const typeNum = extU === 'xlsx' ? RECENT_TYPE_XLSX : extU === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
-      if (appendRecent(this.hostFilesDir, name, this.hostFilesDir + '/' + name, typeNum)) {
-        this.arkLog('RECENTS_APPEND name=' + name + ' type=0x' + typeNum.toString(16));
+      if (newDoc) {
+        // 新建语义：无文件身份（currentOpenName 置空——保存链见「无身份→另存为」回路）
+        this.currentOpenName = '';
+        this.currentOpenExt = extU;
+        this.saveTarget = 'none';
+        this.savePath = '';
       } else {
-        this.arkLog('RECENTS_APPEND_ERR name=' + name); // 写失败（records 损坏保护）不阻断打开
+        this.currentOpenName = name;
+        this.currentOpenExt = extU;
+        // 打开链保存目标（2026-09-05 修正「打开文件保存后用户源文件不更新」）：
+        // 有用户真实位置（系统选择器 uri / recents path=uri）→ 'uri'（保存覆盖用户
+        // 文件）；无（历史 recents 条目 path 为沙箱）→ 'sandbox'（引擎工作副本）。
+        // 沙箱工作副本始终会由本函数写入（转换链需要），但不作保存目标。
+        if (userUri !== undefined && userUri.length > 0) {
+          // 历史 recents 的 path 是沙箱路径（=工作副本本身）→ 保存目标=沙箱；
+          // 真实位置（file:/// 等）→ 保存覆盖用户文件
+          this.saveTarget = userUri.indexOf(this.hostFilesDir) === 0 ? 'sandbox' : 'uri';
+          this.savePath = userUri;
+        } else {
+          this.saveTarget = 'sandbox';
+          this.savePath = this.hostFilesDir + '/' + name;
+        }
+        // M7：recents 真数据 —— 打开过即"最近"，type 按格式枚举上报（单一实现见 recents.ets）
+        // 2026-09-05：仅打开（addRecent=true）写入；新建（create:new）不写（见 openNewFile）
+        // recents.path = 保存目标真实路径（uri 优先；沙箱路径为历史兼容）
+        if (addRecent) {
+          const typeNum = extU === 'xlsx' ? RECENT_TYPE_XLSX : extU === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
+          if (appendRecent(this.hostFilesDir, name, this.savePath, typeNum)) {
+            this.arkLog('RECENTS_APPEND name=' + name + ' type=0x' + typeNum.toString(16));
+          } else {
+            this.arkLog('RECENTS_APPEND_ERR name=' + name); // 写失败（records 损坏保护）不阻断打开
+          }
+        }
       }
-      this.arkLog('OPEN_CONVERTED bin=' + buf.byteLength);
+      this.arkLog('OPEN_CONVERTED bin=' + buf.byteLength + ' target=' + this.saveTarget);
       this.controller.loadUrl(this.editorUrl(extU, name));
       return 'true';
     } catch (e) {
@@ -509,6 +676,20 @@ struct EditorPage {
           // registerJavaScriptProxy 的对象要到页面 (re)load 才出现在 window，故在
           // onControllerAttached（早于加载）注册才对本页生效。
           // 同步方法表：'_call'（JS 端阻塞取返回——官方 CEF V8 语义）、'_onReady'（安装完成）。
+          // 启动清 webview 缓存（2026-09-05「创建新 docx 偶显历史文档」根治）：History
+          // 渲染蓄藏在 webview 持久化缓存（data/storage/el2/base/cache/web/Cache——
+          // install -r 保留；用户实测：卸载重装（清 data）后不再复现）。每次 app
+          // 启动清一次 = 常驻干净态；removeCache 需 web 组件已 attach（本回调时机），
+          // once guard 防多次清。遗漏/异常不阻断主流程。
+          if (!this.cacheCleared) {
+            this.cacheCleared = true;
+            try {
+              this.controller.removeCache(true);
+              this.arkLog('CACHE_CLEARED');
+            } catch (ce) {
+              this.arkLog('CACHE_CLEAR_ERR ' + String(ce));
+            }
+          }
           // ascNative 字段保持强引用（registerJavaScriptProxy 代理对象避免被回收）。
           const nativeDispatch = new AscNativeDispatch(this.hostFilesDir, ((m: string) => this.arkLog(m)));
           // LoadFontBase64 桥（引擎桌面路径取字体字节）：rawfile/onlyoffice/fonts/<id>
@@ -521,6 +702,9 @@ struct EditorPage {
           nativeDispatch.setLocalStartOpenHandler(() => {
             this.onEditorReadyForDoc();
           });
+          // save:type 询问（v2 单点事实源）：页面 asc_Save 同步询问保存目标——
+          // 'none'（autosave 跳过/用户保存→另存为）| 'sandbox' | 'uri'
+          nativeDispatch.setSaveTargetReader(() => this.saveTarget);
           this.ascNative = new AscNativeBridge(nativeDispatch);
           this.controller.registerJavaScriptProxy(this.ascNative, 'AscNative', ['_call', '_onReady'], []);
         })
