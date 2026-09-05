@@ -19,9 +19,7 @@
 
 复现/用法：python3 scripts/onlyoffice/fix_docx_default_lang.py
 
-另注（历史 origin，勿回退）：ru-RU docDefaults 来自官方样本 sdkjs 测试资产系列
-（web-apps 时代样例自带），当时旧脚本全量拷贝未做语言规范化——此前多轮 M7 验证
-跑在「俄语默认」下（M7AUTO-EDIT-OK 文本为 ASCII 未暴露差异）。
+另注（勿回退）：ru-RU docDefaults 源于官方样本资产，旧脚本全量拷贝未规范化。
 """
 import os
 import re
@@ -70,10 +68,10 @@ def fix_one(path: str) -> str:
 
 
 def main() -> int:
-    # 样本集中 at rawfile/onlyoffice/smoke/（2026-09-06 用户：smoke 文件单独目录；
-    # 原 RAW 根扫描 sample*/demo* 已随移动失效）
+    # 样本集中 at rawfile/onlyoffice/smoke/samples/（2026-09-06 用户：smoke 文件单独目录；
+    # 原 RAW 根扫描 sample*/demo* 已随移动失效；install_smoke 整目录拷贝保留 samples/）
     docs = []
-    smk = os.path.join(RAW, 'smoke')
+    smk = os.path.join(RAW, 'smoke', 'samples')
     if os.path.isdir(smk):
         docs += [os.path.join(smk, f) for f in sorted(os.listdir(smk))
                  if f.endswith('.docx') and (f.startswith('sample') or f.startswith('demo'))]

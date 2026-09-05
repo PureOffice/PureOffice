@@ -1,118 +1,97 @@
 # ONLYOFFICE → HarmonyOS NEXT 移植（B 架构）
 
-把 ONLYOFFICE DesktopEditors(AGPL-3.0) 移植到商用鸿蒙 Pad 的工程。**迭代 1 已达成「真文件打开 → 编辑 → 保存」最小产品闭环（2026-09-03 真机 ✅）。**
+把 ONLYOFFICE DesktopEditors（AGPL-3.0）移植到商用鸿蒙 Pad：ArkTS 薄壳 + 系统 ArkWeb
+渲染 ONLYOFFICE web 编辑器 + native core(x2t) 转换引擎。真机已验证：docx/xlsx/pptx
+打开 → 编辑 → 保存全链闭环。
 
-## 现状一句话
+## 功能（已实现）
 
-「ArkTS 薄壳 + 系统 ArkWeb 渲染 ONLYOFFICE web 编辑器 + native core(x2t) 转换引擎」= **B 架构**。
-真机验证（2026-09-05 三格式全链复核）：`docx/xlsx/pptx` **打开 → 渲染（菜单/工具栏/内容全覆盖）→ 编辑 → 保存 → 产物校验** 全部通过；保存链 document.xml 1017 个 `<w:t>` = 原文 1016 + 编辑标记 1（增量精确）。
+- **打开**：欢迎页「打开本地文件」（系统选择器）/「最近使用」列表 / 新建（Word/Excel/PPT 空文档）
+- **编辑**：三格式完整工具栏/菜单/界面渲染
+- **保存**：新建=另存为（系统保存对话框）；打开的文件=覆盖原文件；最近列表随保存刷新
+- **导出**：文件菜单另存为系统位置
+- **默认中文**：界面 + 新建文档默认语言 zh-CN
 
-## 关键文档
-
-| 文档 | 内容 |
-|---|---|
-| [docs/ONLYOFFICE_OHOS_PORT_DESIGN.md](docs/ONLYOFFICE_OHOS_PORT_DESIGN.md) | 总设计：为何走 B（CEF/Chromium 调研结论）、阶段路线图、POC 1-5 状态、风险表 |
-| [docs/ONLYOFFICE_OHOS_PORT_KEYPOINTS.md](docs/ONLYOFFICE_OHOS_PORT_KEYPOINTS.md) | **方案关键点**：DOCY v5/v10 家族、打开/保存链最终形态、传输规则、探针体系、构建部署细节与坑 |
-| [docs/ONLYOFFICE_SAVE_CHAIN_REVISED.md](docs/ONLYOFFICE_SAVE_CHAIN_REVISED.md) | 保存链全源码考古（为何不依赖 saveDocumentToZip/服务器） |
-| [docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md](docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md) | 正规化后的功能支持矩阵：已实现/降级/未实现能力 + 官方桥方法返回值契约 + 升级路线 |
-| [docs/ONLYOFFICE_OHOS_PRODUCT_ROADMAP.md](docs/ONLYOFFICE_OHOS_PRODUCT_ROADMAP.md) | 产品化路线图：P0/P1/P2 差距清单（文件进出/文档管理/恢复/合规等）+ M7-M9 建议里程碑 |
-
-## 快速开始
+## 快速开始（从零复现）
 
 ```bash
-# 0) 环境（已具备；均可环境变量覆盖见各脚本）
-#   OHOS SDK: /apps/harmony/sdk/default/openharmony（SDK 6.1.0(23), BiSheng clang）→ OHOS_NDK
-#   hdc:      /apps/harmony/sdk/default/openharmony/toolchains/hdc → OHOS_HDC
-#   hvigor:   /apps/harmony/bin/hvigorw → OHOS_HVIGORW
-#   真机:     192.168.1.8:33363（hdc 已配对）→ OHOS_DEV；bundle: app.hackeris.winehua
+# 环境（可环境变量覆盖）：
+#   OHOS SDK /apps/harmony/sdk/default/openharmony → OHOS_NDK
+#   hdc /apps/harmony/sdk/default/openharmony/toolchains/hdc → OHOS_HDC
+#   hvigor /apps/harmony/bin/hvigorw → OHOS_HVIGORW
+#   target device → OHOS_DEV（必须显式指定，无默认值）
 
-# 从零复现（仓库 = 可复现内容集合：源码 + 构建脚本 + submodule pin）：
-git submodule update --init                            # 四库（core/sdkjs/web-apps/build_tools，官方 release/v9.4.0）
-bash scripts/onlyoffice/patch_core_ohos.sh             # core OHOS 补丁（power-idempotent；03 执行位保险）
-python3 scripts/onlyoffice/pack_web.py                 # rawfile/onlyoffice 运行时资源（163MB 产物，不入库）
-python3 scripts/onlyoffice/core3d/gen_cmake.py && cmake -S build/core3d -B build/core3d/build \
-  -DCMAKE_TOOLCHAIN_FILE=$PWD/scripts/onlyoffice/core3d/ohos-arm64.toolchain.cmake \
-  && cmake --build build/core3d/build -j$(nproc)      # core(x2t) 静态库（仓库已带 build/ 缓存时跳过）
+# 0) 子模块与补丁
+git submodule update --init                 # core/sdkjs/web-apps/build_tools（官方 release/v9.4.0）
+bash scripts/onlyoffice/patch_core_ohos.sh  # core OHOS 平台补丁（幂等）
 
-# 1) 打包 + 装机 + 重启（迭代1 部署闭环；--probe 加读运行探针）
-bash scripts/onlyoffice/deploy_ohos.sh --probe
+# 1) 构建库产物（first time / clean 误清后）
+python3 scripts/onlyoffice/core3d/gen_cmake.py
+cmake -S build/core3d -B build/core3d/build \
+  -DCMAKE_TOOLCHAIN_FILE=$PWD/scripts/onlyoffice/core3d/ohos-arm64.toolchain.cmake
+cmake --build build/core3d/build -j$(nproc)
 
-# 2) 真机验证闭环（autotest 自动跑：打开 sample.docx → mark(OOH-ts) → save）
-#    probe.txt 落点: hdc shell cat /data/app/el2/100/base/app.hackeris.winehua/haps/entry/files/probe.txt
-#    保存产物:       .../files/save.docx；拉回解压验 document.xml 指纹即可
+# 2) 一键：生成 ascshim + 空模板 + HAP 打包 + 装机 + 重启
+OHOS_DEV=<ip:port> bash scripts/onlyoffice/deploy_ohos.sh
 
-# 3) 手动验证：壳层三个按钮 打开 sample.docx / 标记 / 保存
+# 3) 自动验收（可选）：启动带 m7accept 参数 → 自动打开样本并验证打开/保存链
+hdc -t <ip:port> shell aa start -a EntryAbility -b app.hackeris.winehua --ps m7accept 1
+# 日志：hdc -t <ip:port> shell cat .../files/web_console.txt（页面与壳侧统一落盘）
 ```
 
 ## 工程结构
 
 ```
 entry/src/main/
-  ets/
-    pages/EditorPage.ets          # 壳：Web 组件 + 打开/标记/保存按钮 + 探针(probe.txt)
-    common/ascBridge.ets          # AscConvertProxy(x2t 打开桥) + AscSaveProxy(保存桥) + rawfileLoader
-    common/rawfileLoader.ets      # onInterceptRequest：onlyoffice  rawfile + userfile/<name> 沙箱映射
-    common/x2t.ets                # x2tConvertSync 等 NAPI 封装
-  cpp/                            # convertershell：x2t 26 库打包成 .so + NAPI convert/convertSync/version
-  resources/rawfile/onlyoffice/   # web-apps + sdkjs（官方 release/v9.4.0 配套）+ fonts + document.docx
-    webapps/.../documenteditor/main/index.html   # 含注入：Asc.Addons.ooxml + __oobDocy 打开桥 + 探针
-third_party/core | sdkjs          # ONLYOFFICE 源码（双仓库均 pinned release/v9.4.0）
-scripts/onlyoffice/               # 构建：core3d(交叉编译)/打包/部署/审计
-docs/                             # 本组文档
+  ets/pages/EditorPage.ets        # 壳：Web 组件 + 编译/打开/保存链（SaveTarget 单一事实源）
+  ets/common/ascBridge.ets        # AscNative 桥（JS 同步 _call + 注册）
+  ets/common/rawfileLoader.ets    # onInterceptRequest：onlyoffice/* 与 userfile/* 沙箱映射
+  ets/common/x2t.ets              # x2tConvertSync（NAPI）
+  ets/common/recents.ets          # 最近使用（recents.json）
+  resources/rawfile/onlyoffice/   # 运行时资源（构建产物，不入库）
+third_party/core|sdkjs|...        # ONLYOFFICE 官方源码（submodule pinned）
+scripts/onlyoffice/
+  desktop/grunt-build.sh          # 官方构建 + 装配唯一入口（--no-upstream 仅装配）
+  desktop/make_ascshim.py         # ascshim.js 拼装（src/*.js → rawfile）
+  desktop/src/*.js                # 页面适配层（桥/打开/保存/欢迎页）
+  make_empty_templates.py         # 新建空模板（empty.docx/xlsx/pptx）
+  build_editors_ohos.py           # 装配：webapps/sdkjs/fonts/index.html/smoke/version.json
+  deploy_ohos.sh                  # 打包+安装+重启
+  smoke/                          # 验收样本与诊断脚本（samples/ 子目录）
+docs/                             # 设计/关键点/功能矩阵/合规方案（见下表）
 ```
 
 ## 常用命令
 
 ```bash
-# 构建（切勿 clean！会清掉 build/core3d 的 native 静态库，重建需 10+ 分钟）
+# 构建 HAP（严禁 clean——会清掉 build/core3d native 产物）
 /apps/harmony/bin/hvigorw assembleHap -p product=default --mode module --no-daemon
 
-# 真机
+# 真机（多设备必须 -t <ip:port>）
 hdc list targets
-hdc -t 192.168.1.8:33363 shell   # 注意：多设备必须 -t
-hdc -t 192.168.1.8:33363 install -r entry/build/default/outputs/default/entry-default-signed.hap
-hdc -t 192.168.1.8:33363 shell "aa force-stop app.hackeris.winehua; aa start -a EntryAbility -b app.hackeris.winehua"
-# 截图
-hdc -t 192.168.1.8:33363 shell snapshot_display && hdc -t 192.168.1.8:33363 file recv /data/local/tmp/snapshot_*.jpeg /tmp/s.png
-
-# core3d（libx2t.a 等）重建（被 clean 误清后恢复用）
-python3 scripts/onlyoffice/core3d/gen_cmake.py
-cmake -S build/core3d -B build/core3d/build -DCMAKE_TOOLCHAIN_FILE=/data/share/office/scripts/onlyoffice/core3d/ohos-arm64.toolchain.cmake
-cmake --build build/core3d/build -j$(nproc)
+hdc -t <ip:port> install -r entry/build/default/outputs/default/entry-default-signed.hap
+hdc -t <ip:port> shell "aa force-stop app.hackeris.winehua; aa start -a EntryAbility -b app.hackeris.winehua"
+hdc -t <ip:port> shell snapshot_display -f /data/local/tmp/s.jpeg && hdc -t <ip:port> file recv /data/local/tmp/s.jpeg /tmp/s.jpeg   # 截图（必须 .jpeg 后缀）
 ```
 
-## 当前任务状态
+## 踩坑速查
 
-- **正规化（M1-M5）**：✅ 完成（2026-09-04，真机 192.168.1.8 验收）
-  - M1 官方桌面构建链（sdkjs `--desktop` 双清单 + web-apps grunt + loginpage 欢迎页）
-  - M2 桥（ascshim.js：`window.AscDesktopEditor` 201 方法 + 官方 shim + ArkTS 同步代理）
-  - M3 官方欢迎页 + docx 打开闭环 ✅
-  - M4 打开三格式（docx/xlsx/pptx）+ **保存闭环** ✅ —— 编辑 → `asc_nativeGetFileData`(DOCY;v10)
-    → x2t doct_bin2docx → save.docx 并回写源文件（编辑文本进 `word/document.xml`，真机核验）
-  - M5 清理 POC（探针/自测/AscSaveBridge/AscConvertBridge 退役）+ 功能矩阵
-    [docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md](docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md)
-  - 前期的 POC 迭代 1/2（v5/POC 链、v12 三格式）已被正规化链替代，此仓库以官方产物 + 少量
-    适配补丁为基线
-- **M7 文件进出**：✅ 真机全闭环（2026-09-04，`90c15ee`→`26586d5`）—— 打开本地文件（系统
-  选择器 + 欢迎页「打开」FAB）、**保存三格式**（`save.<ext>` 自动选 doct/xlst/pptt 转换器；
-  docx/xlsx/pptx 保存产物 zip 校验全过）、**导出/另存为**（系统保存对话框落盘，md5 与保存链一致）、
-  recents 真数据（recents.json 驱动，打开即入列、重启持久）
-- **三格式全链复核 + cell/slide 收尾**：✅（2026-09-05 真机）—— docx/xlsx/pptx 打开/渲染/
-  保存/工具栏全链逐一验收（详见 FEATURE_MATRIX §5 验收记录）；cell/slide 打开链四修
-  （DI 链 `_m.document`/权限分发/Gateway 踢闸/CDocsCoApi dummy，见 KEYPOINTS §11）；
-  生产形态 = M7 自动验收常量置空，产品路径无测试痕迹
-- **M6+ 待办**：模板库（LocalFileTemplates）、PDF/打印、全屏窗口管理、宏/插件/拼写/云存储等
-  （详见 FEATURE_MATRIX §6）
-- 引擎装配要点（维护者必读）：sdkjs 运行时 = min（sdk-all-min.js，核心+api）与 common
-  （sdk-all.js，Serialize2/History/GlobalLoaders）**双清单**，由官方 `loadSdk`（apiBase.js:293）
-  自动加载 —— **不要手工预载 sdk-all.js、不要往 sdk.min 清单加类文件**（CMemory/History 在
-  common 清单，加载顺序错误 = 字体链崩溃/文档打开静默失败）。`window.native` 保持未定义，
-  仅序列化期间临时挂 `Save_End`。
+1. **hvigor 严禁 clean**——会删 build/core3d 的 libx2t.a，native 链接失败，重建 10+ 分钟。
+2. **改动未见效**：先确认进包（`strings HAP | grep <新字符串>`）——.ets 增量可能不刷新。
+3. **openDocument 字节必须 Uint8Array**——string 传入得到空模型或卡死。
+4. **ArkTS→页面传二进制必须 base64 信封**——runJavaScript 走字符串会损坏 NUL 字节。
+5. **产物不入库**：rawfile 运行时资源（webapps/sdkjs/fonts/…）是构建产物，由
+   `grunt-build.sh` 重生成；ascshim.js 与模板为生成产物入库跟踪。
+6. **sdkjs 双清单**：核心（sdk-all-min.js）与 common（sdk-all.js）由官方 loadSdk 自动加载，
+   勿手工预载/向清单加类文件（加载顺序错误 = 字体链崩溃/打开静默失败）。
 
-## 踩坑速查（本轮实测）
+## 文档索引
 
-1. **hvigor 严禁 clean**——`hvigorw clean` 会删 `build/core3d`，`libx2t.a` 消失导致 native 链接失败，重建 10+ 分钟。
-2. **增量构建可能不带最新 .ets**——若改动 EditorPage.ets 后行为不变，先 `strings HAP | grep <新字符串>` 确认已打包（本次踩坑：modules.abc 未刷新，改动没进包）。
-3. **openDocument 的 DOCY 必须用 Uint8Array 传入**——string（二进制串）读 v10 会得到空模型或死循环卡死（详见 KEYPOINTS §4）。
-4. **ArkTS→页面传二进制必须 base64 信封**——raw 字符串含 NUL 等字节经 runJavaScript 会损坏。
-5. **页面 console 走 `console.error`**——I 级日志随 app 切后台被丢，E 级稳定（EditorPage.onConsole 转发 hilog `[web]` 前缀）。
+| 文档 | 内容 |
+|---|---|
+| docs/ONLYOFFICE_OHOS_PORT_DESIGN.md | 总设计：B 架构决策依据、阶段路线图 |
+| docs/ONLYOFFICE_OHOS_PORT_KEYPOINTS.md | 关键点：DOCY v5/v10、打开/保存链、探针体系 |
+| docs/ONLYOFFICE_SAVE_CHAIN_REVISED.md | 保存链源码依据（不依赖服务器） |
+| docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md | 功能支持矩阵：已实现/降级/未实现 + 升级路线 |
+| docs/ONLYOFFICE_OHOS_PRODUCT_ROADMAP.md | 产品路线：P0-P2 差距清单 |
+| docs/OPENSOURCE_COMPLIANCE_PLAN.md | 开源合规整改方案（AGPL） |

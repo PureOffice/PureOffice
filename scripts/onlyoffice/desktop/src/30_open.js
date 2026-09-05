@@ -115,33 +115,6 @@
       })();
     }
 
-    // ---- 3.6 字体链修复（历史注记，2026-09-05 审查）：官方 shim loadLocalFile 请求
-    //      ascdesktop://fonts/（CEF 拦截），ArkWeb 无此 scheme，XHR 永远 pending →
-    //      字体回调 null → BIN 读取 undefined.length 崩；原修复改经
-    //      http://localhost/onlyoffice/fonts/（rawfileLoader 提供已 pre_xor 字体）。
-    //      当前在编辑器页 3.7 段删除 window.AscDesktopEditor（web 语义），且 sdkjs 唯一
-    //      调用点 cell/api.js:616 自身以 if (window["AscDesktopEditor"]) 门控 → **本段在
-    //      编辑器页永不执行**（字体实际走 web 链 Externals.js LoadFontArrayBuffer XHR，同 URL）。
-    //      保留以备桌面语义启用；如确认桌面色态启用请同步 3.7 门控。 ----
-    window.AscDesktopEditor.loadLocalFile = function(url, callback, start, len) {
-      try {
-        var loadUrl = url;
-        if (start !== undefined) loadUrl += ('__ascdesktopeditor__param__' + start);
-        if (len !== undefined) {
-          if (undefined === start) loadUrl += '__ascdesktopeditor__param__0';
-          loadUrl += ('__ascdesktopeditor__param__' + len);
-        }
-        var _xh = new XMLHttpRequest();
-        _xh.open('GET', 'http://localhost/onlyoffice/fonts/' + loadUrl, true);
-        _xh.responseType = 'arraybuffer';
-        _xh.onload = function() {
-          try { callback(new Uint8Array(_xh.response)); } catch (x) { callback(null); }
-        };
-        _xh.onerror = function() { callback(null); };
-        _xh.send(null);
-      } catch (x) { callback(null); }
-    };
-
     // ---- 3.4 顶层编辑器页模拟官方 api.js _onAppReady（无 api/documents 壳时）：
     //      init(editorConfig) → Gateway loadConfig；opendocument(_offline_) → loadDocument
     //      → asc_LoadDocument(loadSdk→isLoadFullApi) → onEndLoadDocInfo → _openEmptyDocument
@@ -261,28 +234,17 @@
               } catch (le) {
                 console.error('LSO_LC_ERR ' + String(le));
               }
-              if (_dt === 'word' && !window.__lsoWordDI) {
-                // （2026-09-06 根因）word 不再走 loadDocument——官方链 loadDocument →
-                // onEndLoadDocInfo → _openEmptyDocument（apiBase.js:1429）→ AscCommon.getEmpty()
-                // （word/document/editor.js:41 "DOCY;v2;50190;…" 内置 History 范文，官方桌面版
-                // 新建默认内容；base64 编码——此前"全文搜无"的根因）装载范文并渲染 7 页；
-                // 真字节 ReplaceContent 后绘制层范文帧残留（重排版时序差）→ 用户所见
-                // 「History」。官方 Desktop 语义 = 不打开空文档（sdkjs/common/Local/common.js:40-64
-                // 「非 iframe 编辑器不打开空文档」，等待 LocalStartOpen 直接注入真字节）。
-                // 对齐：word 改走 DI 链（asc_setDocInfo+权限分发——loadDocument 的公因子，
-                // cell/slide 三格式已验证，DI 链无 _openEmptyDocument 路径）。首帧=真文档。
-                window.__lsoWordDI = true;
-              }
-              if (_dt === 'word' && !window.__lsoWordDI) {
-                // 官方 loadDocument（word 已实机验证可用；cell/slide 会崩 'lang' —— 见下）
-                _m.loadDocument({doc: _cfg.document});
-                console.error('LSO_LD_OK');
-              } else {
-                // cell/slide：官方 loadDocument 在无服务器环境崩（'reading lang'，细节未知），
-                // 但 DI 链（官方 asc_CDocInfo 字段装配 + asc_setDocInfo + asc_getEditorPermissions）
-                // 实测可用——等价 loadDocument 的前半段（DocInfo 装配/权限），
-                // 保证 onEndLoadDocInfo → 空模型/打开链正常继续。
-                if (!window.__lsoDIUsed) {
+              // 2026-09-06 根因（History 假帧）：官方 loadDocument → onEndLoadDocInfo →
+              // _openEmptyDocument（apiBase.js:1429）→ AscCommon.getEmpty()（word/document/editor.js:41
+              // "DOCY;v2;50190;…" 内置 History 范文，base64 编码——此前"全文搜无"的根因）装载
+              // 范文并渲染 7 页；真字节 ReplaceContent 后绘制层范文帧残留 → 用户所见「History」。
+              // 官方 Desktop 语义 = 不打开空文档（sdkjs/common/Local/common.js:40-64「非 iframe
+              // 编辑器不打开空文档」，等待 LocalStartOpen 注入真字节）。对齐：三格式统一走
+              // DI 链（asc_setDocInfo+权限分发——loadDocument 的公因子，cell/slide 已验证；
+              // DI 链无 _openEmptyDocument 路径，首帧=真文档）。cell/slide 官方 loadDocument
+              // 在无服务器环境崩（'reading lang'），DI 链实测可用——等价 loadDocument 前半段
+              // （DocInfo 装配/权限），保证 onEndLoadDocInfo → 空模型/打开链正常继续。
+              if (!window.__lsoDIUsed) {
                   window.__lsoDIUsed = true;
                   var _ui = new Asc.asc_CUserInfo();
                   var _uopt = _m.appOptions.user || {};
@@ -367,7 +329,6 @@
                   _m.api.asc_getEditorPermissions();
                   console.error('LSO_DIOPEN_OK url=' + _di2.get_Url() + ' perms=' + (typeof _m.permissions));
                 }
-              }
               console.error('LSO_DIRECT_INIT DONE key=' + _cfg.document.key + ' type=' + _cfg.documentType);
             } else {
               console.error('LSO_DIRECT_INIT main-not-ready (' + (typeof _m) + ')');
@@ -389,35 +350,89 @@
           //   A. AscFonts.g_font_infos 已建（28MB checkAllFonts 完成）
           //   B. Common.NotificationCenter._events['fonts:load'] 已挂（订阅者就位）
           //     ——与 Fonts.js:127 同判据。
-          (function lsoSendFonts() {
+          // —— 字体注入源头归一（2026-09-06 数据取证定案）：官方链（#1/#3 各 18 条）
+          //    已跑通（v13 时代"官方链断、需补发"的结论被推翻）——lsoSendFonts 补发
+          //    整段删除（截图实证：补发的 CFont（type=''）与官方 18 条混排 → 空白行 +
+          //    simsun.ttf 等文件行 + 英中成对重复）；此处 wrap sync_InitEditorFonts
+          //    （apiBase.js:806 唯一入口）统一归一：
+          //    ① 同签名跳过（官方链重发同内容 → 第二次丢弃，杜绝双份）；
+          //    ② 族归一：按 Thumbnail（运行时字段——ROW 打点实证 Arial=0/Liberation=1/
+          //       SimHei=10 族号）为键，每族一条；
+          //    ③ 中文名优先（两轮处理：先选名再建列表——CFont.name 可能只读，不动原行，
+          //       按名重造 CFont 不可（无构造器类型），改「选择保留哪条」策略：
+          //       保留【中文名行】或【无中文名时的原行】）；
+          //    ④ 剔 .ttf/.otf 文件名行（构建表文件别名，非族名）。
+          //    渲染注册表 g_font_infos 不动：文档引用行名照常（宋体修复 name 契约）。
+          (function _wrapInj() {
             try {
-              if (window.__lsoFontsSent) { return; }
-              var _fi0 = window.AscFonts && window.AscFonts.g_font_infos;
-              var _nc = window.Common && window.Common.NotificationCenter;
-              var _subs = _nc && _nc._events && _nc._events['fonts:load'];
-              if (!_fi0 || !_fi0.length || !_subs) {
-                if ((window.__lsoFontsN = (window.__lsoFontsN || 0) + 1) < 150) {
-                  setTimeout(lsoSendFonts, 200); return;
-                }
-                console.error('LSO_UI_FONTS_GIVEUP infos=' + (_fi0 ? _fi0.length : 'U')
-                  + ' subs=' + !!_subs);
+              if (window.__lsoInjWrapped || !_m || !_m.api) { return; }
+              window.__lsoInjWrapped = true;
+              var _oriI = _m.api.sync_InitEditorFonts;
+              if (typeof _oriI !== 'function') {
+                console.error('LSO_FONT_WRAP_NOMETHOD');
                 return;
               }
-              var _cf = [];
-              for (var _fi2 = 0; _fi2 < _fi0.length; _fi2++) {
-                if (_fi0[_fi2].Name === 'ASCW3') { continue; } // 特殊符号字体不入 UI 列表
-                _cf.push(new window.AscFonts.CFont(_fi0[_fi2].Name, '', _fi0[_fi2].Thumbnail || 0));
-              }
-              if (typeof _m.api.sync_InitEditorFonts !== 'function') {
-                console.error('LSO_UI_FONTS_NOSUPPORT'); return;
-              }
-              window.__lsoFontsSent = true;
-              _m.api.sync_InitEditorFonts(_cf);
-              console.error('LSO_UI_FONTS n=' + _cf.length);
-            } catch (fex) {
-              console.error('LSO_UI_FONTS_ERR ' + String(fex));
-            }
+              _m.api.sync_InitEditorFonts = function(fonts) {
+                var _prev = '';
+                try {
+                  _prev = window.__lsoInjSig || '';
+                  var _names = [], _sig = [], _nmv = [];
+                  for (var ni = 0; ni < (fonts || []).length; ni++) {
+                    var _ff = fonts[ni];
+                    _nmv.push(String(_ff && _ff.asc_getFontName ? _ff.asc_getFontName() : ''));
+                  }
+                  _sig = _nmv.join('|');
+                  if (_prev && _prev === _sig) {
+                    console.error('LSO_FONT_SKIP_DUP n=' + _nmv.length);
+                    return undefined; // 同内容重发 → 丢弃（防双份）
+                  }
+                  window.__lsoInjSig = _sig;
+                  // 族归一（两轮）：候选名 → 选中文优先 → 输出
+                  var _byThumb = {};
+                  for (var k = 0; k < (fonts || []).length; k++) {
+                    var _ft = fonts[k];
+                    var _nm = String(_ft && _ft.asc_getFontName ? _ft.asc_getFontName() : '');
+                    var _th = String(_ft && _ft.asc_getFontThumbnail ? _ft.asc_getFontThumbnail() : 'u');
+                    if (!_nm || /\.(ttf|otf|eot|woff2?)$/i.test(_nm)) { continue; }
+                    if (!_byThumb[_th]) { _byThumb[_th] = []; }
+                    _byThumb[_th].push(_nm);
+                  }
+                  var _keep = [];
+                  for (var _tk in _byThumb) {
+                    var _names2 = _byThumb[_tk];
+                    var _pick = '';
+                    for (var j = 0; j < _names2.length; j++) {
+                      if (/[一-龥]/.test(_names2[j])) { _pick = _names2[j]; break; } // 中文名优先
+                    }
+                    if (!_pick) { _pick = _names2[0]; }
+                    _keep.push({thumb: _tk, name: _pick});
+                  }
+                  // 从原列表挑选“被保留名字”的行（原 CFont 对象 + 不重复）
+                  var _out = [];
+                  for (var mm = 0; mm < (fonts || []).length; mm++) {
+                    var _fo2 = fonts[mm];
+                    var _nm3 = String(_fo2 && _fo2.asc_getFontName ? _fo2.asc_getFontName() : '');
+                    var _th3 = String(_fo2 && _fo2.asc_getFontThumbnail ? _fo2.asc_getFontThumbnail() : 'u');
+                    if (/\.(ttf|otf|eot|woff2?)$/i.test(_nm3)) { continue; }
+                    var _isKeep = false;
+                    for (var kk = 0; kk < _keep.length; kk++) {
+                      if (_keep[kk].thumb === _th3 && _keep[kk].name === _nm3) { _isKeep = true; break; }
+                    }
+                    if (_isKeep) { _out.push(_fo2); }
+                  }
+                  console.error('LSO_FONT_INJ n=' + ((fonts || []).length) + ' out=' + _out.length);
+                  return _oriI.call(this, _out);
+                } catch (iwx) {
+                  console.error('LSO_FONT_INJ_ERR ' + String(iwx));
+                  return _oriI.apply(this, arguments); // 异常降级原链
+                }
+              };
+            } catch (iwx) { console.error('LSO_FONT_WRAP_ERR ' + String(iwx)); }
           })();
+          // （原 lsoSendFonts 补发段已删除——2026-09-06：官方链实证已跑（wrap 打点
+          //  LSO_FONT_INJ 出现官方调用 #1/#3）；补发制造 CFont type='' 空白行+混排
+          //  （截图实证）；后续若再遇"字体表未加载"，先查 wrap 的 LSO_FONT_INJ 是否
+          //  存在官方调用，再决定恢复补发（勿照旧结论 v13）。
         };
         // 应用命名空间随编辑器而异：DE(document)/SSE(spreadsheet)/PE(presentation)，
         // 不能用 window.DE（cell 页 DE=undefined → Main 永远找不到 → 不开文档）

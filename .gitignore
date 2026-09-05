@@ -24,9 +24,13 @@ entry/src/main/resources/rawfile/onlyoffice/themes.json
 entry/src/main/resources/rawfile/onlyoffice/smoke/
 # 版本号（构建期内容哈希生成——阶段3，替代手改 VERSION_BUMP）
 entry/src/main/resources/rawfile/onlyoffice/version.json
-# 注：ascshim.js 与 index.html（loginpage 欢迎页）同为构建产物却入库跟踪（决策：
-#   fresh clone 不用先跑 make_ascshim/grunt 即可编译；两者均由
-#   scripts/onlyoffice/desktop/make_ascshim.py 与 grunt-build.sh 重生成，升级时同步提交）
+# ascshim.js（make_ascshim.py 由 src/*.js 拼接生成）与 index.html（欢迎页，来自
+# third_party/desktop-apps loginpage deploy）同为生成产物，与 webapps/fonts 等一并
+# 不入库——fresh clone 编译 HAP 前本就必须先跑 grunt-build.sh（其余 rawfile 全在
+# 库里缺失），"入库便于 clone 自足"的理由不成立；入库反而要求每次改 src 后手工
+# 重新生成再提交（曾发生源码已改、产物忘记再生成的不一致）。
+entry/src/main/resources/rawfile/onlyoffice/ascshim.js
+entry/src/main/resources/rawfile/onlyoffice/index.html
 # 样本（sample.*）是测试资产，保留跟踪；document.json/editor.html/document.docx 已退役删除
 # native 构建产物/工具链拷贝
 entry/libs/

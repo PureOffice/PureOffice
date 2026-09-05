@@ -32,8 +32,10 @@ class ShellCommandHandler implements AscCommandHandler {
     this.owner = owner;
   }
 
-  onCommand(cmd: string, param: string): string {
-    return this.owner.onShellCommand(cmd, param);
+  onCommand(cmd: string, param: string, userFlag?: number): string {
+    // userFlag 透传（ascBridge 第三参：1 用户保存 / 0 autosave——v2 保存语义，
+    // 缺省 1 兜底用户保存）
+    return this.owner.onShellCommand(cmd, param, userFlag ?? 1);
   }
 }
 
@@ -201,7 +203,7 @@ struct EditorPage {
       }
       return 'true';
     }
-    // 其余桌面命令（open:folder / files:check ...）M5 登记降级，当前 no-op
+    // 其余桌面命令（files:check 等）M5 登记降级，当前 no-op
     return 'true';
   }
 
@@ -314,12 +316,6 @@ struct EditorPage {
   }
 
   /**
-   * M4 保存链：ascshim checkSaveDocumentEvent 接管 → 官方 asc_nativeGetFileData
-   * （BinaryFileWriter 序列化当前模型 → DOCY;v10 原始字节，与打开链 in.bin 同格式）
-   * → base64 → execCommand('save:bin') 至此。本端：写沙箱 in.bin → x2t doct_bin2docx
-   * → save.docx（zip 头校验 0x50 0x4b）→ 回写当前源文件（重开 recents 即编辑后内容）。
-   */
-  /**
    * 另存为（新文件首次保存）：系统保存对话框（DocumentViewPicker.save）→ 用户选位置/
    * 文件名 → 字节落盘（uri 写）→ 沙箱同步（后续保存=覆盖；重开链路径稳定）→
    * recents 补录 + isNewUnsaved 复位。取消 → 不动（未保存状态保留）。
@@ -376,6 +372,12 @@ struct EditorPage {
   /**
    * @param userSaved 用户主动保存（true=补录 recents）/ autosave（false=只落盘不打扰
    * 「最近使用」；2026-09-05 新建即 autosave 的连锁修正）
+   */
+  /**
+   * M4 保存链本体（saveBinRaw）：ascshim saveDocument 接手 → 官方 asc_nativeGetFileData
+   * （BinaryFileWriter 序列化当前模型 → DOCY;v10，与打开链 in.bin 同格式）→ save:bin
+   * 至此：写沙箱 in.bin → x2t doct_bin2docx → save.<ext>（zip 头校验）→ 回写当前源文件。
+   * userSaved=1 用户保存（补录 recents）/ 0 autosave（只落盘不补录，2026-09-05 语义）。
    */
   private saveBinRaw(b64: string, userSaved: boolean = true): string {
     try {
@@ -642,14 +644,15 @@ struct EditorPage {
 
   /** rawfile 样本复制到沙箱 filesDir（open 链走 userfile/ 前缀；编辑/转换产物也在 filesDir）。
    *  仅自动验收态拷贝（m7Target 非空——阶段2 验收与产品分离）：产品路径不产生任何验收样本文件。
-   *  样本集中 at rawfile/onlyoffice/smoke/（2026-09-06 用户：smoke 文件单独目录存放）。 */
+   *  样本集中 at rawfile/onlyoffice/smoke/samples/（2026-09-06 用户：smoke 文件单独
+   *  目录存放；install_smoke 整目录拷贝保留 samples/ 子目录——读取须加 samples/ 段）。 */
   private copySandboxSamples(): void {
     if (!this.resourceManager || this.m7Target.length === 0) {
       return;
     }
     for (const name of ['sample.docx', 'sample.xlsx', 'sample.pptx', 'm7-open-test.docx']) {
       try {
-        const raw = this.resourceManager.getRawFileContentSync('onlyoffice/smoke/' + name) as Uint8Array;
+        const raw = this.resourceManager.getRawFileContentSync('onlyoffice/smoke/samples/' + name) as Uint8Array;
         const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
         if (!writeFileBuf(this.hostFilesDir + '/' + name, ab)) {
           this.arkLog('SAMPLE_COPY_ERR ' + name);
@@ -705,7 +708,7 @@ struct EditorPage {
           if (this.m7DirectQueued && cu.indexOf('/main/index.html') < 0) {
             this.m7DirectQueued = false;
             try {
-              const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/smoke/' + this.m7Target) as Uint8Array;
+              const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/smoke/samples/' + this.m7Target) as Uint8Array;
               const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
               const ext = this.m7Target.substring(this.m7Target.lastIndexOf('.') + 1).toLowerCase();
               this.arkLog('M7_DIRECT_OPEN ' + this.m7Target + ' len=' + ab.byteLength);

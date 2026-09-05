@@ -1,24 +1,14 @@
 // ---- 0.5 CJK 字体流保供（2026-09-05 中文方块根因修复，方案 A：装填式）----
-// 根因（全链实证，见 50_init 探针注释与 build_editors_ohos.py FONT_* 表）：
-//   文档 run eastAsia=SimSun → GetFontSlot(EA)=SimSun → LoadFont('SimSun') →
-//   g_font_infos[idx 12] 的字体文件 = fonts/HarmonyOS_Sans_SC.ttf（9.25MB）。
-//   引擎「字体字节加载」只发生于渲染期按需链（FontPickerByCharacter.checkText/
-//   asc_insertSymbol/watermark 等 → LoadDocumentFonts2 → CheckFontLoadStyles →
-//   CFontFileLoader.LoadFontAsync）：文档首帧渲染远早于 9.25MB XHR 完成 →
-//   首帧全部 renderface=null → 方块；字节到后（~15s）重绘即正常（PROF_LF
-//   face=14231976 gid中=7517 实测）。日志实锤：
-//     - 09_fonts 旧实现预取相对路径 'fonts/<id>' 解析到编辑页目录 → rawfile
-//       miss（真机 web_console 行 35）→ WARM 恒空 → 喂字节约死未生效；
-//     - LoadFontArrayBuffer/LoadFontBase64 全树零调用（LSO_FB64 桥 0 条、
-//       FONT_WARM_FEED 0 条）：LoadFontAsync 在渲染链从没被调到。
-// 方案 A（本次）：不改任何官方产物/链——页内主动把 HOS SC 字节取到手（XHR
-//   localhost rawfile，与 30_open loadLocalFile 覆写同源），等 28MB sdk-all 的
-//   checkAllFonts()(243879) 建好 AscFonts.g_font_files 后，把解码字节直接装填
-//   g_fonts_streams + SetStreamIndex + Status=0（+wasm 需 CreateNativeStreamByIndex
-//   转 wasm 内存，min 版 48958 定义）——此后任何 LoadFont 立即有流、FT_Open_Face
-//   有效 → 首帧中文不 miss。装填点不依赖任何异步加载链（竞态免疫）。
-// 兼容性：装填目标与官方 LoadFontAsync 桌面/ web 分支的流位置同构（g_fonts_streams
-//   尾部 + SetStreamIndex），与后续桌面语义（LoadFontBase64 桥）互不冲突。
+// 根因：文档 run eastAsia=SimSun → LoadFont('SimSun') → 引擎「字体字节加载」仅发生于
+//   渲染期按需链（LoadDocumentFonts2 → CFontFileLoader.LoadFontAsync）——首帧渲染远早于
+//   9.25MB XHR 完成 → renderface=null 方块（字节到后重绘即正常）。旧「相对路径预取」
+//   与 LoadFontAsync 两条路均证伪（rawfile miss / 渲染链从没调它）——故走装填式。
+// 方案 A（本次）：不动官方产物/链——页内 XHR 取 rawfile 字节，等 checkAllFonts() 建好
+//   AscFonts.g_font_files 后把解码字节直接装填 g_fonts_streams + SetStreamIndex +
+//   Status=0（+wasm 转 CreateNativeStreamByIndex，min 版 48958 定义）→ 任何 LoadFont
+//   立即有流 → 首帧中文不 miss。装填点不依赖异步加载链（竞态免疫）。
+// 兼容性：装填目标与官方 LoadFontAsync 的流位置同构（g_fonts_streams 尾部 +
+//   SetStreamIndex），与桌面语义（LoadFontBase64 桥）互不冲突。
 (function() {
   var GUID = [0xA0, 0x66, 0xD6, 0x20, 0x14, 0x96, 0x47, 0xFA, 0x95, 0x69, 0xB8, 0x50, 0xB0, 0x41, 0x49, 0x48];
   // 装填清单 = 全部 CJK 字体（2026-09-05 宋体修复：单字体→清单；ID 与构建链

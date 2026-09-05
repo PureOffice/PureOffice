@@ -177,66 +177,6 @@
         if (_fm) console.error('PROF_FMKEYS ' + Object.keys(_fm).slice(0, 40).join(','));
       }
     } catch (e3) { console.error('PROF_GI_ERR ' + String(e3)); }
-
-    // 高层 name→face 链逐步面诊（2026-09-05 最后收窄：a/b/c 每步返回值）
-    try {
-      var out = [];
-      try { out.push('idxSong=' + _ga.GetFontIndex('宋体')); } catch (e) { out.push('A' + e); }
-      try { out.push('idxSimSun=' + _ga.GetFontIndex('SimSun')); } catch (e) { out.push('B' + e); }
-      try {
-        var _dict = _ga.GetFontNameDictionary && _ga.GetFontNameDictionary();
-        out.push('dict=' + (typeof _dict === 'string' ? _dict.slice(0, 120) : (_dict ? Object.keys(_dict).slice(0, 20).join(',') : 'null')));
-      } catch (e) { out.push('C' + e); }
-      try {
-        var _ffw = _ga.GetFontFileWeb && _ga.GetFontFileWeb('宋体');
-        if (_ffw) {
-          out.push('ffwIdx=' + _ffw.m_lIndex
-            + ' r1=' + ((_ffw.m_ulUnicodeRange1 === undefined) ? 'undef' : (_ffw.m_ulUnicodeRange1 >>> 0).toString(16))
-            + ' r4=' + ((_ffw.m_ulUnicodeRange4 === undefined) ? 'undef' : (_ffw.m_ulUnicodeRange4 >>> 0).toString(16))
-            + ' cp1=' + ((_ffw.m_ulCodePageRange1 === undefined) ? 'undef' : (_ffw.m_ulCodePageRange1 >>> 0).toString(16))
-            + ' fmt=' + _ffw.m_eFontFormat
-            + ' path=' + _ffw.m_wsFontPath);
-        } else { out.push('ffw=null'); }
-      } catch (e) { out.push('D' + e); }
-      try {
-        var _ff = _ga.GetFontFile && _ga.GetFontFile('宋体');
-        out.push('ff=' + (_ff ? Object.keys(_ff).slice(0, 20).join('.') : 'null'));
-      } catch (e) { out.push('E' + e); }
-      // CFontSelectList.List 的名字全集（GetFontIndex 候选列表 = g_fonts_selection_bin 反序列化）
-      try {
-        var _selList = _ga && _ga.g_fontSelections && _ga.g_fontSelections.List || [];
-        var _nm = [];
-        for (var _i = 0; _i < Math.min(_selList.length, 40); _i++) {
-          _nm.push(_selList[_i] && (_selList[_i].m_wsFontName || _selList[_i].m_wsFontPath || '?'));
-        }
-        console.error('PROF_LIST n=' + _selList.length + ' names=' + _nm.join(','));
-      } catch (e5) { console.error('PROF_LIST_ERR ' + String(e5)); }
-      // 直接调 GetFontIndex（名字选择），观察对两个名字的选择结果
-      try {
-        var _o1 = { wsName: 'HarmonyOS Sans SC' };
-        var _r1 = _ga.GetFontIndex(_o1, true);
-        var _o2 = { wsName: '宋体' };
-        var _r2 = _ga.GetFontIndex(_o2, true);
-        console.error('PROF_GETIDX hxos=[' + (_r1 && (_r1.m_wsFontName || '?') + '/' + _r1.m_lIndex) + ']'
-          + ' song=[' + (_r2 && (_r2.m_wsFontName || '?') + '/' + _r2.m_lIndex) + ']');
-      } catch (e6) { console.error('PROF_GETIDX_ERR ' + String(e6)); }
-      // 逐候选罚分（名字选择为何不中——2026-09-05）
-      try {
-        var _pl = _ga.g_fontSelections && _ga.g_fontSelections.List || [];
-        var _dict = _ga.g_fontDictionary;
-        for (var _i2 = 0; _i2 < _pl.length; _i2++) {
-          try {
-            var _oPen = { wsName: 'HarmonyOS Sans SC' };
-            var _res = _pl[_i2].GetPenalty(_oPen, _dict.MainUnicodeRanges);
-            if (_res && _res.Penalty < 9000) {
-              console.error('PROF_PEN ' + JSON.stringify(_pl[_i2].m_wsFontName)
-                + ' pen=' + _res.Penalty + ' namePen=' + _res.NamePenalty);
-            }
-          } catch (e7) {}
-        }
-      } catch (e8) { console.error('PROF_PEN_ERR ' + String(e8)); }
-      console.error('PROF_CHAIN ' + out.join(' | '));
-    } catch (e4) { console.error('PROF_CHAIN_ERR ' + String(e4)); }
   } catch (e) { console.error('PROF_PICK_ERR ' + String(e)); }
 
   // —— WebView 层中文渲染能力（页面 canvas，独立于引擎 libfont 的证据）——

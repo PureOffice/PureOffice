@@ -5,6 +5,7 @@
 
 | 文件 | 职责 |
 |---|---|
+| `09_fonts.js` | CJK 字体流保供（rawfile 预取 + XOR 解码 + `g_fonts_streams` 装填，中文方块根因修复） |
 | `00_boot.js` | IIFE 引导 + 公共工具（`__lsoB64` Uint8Array→base64 单点） |
 | `10_engine.js` | Gateway `opendocumentfrombinary` wrap：字节打点（LSO_GW_BIN）+ serverId/images 踢闸（引擎闸门适配） |
 | `20_bridge.js` | 字体注册表注入、CEF 方法装配（`@@METHOD_JS@@`）、`window.AscDesktopEditor`/`desktop` 对象、就绪探针（isLoadFullApi → LocalStartOpen）、loginpage 面板刷新桥、官方 shim（`@@SHIM@@`） |
