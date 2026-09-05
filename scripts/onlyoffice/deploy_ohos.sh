@@ -22,6 +22,10 @@ cd "$ROOT"
 # 未生成 ascshim，旧包白跑一轮；ascshim.js 是生成产物勿手改）
 echo "== shim =="
 python3 "$ROOT/scripts/onlyoffice/desktop/make_ascshim.py" 2>&1 | tail -2
+# 新建空模板同样随包走（make_empty_templates.py 幂等生成 empty.{docx,xlsx,pptx}；
+# 与 grunt-build.sh 主链同源，部署前重跑保证模板源改动进包——2026-09-05 补）
+echo "== empty templates =="
+python3 "$ROOT/scripts/onlyoffice/make_empty_templates.py" 2>&1 | tail -4
 # 构建日志 tee 落盘（pipefail 保 rc；失败时 /tmp/deploy_build.log 留完整证据——2026-09-05 审查补）
 LOG=/tmp/deploy_build.log
 echo "== build =="

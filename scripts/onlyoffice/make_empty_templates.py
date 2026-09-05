@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""生成"新建"空模板：rawfile/onlyoffice/templates/empty.xlsx / empty.pptx
+"""生成"新建"空模板：rawfile/onlyoffice/templates/empty.docx / empty.xlsx / empty.pptx
 
 背景（2026-09-05 用户报修）：欢迎页新建电子表格显示"不像空白表格"——C 列很宽、
 绿色形状、工作表名 "Other"。根因：旧版脚本仅清空 sheetData，**保留了样本视觉残留**
@@ -24,6 +24,13 @@
     Vertical Title/Title and Vertical Text）+ 单张纯空白首滑（ctrTitle/subTitle
     占位，无文本无装饰）+ notesMaster/主题全集。仅清理 docProps/core.xml
     （作者/标题残留）与缩略图。
+  - docx 骨架：templates_src/empty.docx（3 部件最小包——2026-09-04 手搓时
+    "新建 word"模板，真机验证引擎可开、无视觉残留；本脚本在其基础上**追加
+    word/styles.xml**（docDefaults 全段照抄 demo-cn.docx——文档默认中文的
+    唯一机制：demo-cn 无 run 级声明、全文按 docDefaults 识别/渲染为中文，
+    用户真机确认过）并补 [Content_Types].xml / _rels/.rels 声明）。
+    **不要**在 word/document.xml 里写 rFonts/语言：run 级声明会覆盖 docDefaults，
+    且与 demo-cn 的正样本语义（docDefaults 承载）脱节。
 
 旧实现回顾（避免按旧经验修）：
   - xlsx 旧版：基于 sample.xlsx 清 sheetData——sample.xlsx 含 14 部件
@@ -46,8 +53,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SRC_DIR = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src')
 SRC_XLSX = os.path.join(SRC_DIR, 'simple1.xlsx')
 SRC_PPTX = os.path.join(SRC_DIR, 'blank.pptx')
+SRC_DOCX = os.path.join(SRC_DIR, 'empty.docx')
 DST_DIR = os.path.join(ROOT, 'entry', 'src', 'main', 'resources', 'rawfile',
                        'onlyoffice', 'templates')
+DST_W = os.path.join(DST_DIR, 'empty.docx')
 DST_X = os.path.join(DST_DIR, 'empty.xlsx')
 DST_P = os.path.join(DST_DIR, 'empty.pptx')
 
@@ -104,6 +113,50 @@ BLANK_PROP_APP = (
     '<AppVersion>16.0300</AppVersion></Properties>\n'
 )
 
+# —— docx 空模板：styles.xml 内容（docDefaults = 文档默认语言/默认字体的唯一载体）——
+# 全段照抄 demo-cn.docx word/styles.xml 的 docDefaults（2026-09-05 真机已确认
+# "识别对了"：ascii=Arial 西文 + eastAsia=SimSun 中文 + w:lang zh-CN + sz 22 五号）。
+# 字段说明（勿凭感觉增减）：rFonts 决定默认字体（eastAsia=SimSun → 新建即中文
+# 字形）；w:lang 决定状态栏/拼写/默认语言（"English - United States" 消失）；
+# pBdr=0 + spacing after=200/line=276 是官方生成器的空文档默认段落格式（demo-cn
+# 原样），删掉后引擎按内置默认（spacing after=100）与 demo-cn 行为分叉。
+DOCX_STYLES = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+    '<w:docDefaults><w:rPrDefault><w:rPr>'
+    '<w:rFonts w:ascii="Arial" w:eastAsia="SimSun" w:hAnsi="Arial" w:cs="Arial"/>'
+    '<w:sz w:val="22"/><w:szCs w:val="22"/>'
+    '<w:lang w:val="zh-CN" w:eastAsia="zh-CN" w:bidi="ar-SA"/>'
+    '</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>'
+    '<w:pBdr><w:top w:val="none" w:sz="4" w:space="0" w:color="000000"/>'
+    '<w:left w:val="none" w:sz="4" w:space="0" w:color="000000"/>'
+    '<w:bottom w:val="none" w:sz="4" w:space="0" w:color="000000"/>'
+    '<w:right w:val="none" w:sz="4" w:space="0" w:color="000000"/>'
+    '<w:between w:val="none" w:sz="4" w:space="0" w:color="000000"/>'
+    '</w:pBdr><w:spacing w:after="200" w:line="276" w:lineRule="auto"/>'
+    '</w:pPr></w:pPrDefault></w:docDefaults></w:styles>\n'
+)
+# 骨架 [Content_Types].xml 只声明 document.xml → 追加 styles.xml Override
+DOCX_CT = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    '<Default Extension="xml" ContentType="application/xml"/>'
+    '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+    '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+    '</Types>\n'
+)
+# 包级 _rels/.rels 保持原样（只挂 officeDocument rId1）——styles 是 **word/document.xml
+# 的部件关系**，必须挂在 word/_rels/document.xml.rels（2026-09-05 踩坑：第一版误把
+# styles 关系追加到包级，Target=styles.xml 在包根找不到 → x2t 当孤立部件丢弃 →
+# doct_bin 无 docDefaults → 状态栏仍 en-US。真机证据：转换产物 768B 仅含 0x409）。
+DOCX_DOC_RELS = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+    '</Relationships>\n'
+)
+
 # 骨架部件 → 重写内容（未列出的部件原样保留）
 XLSX_REPLACES = {
     'xl/workbook.xml': BLANK_WORKBOOK,
@@ -137,6 +190,32 @@ def rewrite_zip(src_path, dst_path, replaces):
 
 def empty_xlsx():
     rewrite_zip(SRC_XLSX, DST_X, XLSX_REPLACES)
+
+
+def empty_docx():
+    """最小 docx 骨架（真机验证引擎可打开的 3 部件包）→ 补 styles.xml
+    （docDefaults 默认中文）+ Content_Types/rels 声明 → empty.docx。
+    注意：骨架 word/document.xml 保持"单空段落"不动——它已被真机验证可打开；
+    默认中文只经 docDefaults（demo-cn 同款），勿再往 document.xml 写任何内容。"""
+    if not os.path.isfile(SRC_DOCX):
+        raise SystemExit('docx 骨架缺失: %s（来源见文件头注释）' % SRC_DOCX)
+    src = zipfile.ZipFile(SRC_DOCX)
+    names = src.namelist()
+    for key in ('[Content_Types].xml', '_rels/.rels', 'word/document.xml'):
+        if key not in names:
+            raise SystemExit('docx 骨架缺部件 %s（骨架版本不符，须更新本脚本）' % key)
+    with zipfile.ZipFile(DST_W, 'w', zipfile.ZIP_DEFLATED) as out:
+        for item in src.infolist():
+            if item.filename == '[Content_Types].xml':
+                data = DOCX_CT.encode('utf-8')
+            else:
+                data = src.read(item.filename)
+            out.writestr(item, data)
+        # 新增部件（骨架中没有 → 追加写入；styles 关系放 word/_rels/document.xml.rels——
+        # 包级目录仅是 package rels，挂错层级 = styles 被孤立，见 DOCX_DOC_RELS 注释）
+        out.writestr('word/styles.xml', DOCX_STYLES.encode('utf-8'))
+        out.writestr('word/_rels/document.xml.rels', DOCX_DOC_RELS.encode('utf-8'))
+    src.close()
 
 
 def empty_pptx():
@@ -185,8 +264,22 @@ def check(path, asserts):
 
 if __name__ == '__main__':
     os.makedirs(DST_DIR, exist_ok=True)
+    empty_docx()
     empty_xlsx()
     empty_pptx()
+    check(DST_W, [
+        # 新建 word 默认中文判据：docDefaults 带 w:lang zh-CN + eastAsia=SimSun；
+        # 无 run 级字体/语言覆盖（defaults 承载）；en-US 黑名单防回退
+        ('word/styles.xml', ['w:lang w:val="zh-CN"', 'w:eastAsia="SimSun"'],
+         ['w:val="en-US"']),
+        ('word/document.xml', ['<w:body>', '<w:sectPr'], ['<w:rFonts', 'w:lang']),
+        ('[Content_Types].xml', ['styles+xml'], []),
+        # styles 必须是 document 的部件关系（word/_rels/document.xml.rels）；
+        # 包级 _rels/.rels 只挂 officeDocument（挂 styles 进去即 dangling——x2t 丢
+        # docDefaults，2026-09-05 真机实锤 768B bin 只有 0x409）
+        ('word/_rels/document.xml.rels', ['styles.xml'], []),
+        ('_rels/.rels', ['word/document.xml'], []),
+    ])
     check(DST_X, [
         # 真空白判据：无单元格/列宽/多 sheet；标准 sheet 名；空 sst
         ('xl/worksheets/sheet1.xml', ['<sheetData/>'], ['<row ', '<cols', 'EEF0F6']),

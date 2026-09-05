@@ -96,7 +96,8 @@
         window.__lsoReqClose = true;
         _g.requestClose = function() {
           console.error('LSO_REQUEST_CLOSE -> welcome');
-          try { window.location.href = 'http://localhost/onlyoffice/index.html'; } catch (e) { console.error('LSO_RC_ERR ' + String(e)); }
+          // 欢迎页语言=URL lang 参数（缺省 en）——与 goback/homeUrl 同参，保持中文
+          try { window.location.href = 'http://localhost/onlyoffice/index.html?lang=zh-CN'; } catch (e) { console.error('LSO_RC_ERR ' + String(e)); }
         };
         console.error('LSO_RC_HOOKED');
       }

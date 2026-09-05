@@ -185,7 +185,13 @@
                   // → 头部/文件菜单"返回"按钮 → goback → parent.location.href = url
                   //（web 编辑器层唯一的官方回欢迎页机制；Desktop 菜单"关闭文件"项待桌面
                   //  字体/native 通路三项补齐后再启用 isDesktopApp）。
-                  goback: {url: 'http://localhost/onlyoffice/index.html'},
+                  // 欢迎页语言=URL lang 参数（loginpage utils.js:547 getUrlParams 默认
+                  // {lang:'en'}）——与 EditorPage.homeUrl 同参，否则关闭后欢迎页回英文。
+                  goback: {url: 'http://localhost/onlyoffice/index.html?lang=zh-CN'},
+                  // 隐藏头部左上角 ONLYOFFICE logo：官方 branding 语义
+                  // Header.js:798 this.branding = this.options.customization；
+                  // :886-888 branding.logo.visible===false → #header-logo.addClass('hidden')
+                  logo: {visible: false},
                   close: {visible: true, text: '关闭'}
                 }
               },

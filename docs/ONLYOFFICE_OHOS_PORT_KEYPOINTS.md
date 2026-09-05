@@ -298,4 +298,35 @@ desktop-apps 渲染层**）。
 **推荐**：fork 对象 = `third_party/desktop-apps`（非 sdkjs/web-apps——后者
 release 升级会冻结）；构建切官方 --desktop 语义；B 架构补 native 三件套
 （字体精灵/loadjs/AllFonts——KEYPOINTS 既有规划）。在「native libfont 编译件」
-到位后立项；当前 ascshim 方案与之一致（ascshim 的适配内容即官方渲染层同构）。
+到位后立项；当前 ascshim 方案与之一致（ascshim 的适配内容即官方渲染层同构）。## 15. 默认中文三修复（2026-09-05，#66/#67/#68，真机✓）
+
+### 15.1 欢迎页语言 = URL lang 参数（loginpage 唯一入口）
+- 官方 loginpage：`utils.js:541-553` `getUrlParams()` 默认 `{lang:'en'}`；`locale.js:316`
+  页面加载 `(getUrlParams()['lang'])` 初始化（correctLang：`-`→`_`，l10n 键 `zh_CN`）。
+- 三处欢迎页跳转必须带 `?lang=zh-CN`：EditorPage.homeUrl（#63 已带）、
+  ascshim 30_open.goBack、ascshim 40_save.requestClose 覆写（本次补上——用户
+  「关闭后变英文」即这两处）。
+- 验证（真机 192.168.1.8）：点右上角 X（slot-btn-close）→ requestClose 覆写 →
+  欢迎页全中文 ✓。uitest 点击坐标：`dumpLayout` JSON 的 bounds 物理像素。
+
+### 15.2 新建 word 默认语言 = 空模板 docDefaults（链：模板→x2t→doct_bin）
+- `make_empty_templates.py`（挂 grunt-build.sh / deploy_ohos.sh）扩展生成 empty.docx：
+  `templates_src/empty.docx`（3 部件骨架，仓库跟踪）+ **新增 word/styles.xml**
+  （docDefaults 全段照抄 demo-cn.docx：rFonts ascii=Arial eastAsia=SimSun、
+  sz 22/22、w:lang val/eastAsia="zh-CN" bidi="ar-SA"）+ Content_Types Override +
+  **word/_rels/document.xml.rels**。
+- **★ 关系层级坑（本轮最痛，勿重犯）**：`styles.xml` 是 **word/document.xml 的部件
+  关系**，必须挂 `word/_rels/document.xml.rels`（rId1 styles）——**不是包级
+  `_rels/.rels`**！第一版挂包级 → dangling（包根无 styles.xml）→ x2t 当孤立部件
+  丢弃 → doct_bin(768B) 无 docDefaults → 状态栏 still en-US（真机实锤）。
+  修正后：doct_bin 1086B、状态栏「中文 - 中华人民共和国」、默认字体 Arial/11（=sz22）。
+- 判据（勿用 LCID 字节搜索）：doct_bin 语言非 LCID 序列化（搜 0x804 无效），
+  以 bin 体积变化 + 引擎状态栏/默认字体行为为准；先 unzip HAP 验证 rawfile 进包。
+- deploy_ohos.sh 新增 `make_empty_templates.py` 步骤（与 make_ascshim 并列），
+  防止模板源改动不进包。
+
+### 15.3 隐藏编辑器左上角 ONLYOFFICE logo（官方 branding 语义）
+- Header.js:798 `this.branding = this.options.customization`；
+  :886-888 `branding.logo.visible===false → #header-logo.addClass('hidden')`。
+- 修法：ascshim `editorConfig.customization` 加 `logo: {visible: false}`（与
+  goback/close 同机制，非 DOM hack）。真机✓（工具栏最左只有打开/撤销/重做）。
