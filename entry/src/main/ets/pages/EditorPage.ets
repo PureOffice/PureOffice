@@ -112,12 +112,10 @@ struct EditorPage {
    *  底部手势条正确接口（setWindowSystemBarEnable 的 'navigation' 无效果，参照
    *  ../comfyui 实测注释）。 */
   private setImmersive(url: string): void {
-    // 沉浸设备范围（2026-09-05 用户）：Tablet + PC（2in1/pc——1.4 为 PC 桌面形态，
-    // 用户要在文档编辑页也沉浸看看效果；phone 仍不沉浸（小屏通知/界面侵入性强）。
-    // 主页（index.html）始终保持不沉浸，仅编辑器页开启——URL 判定在下方。
-    const isPadOrPc = deviceInfo.deviceType === 'tablet'
-      || deviceInfo.deviceType === '2in1' || deviceInfo.deviceType === 'pc';
-    if (!isPadOrPc) { return; }
+    // 沉浸设备范围：仅 Tablet（2026-09-05 用户回调：PC/2in1 不做沉浸——PC 的
+    // 形态诉求是「空出系统标题栏」，由 EntryAbility setWindowDecorVisible(false)
+    // 方案处理（HiSH 同款）；phone 保持系统默认。主页始终不沉浸（URL 判定下方）。
+    if (deviceInfo.deviceType !== 'tablet') { return; }
     const on = url.indexOf('/main/index.html') >= 0;
     const state = on ? 'on' : 'off';
     if (this.immersiveState === state) { return; }
