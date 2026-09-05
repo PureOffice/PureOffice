@@ -54,8 +54,10 @@ SYSTEM_FONTS_DIR = os.environ.get('OHOS_LIBERATION_FONTS', '/usr/share/fonts/tru
 CJK_FONTS_DIR = os.environ.get('OHOS_CJK_FONTS_DIR',
                                '/apps/harmony/sdk/default/hms/previewer/resources/fonts')
 # 顺序必须 R,I,B,BI（ascshim __fonts_files 注入数组与 FONT_INFOS 的 indexI/indexB 下标一致）
-# 下标 12 = HarmonyOS_Sans_SC.ttf（无独立 Bold/Italic 文件：R/I/B/BI 共用 regular，
-# 加粗/倾斜由引擎模拟——与 Symbol/Wingdings 全下标 0 同约定）
+# 下标 12 = HarmonyOS_Sans_SC.ttf（黑体/无衬线 CJK；无独立 Bold/Italic 文件：
+# R/I/B/BI 共用 regular，加粗/倾斜由引擎模拟——与 Symbol/Wingdings 全下标 0 同约定）
+# 下标 13 = NotoSerifCJK-SC.ttf（宋体/衬线 CJK —— 2026-09-05 宋体修复：真宋体，
+#   用户选「宋体」渲染成无衬线黑体的根因=宋体族行全映射下标 12；见 FONT_INFOS）
 # 曾试用 NotoSansCJK_SC-Regular.otf（CFF）：引擎 wasm libfont 为精简 freetype，
 # FT_Open_Face 对 CFF 失败（m_pFaceInfo=null → 字体系统崩溃）——弃；
 # 2026-09-05 实测记录。HarmonyOS_Sans_SC.ttf = glyf + gvar（可变字体但仍为
@@ -66,16 +68,16 @@ FONT_FILES = ['LiberationSans-Regular.ttf', 'LiberationSans-Italic.ttf',
               'LiberationSerif-Bold.ttf', 'LiberationSerif-BoldItalic.ttf',
               'LiberationMono-Regular.ttf', 'LiberationMono-Italic.ttf',
               'LiberationMono-Bold.ttf', 'LiberationMono-BoldItalic.ttf',
-              'HarmonyOS_Sans_SC.ttf']
+              'HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf']
 # 字体文件来源目录：Liberation → SYSTEM_FONTS_DIR；CJK → templates_src/fonts
-# （CJK 源为 HarmonyOS SDK previewer 的 HarmonyOS_Sans_SC.ttf（可变字体），
-# 本产物为 varLib.instancer 实例化的**静态 glyf TTF**（templates_src/fonts/）。
+# （CJK 源为 HarmonyOS SDK previewer 字体经转换/子集化的**静态 glyf TTF**。
 # 踩坑记录（2026-09-05，勿回退）：
 #   1. VF 原文件（含 fvar/gvar）→ 引擎渲染管线崩溃（白屏/1 页空）；
 #   2. Noto CFF（.otf）→ wasm libfont（精简 freetype）FT_Open_Face 失败
 #      （m_pFaceInfo=null）——只支持 glyf TrueType。
-# 复现（在构建机，需 fontTools + 字体源）：
-#   python3 -c "
+# 复现（在构建机，需 fontTools + otf2ttf/pip 包 + 字体源）：
+#   - 黑体：HarmonyOS_Sans_SC.ttf（SDK previewer，可变字体）实例化静态化——
+#     python3 -c "
 # from fontTools.ttLib import TTFont
 # from fontTools.varLib.instancer import instantiateVariableFont
 # f = TTFont('$CJK_FONTS_DIR/HarmonyOS_Sans_SC.ttf')
@@ -83,13 +85,31 @@ FONT_FILES = ['LiberationSans-Regular.ttf', 'LiberationSans-Italic.ttf',
 # for t in ('fvar','gvar','STAT','avar','cvar','MVAR','HVAR','VVAR'):
 #     t in f and del f[t]
 # f.save('scripts/onlyoffice/templates_src/fonts/HarmonyOS_Sans_SC.ttf')"
+#   - 宋体：NotoSerifCJK-Regular.ttc（SDK previewer，CFF 字库）CFF→glyf（otf2ttf
+#     >=0.2，pip3 install --break-system-packages otf2ttf）——取 SC 面（TTC 面序
+#     JP/KR/SC/TC/HK → face_index=2）：
+#     otf2ttf -o scripts/onlyoffice/templates_src/fonts/NotoSerifCJK-SC.ttf \
+#       --face-index 2 --overwrite $CJK_FONTS_DIR/NotoSerifCJK-Regular.ttc
+#     产物 31.5MB（全量，**不入库**——过大；子集化产物才入库，见 FONT_SUBSETS）。
 FONT_SRC_BY_FILE = {fn: SYSTEM_FONTS_DIR for fn in FONT_FILES[:12]}
 FONT_SRC_BY_FILE['HarmonyOS_Sans_SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
+FONT_SRC_BY_FILE['NotoSerifCJK-SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
+
+# 子集映射：final 名（FONT_FILES/rawfile fonts/ 里的名字）→ (全量源文件, 子集产物,
+# 注册面名——渲染槽 name 匹配用；CJK 族注册行名须一致。宋体=SimSun（引擎把
+# '宋体' 归一为 'SimSun'），黑体=None（内部名已=注册行名 'HarmonyOS Sans SC'）。
+# 子集产物入库（git）：宋体全量 31.5MB 太大不适于库；subset 缺失时可从全量源重建
+# （otf2ttf 命令见上注释；黑体全量在库、subset 为构建中间产物不入库）。
+FONT_SUBSETS = {
+    'HarmonyOS_Sans_SC.ttf': ('HarmonyOS_Sans_SC.ttf', 'HarmonyOS_Sans_SC.subset.ttf', None),
+    'NotoSerifCJK-SC.ttf': ('NotoSerifCJK-SC.ttf', 'NotoSerifCJK-SC.subset.ttf', 'SimSun'),
+}
 
 # 字体注册表（引擎 Externals.js checkAllFonts 契约）
-# 中文字族：文档字体名（微软雅黑/宋体等）与 HarmonyOS Sans SC 同下标 12——
-# 引擎按名字行匹配到即可从同一文件取字形；避免「未命中名→fallback Liberation Sans
-# → 中文字符无字形→方块」。
+# 中文字族：文档字体名（黑体族：HarmonyOS Sans SC/微软雅黑/Noto Sans 等）→ 下标 12
+# （黑体文件）；宋体族（宋体/SimSun/Songti SC/simsun.ttf）→ 下标 13（真宋体文件）——
+# 引擎按名字行匹配到即可从对应文件取字形；避免「未命中名→fallback Liberation Sans
+# → 中文字符无字形→方块」；宋体族不重定向黑体（2026-09-05 宋体显示乌龙实证）。
 FONT_INFOS = [
     # Arial 保持 Liberation（2026-09-05 实测：把 Arial 重定向到大号 CJK 字体
     # 会拖崩 libfont 渲染管线——1 页空白回归。原因未细究但证据明确：
@@ -115,15 +135,25 @@ FONT_INFOS = [
     ["微软雅黑", 12, 0, 12, 0, 12, 0, 12, 0],
     ["SimHei", 12, 0, 12, 0, 12, 0, 12, 0],
     ["黑体", 12, 0, 12, 0, 12, 0, 12, 0],
-    ["SimSun", 12, 0, 12, 0, 12, 0, 12, 0],
-    ["宋体", 12, 0, 12, 0, 12, 0, 12, 0],
-    ["Songti SC", 12, 0, 12, 0, 12, 0, 12, 0],
-    # 引擎内建字体字典（map.js FD_FontDictionary 硬编码 base64）会把请求名归一为
-    # 「字典文件记录名」（带 .ttf 后缀，如 宋体→simsun.ttf）；渲染随后用
-    # g_map_font_index[该记录名] 查本表——键必须含 .ttf 后缀，否则 undefined →
-    # 无字体 → 控制符方块（2026-09-05 最后根因，实测 GetFontFileWeb('宋体')
-    # 返回 path=simsun.ttf）。
-    ["simsun.ttf", 12, 0, 12, 0, 12, 0, 12, 0],
+    # 下标 13 = NotoSerifCJK-SC.ttf（真宋体/衬线，2026-09-05 宋体修复：FONT_INFOS
+    # 里宋体族（宋体/SimSun/Songti SC/simsun.ttf）此前全映射下标 12（黑体）——
+    # 用户选「宋体」输入文字渲染成**无衬线黑体样式**，实测确认。真宋体行
+    # indexR=13（与下表中黑体族行 12 区分；微软雅黑/黑体/Noto Sans 等仍 12）。
+    ["SimSun", 13, 0, 13, 0, 13, 0, 13, 0],
+    ["宋体", 13, 0, 13, 0, 13, 0, 13, 0],
+    ["Songti SC", 13, 0, 13, 0, 13, 0, 13, 0],
+    # 「字典文件记录名」（带 .ttf 后缀）行（simsun.ttf/simhei.ttf/msyh.ttf）——
+    # 2026-09-05 源码复核（map.js GetPenalty/GetFaceNamePenalty/CheckLikeFonts）：
+    # **不是**任何硬编码字体字典的键（旧注释“map.js FD_FontDictionary 硬编码
+    # base64 归一”不准确——FD_FontDictionary 是运行时构建结构）。真实机制：
+    # ① g_map_font_index[行名] 由 Externals.checkAllFonts 直接以 __fonts_infos
+    #    行 0 为键构建（Externals.js:669）——即 FONT_INFOS 行名本身就是查表键；
+    # ② '宋体' 请求经 GetPenalty **名字相似度匹配**（'宋体' vs 候选 'SimSun'
+    #    NamePenalty=0，官方别名等价）返回 SimSun 行 —— 因此「宋体/SimSun/
+    #    simsun.ttf」三行指向同一 indexR 是**别名重复**，并非三级归一链；
+    # ③ simsun.ttf 行仅供带 .ttf 后缀形式的请求名（个别 API 回显 m_wsFontPath
+    #    用此形式）命中，保持 indexR 一致即可（13/12/12 现正确）。
+    ["simsun.ttf", 13, 0, 13, 0, 13, 0, 13, 0],
     ["simhei.ttf", 12, 0, 12, 0, 12, 0, 12, 0],
     ["msyh.ttf", 12, 0, 12, 0, 12, 0, 12, 0],
 ]
@@ -134,7 +164,9 @@ FONT_INFOS = [
 # FONT_INFOS[infoRowIndex][0] 字族 —— 2026-09-05 中文方块最后根因：
 # 此前只注入 __fonts_files/__fonts_infos，缺这张表 → Ranges 空 → 任何 CJK 字符
 # 回退失败 → 全部渲染为方块（引擎源代码 libfont/character.js:74 init 直接 return）。
-# infoRowIndex 一律取 FONT_INFOS 中「宋体」行（=12，与 CJK 文件同下标）：
+# infoRowIndex 一律取 FONT_INFOS 中「宋体」行（=13 行号；行号是 FONT_INFOS 数组
+# 下标，恰与真宋体文件下标 13 一致——回退到宋体=中文常用字回退到衬线，同官方
+# Windows 语义；勿把行号与 indexR 混为一谈）：
 FONT_INFOS_ROWS = {row[0]: i for i, row in enumerate(FONT_INFOS)}
 CJK_ROW = FONT_INFOS_ROWS["宋体"]
 # 段清单：CJK 部首/符号+假名（2E80-30FF）、CJK 核心表意（4E00-9FFF）、
@@ -146,21 +178,20 @@ for _s, _e in [(0x2E80, 0x30FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF),
     FONT_RANGES.extend([_s, _e, CJK_ROW])
 FONT_GUID_ODTTF = bytes([0xA0, 0x66, 0xD6, 0x20, 0x14, 0x96, 0x47, 0xFA, 0x95, 0x69, 0xB8, 0x50, 0xB0, 0x41, 0x49, 0x48])
 
-# —— B：CJK 字体子集化（2026-09-05 默认中文方案 B）——
-# 9.25MB HarmonyOS_Sans_SC.ttf 是 13 个字体中唯一大文件：A（09_fonts 装填）虽把
-# 字节保供提前到文档打开前，XHR 字节体积仍是毫秒 vs 秒的观感差；子集化后 ~1.3MB，
-# 装填几乎瞬时，且对「首帧竞态」再无任何概率窗口。
+# —— B：CJK 字体子集化（2026-09-05 默认中文方案 B；2026-09-05 宋体修复泛化为
+#     黑体+宋体双字体，见 FONT_SUBSETS 映射）——
+# 9.25MB HarmonyOS_Sans_SC.ttf 是 14 个字体中唯一大文件：A（09_fonts 装填）虽把
+# 字节保供提前到文档打开前，XHR 字节体积仍是毫秒 vs 秒的观感差；子集化后 ~1.9MB
+# （黑体）/5.2MB（宋体衬线——笔画弯钩多，字形数据天然大于黑体；实测装填 <2s
+# 仍无首帧竞态窗口），装填几乎瞬时，且对「首帧竞态」再无任何概率窗口。
 # 字符集：GB2312 全集（6763 汉字 + 符号/字母区 A1A1-F7FE）+ ASCII + Latin-1
 #   + CJK 标点（3000-303F）+ 全角形式（FF00-FFEF）。
 #   取舍：BMP 扩展 A 区（3400-4DBF）生僻字不在子集内——此类字符渲染 notdef
 #   （与桌面版「常用字库」取舍一致；文档实际内容多为常见字）。
-# 前提：fontTools（pip install fonttools；构建机 4.63.0 实测 OK）。
+# 前提：fontTools（pip install fonttools；构建机 4.63.0 实测 OK）+ 全量源字体。
 # 输入源必须是**静态 glyf TTF**（templates_src/fonts/ 现成产物，勿用 VF/ CFF，
 # 见 FONT_SRC_BY_FILE 注释踩坑记录）——子集化不改字体名/表序，__fonts_files
-# 与 ascshim 09_fonts 装填（ID=HarmonyOS_Sans_SC.ttf）不受影响。
-CJK_SUBSET_FONT = 'HarmonyOS_Sans_SC.ttf'
-CJK_SUBSET_OUT = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts',
-                              'HarmonyOS_Sans_SC.subset.ttf')
+# 与 ascshim 09_fonts 装填（ID=final 名）不受影响。
 
 
 def _cjk_unicodes():
@@ -179,30 +210,62 @@ def _cjk_unicodes():
     return ret
 
 
-def make_cjk_subset(src):
-    """pyftsubset 子集化（幂等：产物存在且不早于源 → 复用）。成功后返回产物路径。
+def make_cjk_subset(src, out, family=None):
+    """pyftsubset 子集化（幂等：产物存在且不早于源 → 复用；**产物存在但全量源
+    缺失（如宋体 31.5MB 不入库）→ 也复用产物**——否则全新克隆无法构建）。
+    family 非 None 时**重写 name 表**（ID1/2/3/4/6/16/17 设为 family——引擎渲染槽
+    按 wasm face 的 family Name 与文档请求名匹配；Noto Serif CJK SC 内部名与注册
+    行名（宋体/SimSun）不符 → 槽失效 → 整 run 空白（2026-09-05 真机实测：连拉丁
+    'dd' 都不绘制=run 级空，非字形级）。成功后返回产物路径。
     失败 raise SystemExit —— 构建链非零退出（缺 fontTools/CLI/尺寸越界/缺关键字形）"""
     import subprocess
-    if os.path.isfile(CJK_SUBSET_OUT) and os.path.getmtime(CJK_SUBSET_OUT) >= os.path.getmtime(src):
-        return CJK_SUBSET_OUT
+    if os.path.isfile(out) and (not os.path.isfile(src)
+                                or os.path.getmtime(out) >= os.path.getmtime(src)):
+        if family:
+            rewrite_font_name(out, family)
+        return out
     unicodes = ','.join('U+%04X' % cp for cp in sorted(_cjk_unicodes()))
     cmd = ['pyftsubset', src, '--unicodes=' + unicodes,
-           '--output-file=' + CJK_SUBSET_OUT, '--layout-features=*']
+           '--output-file=' + out, '--layout-features=*']
     try:
         subprocess.run(cmd, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         raise SystemExit('pyftsubset 失败（%s）: %s' % (src, e.stderr.decode(errors='replace')[:500]))
-    size = os.path.getsize(CJK_SUBSET_OUT)
-    if not (100_000 < size < 5_000_000):
+    size = os.path.getsize(out)
+    if not (100_000 < size < 6_000_000):
         raise SystemExit('CJK subset 尺寸越界: %d bytes' % size)
     # 关键字形断言：cmap 必须含 中(4E2D) 与 A(41) —— 防空壳子集静默进入 rawfile
     from fontTools.ttLib import TTFont
-    cm = TTFont(CJK_SUBSET_OUT).getBestCmap()
+    cm = TTFont(out).getBestCmap()
     if 0x4E2D not in cm or 0x41 not in cm:
         raise SystemExit('CJK subset 缺关键字形（4E2D/41）—— 子集化失败')
+    if family:
+        rewrite_font_name(out, family)
     print('  CJK 子集化 %s -> %s (%d bytes, %d chars)'
-          % (os.path.basename(src), os.path.basename(CJK_SUBSET_OUT), size, len(cm)))
-    return CJK_SUBSET_OUT
+          % (os.path.basename(src), os.path.basename(out), size, len(cm)))
+    return out
+
+
+def rewrite_font_name(path, family):
+    """重写 TTF name 表（ID1 family/ID2 subfamily/ID3 unique/ID4 full/ID6 postscript/
+    ID16 typoFamily/ID17 typoSubFamily = family + Regular——引擎 wasm freetype
+    face.Name 取 family（ID1/ID16），必须与 FONT_INFOS 注册行名一致，否则渲染槽
+    匹配失败 → 整 run 空白（2026-09-05 真机实证，见 make_cjk_subset 注释）。
+    幂等：name 已等于目标 → 不动。fontTools 4.63 实测 OK——新转换器替代方案备忘：
+    otf2ttf 才能 CFF→glyf；fontTools 无 otf2ttf。"""
+    from fontTools.ttLib import TTFont
+    g = TTFont(path)
+    nm = g['name']
+    if nm.getDebugName(1) == family and nm.getDebugName(16) == family:
+        return
+    for recid, val in [(1, family), (2, 'Regular'), (3, family + ' Regular'),
+                       (4, family), (6, family), (16, family), (17, 'Regular')]:
+        nm.setName(val, recid, 3, 1, 0x409)      # Windows English
+        nm.setName(val, recid, 3, 1, 0x804)      # Windows zh-CN 同值
+    g.save(path)
+    g2 = TTFont(path)
+    assert g2['name'].getDebugName(1) == family, 'name rewrite 断言失败: %s' % family
+    print('  name 重写 %s -> family=%s' % (os.path.basename(path), family))
 
 
 # —— 字体缩略图精灵生成（2026-09-05 字族下拉终极修复，资源侧；非工控注入）——
@@ -256,7 +319,14 @@ def make_fonts_sprites(count):
             for i in range(count):
                 row = FONT_INFOS[i]
                 ff = FONT_FILES[row[1]]          # CFontInfo indexR → 字体文件
-                src = os.path.join(FONT_SRC_BY_FILE[ff], ff)
+                fname = ff
+                # 子集字体（FONT_SUBSETS）优先用子集产物渲染——与引擎实际拿到的
+                # 字形完全一致（宋体全量不入库，subset 一定存在）
+                if ff in FONT_SUBSETS:
+                    _sub = os.path.join(FONT_SRC_BY_FILE[ff], FONT_SUBSETS[ff][1])
+                    if os.path.isfile(_sub):
+                        fname = FONT_SUBSETS[ff][1]
+                src = os.path.join(FONT_SRC_BY_FILE[ff], fname)
                 try:
                     f = ImageFont.truetype(src, fsize)
                 except OSError:
@@ -501,13 +571,22 @@ def main():
     print('  生成 sdkjs/common/AllFonts.js (%d bytes)' % os.path.getsize(allfonts_dst))
 
     # 字体拷贝：FONT_FILES 全部就位才成功（缺失/预加密失败即非零退出 —— 2026-09-05 审查补）
-    # 源目录按文件取（Liberation→系统目录；CJK→HarmonyOS SDK previewer 字库；
-    # CJK_SUBSET_FONT 额外过子集化——方案 B，见函数块注释）
+    # 源目录按文件取（Liberation→系统目录；CJK→templates_src/fonts，其中
+    # FONT_SUBSETS 登记的两族额外过子集化——方案 B，见函数块注释）
+    # 先清空再装：复用 dest 时陈旧文件（旧版本残留/手放非 ttf）会进 version.json
+    # 哈希导致 **产物 hash 随历史残留漂移**（2026-09-05 演练实证：rm 前后构建
+    # version hash 不一致——当前差异源为历史残留，清空后消除）。幂等依据=内容，
+    # 不依赖 dest 初始状态。
+    if os.path.isdir(FONT_DST):
+        shutil.rmtree(FONT_DST)
     os.makedirs(FONT_DST, exist_ok=True)
     fonts_ok = 0
     for fn in FONT_FILES:
-        if fn == CJK_SUBSET_FONT:
-            src_font = make_cjk_subset(os.path.join(FONT_SRC_BY_FILE[fn], fn))
+        if fn in FONT_SUBSETS:
+            _full, _sub, _fam = FONT_SUBSETS[fn]
+            src_font = make_cjk_subset(os.path.join(FONT_SRC_BY_FILE[fn], _full),
+                                       os.path.join(FONT_SRC_BY_FILE[fn], _sub),
+                                       family=_fam)
         else:
             src_font = os.path.join(FONT_SRC_BY_FILE[fn], fn)
         dst_font = os.path.join(FONT_DST, fn)

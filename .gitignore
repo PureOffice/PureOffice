@@ -35,3 +35,8 @@ entry/.cxx/
 .temp/
 # CJK 子集化中间产物（build_editors_ohos.make_cjk_subset 幂等再生；源字体保留入库）
 scripts/onlyoffice/templates_src/fonts/HarmonyOS_Sans_SC.subset.ttf
+# —— 例外：NotoSerifCJK-SC.subset.ttf 刻意入库（2026-09-05 宋体修复）——
+#   全量源 31.5MB（otf2ttf CFF→glyf）不入库；subset 5.5MB 是全新克隆重建字体的
+#   唯一字体资产（make_cjk_subset 幂等分支「src 缺失 → 复用产物」依赖它），
+#   git clone 后无需 otf2ttf/SDK TTC 即可构建。勿按"中间产物"套用上一条规则。
+

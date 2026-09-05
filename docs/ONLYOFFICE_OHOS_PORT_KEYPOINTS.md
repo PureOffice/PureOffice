@@ -219,6 +219,41 @@ face=非null gid中=369 load中=0 err=0`（子集后 GID 重排 369；修复前 
 正文字形走 CacheGlyph 路径无黑字，不阻断中文渲染，如再遇 HBS 路径场景先从
 textshaper.js:124 实参开始取。
 
+## 12.5 宋体修复与字体选择语义（2026-09-05 扩展，已真机✓）
+
+**宋体渲染修复**（用户：选「宋体」输入显示的是无衬线黑体样式）：
+- 根因：`FONT_INFOS` 宋体族行（宋体/SimSun/Songti SC/simsun.ttf）全映射下标 12
+  的 HarmonyOS_Sans_SC.ttf（黑体文件）——选了宋体=用黑体取字形。
+- 真宋体入库：HarmonyOS SDK previewer 自带 `NotoSerifCJK-Regular.ttc` 是 **CFF
+  轮廓**（wasm libfont 精简 freetype FT_Open_Face 失败——老契约，勿回退）；
+  `otf2ttf`(>=0.2, pip3 install --break-system-packages otf2ttf) CFF→glyf
+  静态化（**TTC 面序 JP/KR/SC/TC/HK → SC=face_index=2**，命令固化为
+  build_editors_ohos.py FONT_SRC_BY_FILE 注释）→ 全量 31.5MB **不入库**
+  （按构建可复现原则：全量源缺失时 subset 幂等复用——git clone 后无需重转）→
+  `make_cjk_subset` GB2312 子集 → **5.5MB 入库** `NotoSerifCJK-SC.subset.ttf`。
+  FONT_FILES 追加 `NotoSerifCJK-SC.ttf`（下标 13）；宋体族四行 12→13；
+  黑体族（黑体/雅黑/Noto Sans/HarmonyOS Sans SC/simhei/msyh）仍 12；
+  `make_cjk_subset` 泛化（参数化+上限放宽 6MB+源缺失复用）；缩放精灵取源
+  subset 优先；09_fonts.js 单字体装填→**双 CJK 清单**（黑体+真宋体）。
+
+**★ 字体内部 name 契约（2026-09-05 真机实证，最重要的教训）**：字体文件
+name 表（ID1/16 family）**必须等于 FONT_INFOS 注册行名**（引擎把'宋体'归一为
+'SimSun'）。第一版宋体包（内部名 'Noto Serif CJK SC' ≠ 注册名）→ 渲染槽失效
+→ **整个 run 空白（含拉丁 'dd'，run 级非字形级）**。修复=构建链 `family` 参数
+→ `rewrite_font_name`（fontTools setName ID1/2/3/4/6/16/17 + 断言，幂等）。
+黑体原文件内部名='HarmonyOS Sans SC' 与注册行名恰一致——此前从未暴露该契约。
+
+**字体选择语义（产品行为说明，与 Word/官方桌面版一致）**：
+- 工具栏字体选择器设置**西文字体**（ascii/hAnsi），**中文字体（eastAsia）由
+  docDefaults 的 `w:eastAsia="SimSun"` + `w:lang="zh-CN"` 决定**（空模板与
+  sample/docDefaults 规范化已设置）。
+- 因此「选择器=Times New Roman，中文显示宋体」**符合预期**（Word 同行为）；中
+  文要换字体需文档 eastAsia 声明（或后续接「字体→高级」eastAsia 选项——当前
+  移植未接，属合理缺口）。
+- 验证现场：Unnamed 空模板/docDefaults 中文默认=宋体；demo-cn.docx docDefaults
+  `ascii=Arial eastAsia=SimSun`（run 无覆盖→全文宋体=正确）；真机 18:52 验证
+  SIMSUN run 渲染衬线正常、字体下拉=SimSun 一致。
+
 ## 13. 字族下拉无法展开（2026-09-05 终局：官方 web 语义的资源侧修复，已真机✓）
 
 **链路（全链实证）**：`ComboBoxFonts.onBeforeShowMenu`（store 空 → preventDefault，

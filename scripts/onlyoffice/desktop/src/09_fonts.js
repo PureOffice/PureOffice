@@ -21,73 +21,77 @@
 //   尾部 + SetStreamIndex），与后续桌面语义（LoadFontBase64 桥）互不冲突。
 (function() {
   var GUID = [0xA0, 0x66, 0xD6, 0x20, 0x14, 0x96, 0x47, 0xFA, 0x95, 0x69, 0xB8, 0x50, 0xB0, 0x41, 0x49, 0x48];
-  var ID = 'HarmonyOS_Sans_SC.ttf';
-  var BYTES = null;   // XHR 成功后 = rawfile 字节（**仍是 pre_xor 加密态**，装填前解码）
-  var filled = false;
-
-  // —— ① 立即预取（ascshim eval 时：早于 app.js/sdk 加载与文档打开）——
-  // rawfile 字体在构建时被 pre_xor_font 加密（前 32B XOR guidOdttf）——装填时还原。
-  (function prefetch() {
-    var urls = [
-      'http://localhost/onlyoffice/fonts/' + ID,  // 绝对同源（页面 origin=http://localhost）
-      '../../../../fonts/' + ID                    // 相对兜底（编辑页→onlyoffice/fonts/）
-    ];
-    (function tryNext(i) {
-      if (i >= urls.length) { console.error('FONT_WARM_PF_GIVEUP'); return; }
-      try {
-        var x = new XMLHttpRequest();
-        x.open('GET', urls[i], true);
-        x.responseType = 'arraybuffer';
-        x.onload = function() {
-          if (x.status === 200 && x.response) {
-            BYTES = new Uint8Array(x.response);
-            console.error('FONT_WARM_BYTES len=' + BYTES.length + ' url=' + urls[i]);
-            try_fill();
-            return;
-          }
-          console.error('FONT_WARM_PF_404 ' + urls[i] + ' st=' + x.status);
-          tryNext(i + 1);
-        };
-        x.onerror = function() { console.error('FONT_WARM_PF_ERR ' + urls[i]); tryNext(i + 1); };
-        x.send(null);
-      } catch (e) { console.error('FONT_WARM_PF_EXC ' + String(e)); tryNext(i + 1); }
-    })(0);
-  })();
-
-  // —— ② 装填（字节+表都就绪后执行一次）——
+  // 装填清单 = 全部 CJK 字体（2026-09-05 宋体修复：单字体→清单；ID 与构建链
+  // FONT_FILES final 名一致：黑体=HarmonyOS_Sans_SC.ttf，真宋体=NotoSerifCJK-SC.ttf）
+  var IDS = ['HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf'];
   function xorDecode(u8) {
     var n = Math.min(32, u8.length);
     for (var i = 0; i < n; ++i) u8[i] ^= GUID[i % 16];
     return u8;
   }
-  function try_fill() {
-    if (filled || !BYTES) return;                 // 字节未到 → 等 prefetch 回调再试
-    var F = window.AscFonts;
-    if (!F) return;                               // AscFonts 未建（min 版 IIFE 时）
-    if (!F.FontStream || !F.g_font_files) return; // 28MB checkAllFonts 未跑（建表+导出错后）
-    var ff = null;
-    for (var i = 0; i < F.g_font_files.length; ++i) {
-      if (F.g_font_files[i].Id === ID) { ff = F.g_font_files[i]; break; }
-    }
-    if (!ff) { console.error('FONT_WARM_NOFILE gff=' + F.g_font_files.length); return; }
-    try {
-      var bytes = xorDecode(BYTES);
-      var streams = F.g_fonts_streams = F.g_fonts_streams || [];
-      var s = new F.FontStream(bytes, bytes.length);
-      streams.push(s);
-      ff.SetStreamIndex(streams.length - 1);
-      ff.Status = 0;                              // 0=loaded（CheckLoaded:=0||1）
-      if (typeof F.CreateNativeStreamByIndex === 'function') {
-        F.CreateNativeStreamByIndex(streams.length - 1); // wasm 语义需转 wasm 内存
+  IDS.forEach(function(ID) {
+    var BYTES = null;   // XHR 成功后 = rawfile 字节（**仍是 pre_xor 加密态**，装填前解码）
+    var filled = false;
+
+    // —— ① 立即预取（ascshim eval 时：早于 app.js/sdk 加载与文档打开）——
+    // rawfile 字体在构建时被 pre_xor_font 加密（前 32B XOR guidOdttf）——装填时还原。
+    (function prefetch() {
+      var urls = [
+        'http://localhost/onlyoffice/fonts/' + ID,  // 绝对同源（页面 origin=http://localhost）
+        '../../../../fonts/' + ID                    // 相对兜底（编辑页→onlyoffice/fonts/）
+      ];
+      (function tryNext(i) {
+        if (i >= urls.length) { console.error('FONT_WARM_PF_GIVEUP ' + ID); return; }
+        try {
+          var x = new XMLHttpRequest();
+          x.open('GET', urls[i], true);
+          x.responseType = 'arraybuffer';
+          x.onload = function() {
+            if (x.status === 200 && x.response) {
+              BYTES = new Uint8Array(x.response);
+              console.error('FONT_WARM_BYTES id=' + ID + ' len=' + BYTES.length + ' url=' + urls[i]);
+              try_fill();
+              return;
+            }
+            console.error('FONT_WARM_PF_404 ' + urls[i] + ' st=' + x.status);
+            tryNext(i + 1);
+          };
+          x.onerror = function() { console.error('FONT_WARM_PF_ERR ' + urls[i]); tryNext(i + 1); };
+          x.send(null);
+        } catch (e) { console.error('FONT_WARM_PF_EXC ' + String(e)); tryNext(i + 1); }
+      })(0);
+    })();
+
+    // —— ② 装填（字节+表都就绪后执行一次）——
+    function try_fill() {
+      if (filled || !BYTES) return;                 // 字节未到 → 等 prefetch 回调再试
+      var F = window.AscFonts;
+      if (!F) return;                               // AscFonts 未建（min 版 IIFE 时）
+      if (!F.FontStream || !F.g_font_files) return; // 28MB checkAllFonts 未跑（建表+导出错后）
+      var ff = null;
+      for (var i = 0; i < F.g_font_files.length; ++i) {
+        if (F.g_font_files[i].Id === ID) { ff = F.g_font_files[i]; break; }
       }
-      filled = true;
-      console.error('FONT_WARM_FILLED idx=' + (streams.length - 1)
-        + ' bytes=' + bytes.length + ' status=' + ff.Status);
-    } catch (e) { console.error('FONT_WARM_FILL_ERR ' + String(e)); }
-  }
-  (function poll() {
-    if (filled) return;
-    try_fill();
-    if (!filled) setTimeout(poll, 200);
-  })();
+      if (!ff) { console.error('FONT_WARM_NOFILE id=' + ID + ' gff=' + F.g_font_files.length); return; }
+      try {
+        var bytes = xorDecode(BYTES);
+        var streams = F.g_fonts_streams = F.g_fonts_streams || [];
+        var s = new F.FontStream(bytes, bytes.length);
+        streams.push(s);
+        ff.SetStreamIndex(streams.length - 1);
+        ff.Status = 0;                              // 0=loaded（CheckLoaded:=0||1）
+        if (typeof F.CreateNativeStreamByIndex === 'function') {
+          F.CreateNativeStreamByIndex(streams.length - 1); // wasm 语义需转 wasm 内存
+        }
+        filled = true;
+        console.error('FONT_WARM_FILLED id=' + ID + ' idx=' + (streams.length - 1)
+          + ' bytes=' + bytes.length + ' status=' + ff.Status);
+      } catch (e) { console.error('FONT_WARM_FILL_ERR id=' + ID + ' ' + String(e)); }
+    }
+    (function poll() {
+      if (filled) return;
+      try_fill();
+      if (!filled) setTimeout(poll, 200);
+    })();
+  });
 })();
