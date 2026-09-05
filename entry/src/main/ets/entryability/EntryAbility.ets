@@ -1,6 +1,5 @@
 import { AbilityConstant, Want, UIAbility } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
-import { deviceInfo } from '@kit.BasicServicesKit';
 
 /**
  * 启动参数（want.parameters）——EditorPage 读取（自动验收开关 m7accept/m7file；
@@ -40,30 +39,11 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
-    windowStage.loadContent('pages/EditorPage', (err) => {
-      if (err.code) {
-        console.error('loadContent failed: ' + JSON.stringify(err));
-        return;
-      }
-      // 沉浸窗口模式（2026-09-05 用户指示，参照 ../comfyui/EntryAbility.ets）：
-      // 全屏布局 + 隐藏状态栏/底部导航指示器 —— WebView 铺满整屏（欢迎页/编辑器页）。
-      // **仅 Pad**：module.json5 deviceTypes 含 phone/2in1（comfyui 只声明 tablet
-      // 无需判断），这里运行时按 deviceInfo.deviceType === 'tablet' 守卫；phone/2in1
-      // 保持系统默认。navigationIndicator 必须用 setSpecificSystemBarEnabled
-      // （setWindowSystemBarEnable 的 'navigation' 参数无效果——comfyui 实测注释）；
-      // 与 EditorPage 根 Stack 的 expandSafeArea 配合，内容顶到边。
-      if (deviceInfo.deviceType === 'tablet') {
-        try {
-          const mw = windowStage.getMainWindowSync();
-          mw.setWindowLayoutFullScreen(true);
-          mw.setSpecificSystemBarEnabled('status', false);
-          mw.setSpecificSystemBarEnabled('navigationIndicator', false);
-          console.info('immersive window (tablet) enabled');
-        } catch (e) {
-          console.error('immersive window setup failed: ' + JSON.stringify(e));
-        }
-      }
-    });
+    // 初始不开启沉浸（2026-09-05 用户需求：主页（index.html）不沉浸，进入编辑器页
+    // 再开）。沉浸窗口已迁至 EditorPage.setImmersive——Web 组件 onLoadIntercept 按
+    // 目标 URL 驱动（index.html=关 / main/index.html=开），仅 tablet（deviceInfo 守卫
+    // 在页面侧）；本处 loadContent 放行即可，勿在此恢复无条件开启（否则主页被沉浸）。
+    windowStage.loadContent('pages/EditorPage');
   }
 
   onWindowStageDestroy(): void {

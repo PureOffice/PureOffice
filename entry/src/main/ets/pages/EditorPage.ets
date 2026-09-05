@@ -1,5 +1,6 @@
 import { webview } from '@kit.ArkWeb';
-import { BusinessError } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { window } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
@@ -97,6 +98,40 @@ struct EditorPage {
     return 'http://localhost/onlyoffice/index.html?v=' + this.pageVer
       + '&lang=zh-CN'
       + (this.m7Target.length > 0 ? '&m7open=' + encodeURIComponent(this.m7Target) : '');
+  }
+
+  /** 沉浸窗口状态缓存（setImmersive 幂等去重；''=未初始化，首次按 URL 设定） */
+  private immersiveState: string = '';
+
+  /** 沉浸窗口按 URL 驱动（2026-09-05 用户需求：主页不沉浸，离开主页（编辑器页）再开。
+   *  仅 Pad（module deviceTypes 含 phone/2in1，deviceInfo 守卫——EntryAbility 已迁移
+   *  到此处，主页初始即非沉浸）。入口统一为 Web 组件 onLoadIntercept（导航决定时、
+   *  早于内容加载）+ 单点收口覆盖所有进出路径（初始/打开/关闭/文件菜单返回/ascshim
+   *  goback/requestClose 的页面自跳——任何落脚 index.html 或 /main/index.html 的
+   *  导航都会经过拦截）。setSpecificSystemBarEnabled 的 navigationIndicator 为隐藏
+   *  底部手势条正确接口（setWindowSystemBarEnable 的 'navigation' 无效果，参照
+   *  ../comfyui 实测注释）。 */
+  private setImmersive(url: string): void {
+    if (deviceInfo.deviceType !== 'tablet') { return; }
+    const on = url.indexOf('/main/index.html') >= 0;
+    const state = on ? 'on' : 'off';
+    if (this.immersiveState === state) { return; }
+    // getLastWindow 为 Promise 版（本 SDK 无 getLastWindowSync）；getContext 需显式
+    // 类型（arkts-no-any-unknown）。导航低频，重复切换时两次异步按序覆盖，终态=最后一次。
+    const ctx = getContext(this) as common.UIAbilityContext;
+    window.getLastWindow(ctx).then((mw: window.Window) => {
+      try {
+        mw.setWindowLayoutFullScreen(on);
+        mw.setSpecificSystemBarEnabled('status', !on);
+        mw.setSpecificSystemBarEnabled('navigationIndicator', !on);
+        this.immersiveState = state;
+        this.arkLog('IMMERSIVE ' + state + ' url=' + url);
+      } catch (e) {
+        this.arkLog('IMMERSIVE_ERR ' + String(e));
+      }
+    }).catch((e: BusinessError) => {
+      this.arkLog('IMMERSIVE_ERR ' + String(e));
+    });
   }
 
   /**
@@ -501,6 +536,11 @@ struct EditorPage {
         .domStorageAccess(true)
         .fileAccess(true)
         .onInterceptRequest((event) => loadRaw(event.request, this.resourceManager!, this.hostFilesDir, ((m: string) => this.arkLog(m))))
+        // 沉浸窗口按目标 URL 切换（主页=关/编辑器页=开；早于加载生效，见 setImmersive）
+        .onLoadIntercept((event) => {
+          this.setImmersive(event.data.getRequestUrl());
+          return false;
+        })
         .onControllerAttached(() => {
           // 桌面链桥——window.AscNative（ascshim.js 里 await 它出现再装 window.AscDesktopEditor）。
           // registerJavaScriptProxy 的对象要到页面 (re)load 才出现在 window，故在
@@ -568,9 +608,6 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     }
     .width('100%')
     .height('100%')
-    // 沉浸窗口模式配合（2026-09-05，EntryAbility 仅 tablet 开启）：内容顶到全屏
-    // 边（状态栏/导航条已隐藏，若按默认安全区挤留黑边——与 ../comfyui 同款）
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .align(Alignment.BottomStart)
   }
 }
