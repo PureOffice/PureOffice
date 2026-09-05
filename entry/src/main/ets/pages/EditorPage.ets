@@ -1,6 +1,5 @@
 import { webview } from '@kit.ArkWeb';
-import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
-import { window } from '@kit.ArkUI';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
@@ -102,49 +101,6 @@ struct EditorPage {
       + (this.m7Target.length > 0 ? '&m7open=' + encodeURIComponent(this.m7Target) : '');
   }
 
-  /** 沉浸窗口状态缓存（setImmersive 幂等去重；''=未初始化，首次按 URL 设定） */
-  private immersiveState: string = '';
-
-  /** PC（2in1/pc）标记：URL 拼 &zoom=1.2 → 页面 ascshim 对 html 设置 CSS zoom
-   *  （WebviewController.zoom(factor) 为移动端触摸语义，桌面布局实测无效——
-   *  2026-09-05 量化验证：字高 47px 前后无变化；故走 URL 参数 + 页面 CSS zoom） */
-  private readonly isPc: boolean = deviceInfo.deviceType === '2in1'
-    || deviceInfo.deviceType === 'pc';
-
-  /** 沉浸窗口按 URL 驱动（2026-09-05 用户需求：主页不沉浸，离开主页（编辑器页）再开。
-   *  仅 Pad（module deviceTypes 含 phone/2in1，deviceInfo 守卫——EntryAbility 已迁移
-   *  到此处，主页初始即非沉浸）。入口统一为 Web 组件 onLoadIntercept（导航决定时、
-   *  早于内容加载）+ 单点收口覆盖所有进出路径（初始/打开/关闭/文件菜单返回/ascshim
-   *  goback/requestClose 的页面自跳——任何落脚 index.html 或 /main/index.html 的
-   *  导航都会经过拦截）。setSpecificSystemBarEnabled 的 navigationIndicator 为隐藏
-   *  底部手势条正确接口（setWindowSystemBarEnable 的 'navigation' 无效果，参照
-   *  ../comfyui 实测注释）。 */
-  private setImmersive(url: string): void {
-    // 沉浸设备范围：仅 Tablet（2026-09-05 用户回调：PC/2in1 不做沉浸——PC 的
-    // 形态诉求是「空出系统标题栏」，由 EntryAbility setWindowDecorVisible(false)
-    // 方案处理（HiSH 同款）；phone 保持系统默认。主页始终不沉浸（URL 判定下方）。
-    if (deviceInfo.deviceType !== 'tablet') { return; }
-    const on = url.indexOf('/main/index.html') >= 0;
-    const state = on ? 'on' : 'off';
-    if (this.immersiveState === state) { return; }
-    // getLastWindow 为 Promise 版（本 SDK 无 getLastWindowSync）；getContext 需显式
-    // 类型（arkts-no-any-unknown）。导航低频，重复切换时两次异步按序覆盖，终态=最后一次。
-    const ctx = getContext(this) as common.UIAbilityContext;
-    window.getLastWindow(ctx).then((mw: window.Window) => {
-      try {
-        mw.setWindowLayoutFullScreen(on);
-        mw.setSpecificSystemBarEnabled('status', !on);
-        mw.setSpecificSystemBarEnabled('navigationIndicator', !on);
-        this.immersiveState = state;
-        this.arkLog('IMMERSIVE ' + state + ' url=' + url);
-      } catch (e) {
-        this.arkLog('IMMERSIVE_ERR ' + String(e));
-      }
-    }).catch((e: BusinessError) => {
-      this.arkLog('IMMERSIVE_ERR ' + String(e));
-    });
-  }
-
   /**
    * 编辑器页 URL —— 官方编辑器应用页（apps/<app>/main/index.html，顶层加载；
    * POC 打开链 v12 真机成功渲染的页面/构建组合）。页面经 Gateway init 后接收
@@ -157,7 +113,7 @@ struct EditorPage {
       : type === 'pptx' ? 'presentationeditor' : 'documenteditor';
     let url = 'http://localhost/onlyoffice/webapps/apps/' + app + '/main/index.html?v=' + this.pageVer
       + '&fileType=' + type + '&isDesktop=false&docType=' + type + '&lang=zh-CN&title=' + encodeURIComponent(title)
-      + (this.isPc ? '&zoom=1.2' : '');   // PC 文档页整体放大 1.2（ascshim 00_boot → html zoom）
+      ;
     // M7 验收态：自动打开后追加 m7auto=1（ascshim：模型就绪→序列化→save:bin→x2t 落盘）
     if (this.m7Target.length > 0) {
       url = url + '&m7auto=1';
@@ -548,11 +504,6 @@ struct EditorPage {
         .domStorageAccess(true)
         .fileAccess(true)
         .onInterceptRequest((event) => loadRaw(event.request, this.resourceManager!, this.hostFilesDir, ((m: string) => this.arkLog(m))))
-        // 沉浸窗口按目标 URL 切换（主页=关/编辑器页=开；早于加载生效，见 setImmersive）
-        .onLoadIntercept((event) => {
-          this.setImmersive(event.data.getRequestUrl());
-          return false;
-        })
         .onControllerAttached(() => {
           // 桌面链桥——window.AscNative（ascshim.js 里 await 它出现再装 window.AscDesktopEditor）。
           // registerJavaScriptProxy 的对象要到页面 (re)load 才出现在 window，故在

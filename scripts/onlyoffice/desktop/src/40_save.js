@@ -188,6 +188,15 @@
         if (_c) { _c.style.display = 'none'; }
         var _u = document.querySelector('.btn-current-user');
         if (_u) { _u.style.display = 'none'; }
+        // 左上 ONLYOFFICE logo：官方 branding 语义（bigger customization.logo.visible）
+        // 只在 role=='left' 分支生效——docx 正常，cell/slide 的 customization 传递分支
+        // 未达（2026-09-05 真机：xlsx/pptx 左上仍显示 logo）→ #header-logo 隐藏兜底
+        // （同 3.9 模式，幂等；docx 已 hidden 再藏无影响；隐藏父 section.logo 防留空位）
+        var _l = document.querySelector('#header-logo');
+        if (_l && _l.closest) {
+          var _ls = _l.closest('section.logo');
+          if (_ls) { _ls.style.display = 'none'; }
+        }
       };
       var _obs = new MutationObserver(_hide);
       if (document.body) {

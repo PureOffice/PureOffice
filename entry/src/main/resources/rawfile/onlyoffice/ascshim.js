@@ -114,26 +114,6 @@
     return btoa(_bin);
   };
 
-  // ---- 页面级整体缩放（2026-09-05 PC 用户诉求 1.2 倍）----
-  // 生效机制：EditorPage（ArkTS，唯一可信 deviceInfo 源）在 URL 拼 &zoom=<factor>
-  // （仅 2in1/pc）；本段读参数对 html 元素设 CSS zoom——布局整体重排放大
-  // （DOM UI 清晰；canvas 元素同步放大）。
-  // 放弃过的路径（勿回退）：WebviewController.zoom(factor)（@ohos.web.webview.d.ts:4331）
-  // 是移动端触摸缩放语义，桌面布局页面实测无效——量化验证：缩放前后「主页」
-  // 文本高 47px 无变化（2026-09-05）；zoomAccess(true) 仅放行手势，与设置无关。
-  // 时机：ascshim 注入于 <head>（早于 app.js/页面 DOM），documentElement 恒存在，
-  // 同步设置、无竞态。
-  (function () {
-    try {
-      var _zq = (window.location.search || '').match(/[?&]zoom=([^&]+)/);
-      if (_zq && parseFloat(_zq[1]) > 0) {
-        document.documentElement.style.zoom = parseFloat(_zq[1]);
-        console.error('LSO_PAGE_ZOOM ' + parseFloat(_zq[1]));
-      }
-    } catch (ze) {
-      console.error('LSO_PAGE_ZOOM_ERR ' + String(ze));
-    }
-  })();
   // ---- 0.94 字体文件加载取证（仅记录）：hook XHR onload，记录 /fonts/ 请求的
   //      状态码与字节数（LSO_FONT_XHR）。2026-09-05 中文渲染排查：判断 CJK 字体
   //      是否真正进入引擎（成功应为 status=200 len≈字体大小）。
@@ -1377,6 +1357,15 @@
         if (_c) { _c.style.display = 'none'; }
         var _u = document.querySelector('.btn-current-user');
         if (_u) { _u.style.display = 'none'; }
+        // 左上 ONLYOFFICE logo：官方 branding 语义（bigger customization.logo.visible）
+        // 只在 role=='left' 分支生效——docx 正常，cell/slide 的 customization 传递分支
+        // 未达（2026-09-05 真机：xlsx/pptx 左上仍显示 logo）→ #header-logo 隐藏兜底
+        // （同 3.9 模式，幂等；docx 已 hidden 再藏无影响；隐藏父 section.logo 防留空位）
+        var _l = document.querySelector('#header-logo');
+        if (_l && _l.closest) {
+          var _ls = _l.closest('section.logo');
+          if (_ls) { _ls.style.display = 'none'; }
+        }
       };
       var _obs = new MutationObserver(_hide);
       if (document.body) {
