@@ -97,11 +97,19 @@ struct EditorPage {
   private homeUrl(): string {
     return 'http://localhost/onlyoffice/index.html?v=' + this.pageVer
       + '&lang=zh-CN'
+      // 注：zoom=1.2 只在文档页（editorUrl）拼——2026-09-05 用户：主界面不放大，
+      // 文档页面才放大（LSO_PAGE_ZOOM 由 ascshim 00_boot 按参数设 html CSS zoom）
       + (this.m7Target.length > 0 ? '&m7open=' + encodeURIComponent(this.m7Target) : '');
   }
 
   /** 沉浸窗口状态缓存（setImmersive 幂等去重；''=未初始化，首次按 URL 设定） */
   private immersiveState: string = '';
+
+  /** PC（2in1/pc）标记：URL 拼 &zoom=1.2 → 页面 ascshim 对 html 设置 CSS zoom
+   *  （WebviewController.zoom(factor) 为移动端触摸语义，桌面布局实测无效——
+   *  2026-09-05 量化验证：字高 47px 前后无变化；故走 URL 参数 + 页面 CSS zoom） */
+  private readonly isPc: boolean = deviceInfo.deviceType === '2in1'
+    || deviceInfo.deviceType === 'pc';
 
   /** 沉浸窗口按 URL 驱动（2026-09-05 用户需求：主页不沉浸，离开主页（编辑器页）再开。
    *  仅 Pad（module deviceTypes 含 phone/2in1，deviceInfo 守卫——EntryAbility 已迁移
@@ -148,7 +156,8 @@ struct EditorPage {
     const app = type === 'xlsx' ? 'spreadsheeteditor'
       : type === 'pptx' ? 'presentationeditor' : 'documenteditor';
     let url = 'http://localhost/onlyoffice/webapps/apps/' + app + '/main/index.html?v=' + this.pageVer
-      + '&fileType=' + type + '&isDesktop=false&docType=' + type + '&lang=zh-CN&title=' + encodeURIComponent(title);
+      + '&fileType=' + type + '&isDesktop=false&docType=' + type + '&lang=zh-CN&title=' + encodeURIComponent(title)
+      + (this.isPc ? '&zoom=1.2' : '');   // PC 文档页整体放大 1.2（ascshim 00_boot → html zoom）
     // M7 验收态：自动打开后追加 m7auto=1（ascshim：模型就绪→序列化→save:bin→x2t 落盘）
     if (this.m7Target.length > 0) {
       url = url + '&m7auto=1';
