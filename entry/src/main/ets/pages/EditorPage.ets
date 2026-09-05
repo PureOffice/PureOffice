@@ -568,6 +568,9 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     }
     .width('100%')
     .height('100%')
+    // 沉浸窗口模式配合（2026-09-05，EntryAbility 仅 tablet 开启）：内容顶到全屏
+    // 边（状态栏/导航条已隐藏，若按默认安全区挤留黑边——与 ../comfyui 同款）
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
     .align(Alignment.BottomStart)
   }
 }

@@ -169,3 +169,36 @@
     }
   } catch (nx) {}
 
+  // ---- 3.9 头部装饰定制（2026-09-05 用户：编辑器页右上角"用户头像 U + 关闭 X"去掉）----
+  // 两元素官方均无**独立**显示开关，故按头部视觉定制在页适配层隐藏：
+  //   - #slot-btn-close（Header.js:970/1076 btnClose）：显示条件 = canCloseEditor
+  //     （Main.js:504 = customization.close.visible!==false && canRequestClose && !isDesktopApp）
+  //     —— 若走官方 close.visible=false 会把"文件菜单→关闭"入口一并关掉（退出只剩
+  //     左上角返回箭头），不符合"只去装饰、保留功能"意图。
+  //   - .btn-current-user（Header.js:1074 用户头像圈）：官方 else 分支无条件渲染
+  //     （guest+canRenameAnonymous 分支是改名按钮，非本场景），无配置可关。
+  // 功能入口保留：左上角"返回"箭头（customization.goback → Main.js canBack）与
+  // 文件菜单"关闭"。用 MutationObserver 等官方渲染后隐藏（事件驱动，非猜时机），
+  // 持续监听防官方 re-render 弹回。
+  (function _hideHeaderIcons() {
+    try {
+      if ((window.location || {}).pathname.indexOf('/main/index.html') < 0) { return; }
+      var _hide = function() {
+        var _c = document.getElementById('slot-btn-close');
+        if (_c) { _c.style.display = 'none'; }
+        var _u = document.querySelector('.btn-current-user');
+        if (_u) { _u.style.display = 'none'; }
+      };
+      var _obs = new MutationObserver(_hide);
+      if (document.body) {
+        _obs.observe(document.body, {childList: true, subtree: true});
+      } else {
+        document.addEventListener('DOMContentLoaded', function() {
+          _obs.observe(document.body, {childList: true, subtree: true});
+        });
+      }
+      _hide();
+      console.error('LSO_HEADER_ICONS_HIDDEN');
+    } catch (hx) { console.error('LSO_HDR_HIDE_ERR ' + String(hx)); }
+  })();
+
