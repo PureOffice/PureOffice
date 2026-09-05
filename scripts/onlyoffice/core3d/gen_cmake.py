@@ -2,7 +2,7 @@
 """POC-2: ONLYOFFICE core -> 单一 CMakeLists（OHOS arm64 交叉）。
 
 输入: 各模块 qmake .pro/.pri（经 qmake2cmake.Parser 解析，源码/头/include/defines 抽为纯 CMake）。
-输出: /data/share/office/build/core3d/CMakeLists.txt（构建目录 build/core3d/build）。
+输出: $ROOT/build/core3d/CMakeLists.txt（构建目录 $ROOT/build/core3d/build；ROOT=仓库根）。
 模块序列 = 官方 X2tConverter ADD_DEPENDENCY 链（静态库全部编译，最终 x2t 3 源成 libx2t.a；
 NAPI convertershell 在下一阶段生成）。
 """
@@ -13,7 +13,9 @@ import re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from qmake2cmake import Parser  # noqa: E402
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+# ROOT = repo 根（scripts/onlyoffice/core3d 上三级）——2026-09-05 修：原 '..','..'
+# 指向 scripts/，导致 third_party/core 找不到 → "0 sources, 0 defines" → x2t 空 target。
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
 CORE = os.path.join(ROOT, 'third_party', 'core')
 OUT_DIR = os.path.join(ROOT, 'build', 'core3d')
 
@@ -193,7 +195,19 @@ def main():
     lines.append('set(CMAKE_CXX_STANDARD_REQUIRED ON)')
     # -fsigned-char：回归官方桌面 Linux 语义（x86_64 char 有符号；OHOS arm64 默认无符号，
     # 会令 ICCProfile 等负值常量表 -Wnarrowing 毙命；libstdc++/zlib 等均按 signed 假设）
+    # -include libcxx-ohos 官方 musl xlocale 适配头（2026-09-05 踩坑）：OHOS musl 缺
+    # strtoll_l/strtoull_l，libc++ v1/locale `__num_get_signed_integral` 却无条件调用；
+    # SDK 为此内置了适配头（extern "C" inline，注释明言 missing in Musl），但它只在
+    # fstream→__locale 链自动包含，sstream→locale 链不带 → 部分 TU 编译报
+    # "undeclared". 全局 -include 使所有含 locale 的 TU 拿到声明（guard 防重复）。
+    # 路径耦合 SDK 6.1.0 native/libcxx-ohos；未来 SDK 若在 __config 统一包含可删本行。
+    XLOCALE = ('${OHOS_NDK_ROOT}/llvm/include/libcxx-ohos/include/c++/v1/'
+               '__support/musl/xlocale.h')
     lines.append('add_compile_options(-fPIC -Wno-unused-result -fsigned-char)')
+    # 只注入 CXX：该头含 <cstdlib>（C++ 头；C 单元（zlib_addon.c）注入会 fatal，
+    # bld8 实测）；C 单元不走 locale/strtoll_l 面。不 genex——CMake genex 内空格
+    # 会被当单 token（bld9 实测 filename 前粘空格），CMAKE_CXX_FLAGS 无此问题
+    lines.append(f'set(CMAKE_CXX_FLAGS "${{CMAKE_CXX_FLAGS}} -include {XLOCALE}")')
     lines.append('')
     lines.append(f'set(CORE_ROOT "{CORE}")')
     lines.append('')
@@ -215,22 +229,76 @@ def main():
         parsed[tgt] = info
         print(f'{tgt}: {len(info["sources"])} sources, {len(info["defines"])} defines, '
               f'{len(info["includes"])} includes', file=sys.stderr)
+        # 0 源 = 模块解析失败（qmake 库缺失/路径错）——历史瘫痪正因 "0 sources → x2t
+        # 空 target"（头注释 line 17），此处立即失败而非留空 target 后盲跑（2026-09-05 审查补）
+        if not module_sources(tgt, info):
+            raise SystemExit(f'{tgt}: 解析到 0 个源文件（{pro_rel}）——qmake 解析链断开；'
+                             f'检查 third_party/core 子模块与 qmake2cmake.py')
 
         srcs = ' '.join(f'"${{CORE_ROOT}}/{os.path.relpath(s, CORE)}"' for s in module_sources(tgt, info))
         if tgt == 'doctrenderer':
             # doctrenderer JS 引擎接入层（v8/jsc）的 OHOS 无引擎桩（js_stub_ohos.cpp）：
             # CJSContext/各 Embed 注册接口/NSAllocator 等符号以无操作实现满足链接
             # （POC 转换路径不触 JS 运行时；源文件与 js_base.h 同目录，随核心树）
-            srcs += ' "${CORE_ROOT}/DesktopEditor/doctrenderer/js_internal/js_stub_ohos.cpp"'
+            srcs += ' "' + os.path.join(os.path.dirname(os.path.abspath(__file__)), 'js_stub_ohos.cpp') + '"'
         lines.append(f'add_library({tgt} STATIC {srcs})')
         incs = [f'"${{CORE_ROOT}}/{os.path.relpath(i, CORE)}"' for i in info['includes']]
         lines.append(f'target_include_directories({tgt} PUBLIC ${{EXTRA_INC}} {" ".join(incs)})')
-        defs = [d for d in info['defines'] if not d.startswith('$')]  # 去掉未展开的 $$VAR 残留
+        # base.pri:45 `INTVER=$$VERSION`（VERSION=Common/version.txt）等 $$ 变量：
+        # 值可得的展开为真值（否则如 Fb2File.cpp:2137 `#if defined(INTVER)` 假分支 →
+        # sVersion 未声明 → 编译错）；真正未定义的 $$VAR 仍丢弃（保持旧行为）。
+        VERSION_TXT = open(os.path.join(CORE, 'Common', 'version.txt')).read().strip()
+        defs = []
+        for d in info['defines']:
+            if d.startswith('$$'):
+                if d == '$$VERSION':
+                    defs.append('INTVER=' + VERSION_TXT)
+                continue
+            defs.append(d)
         # qmake DEFINES 的 `FOO="1"` 在官方 make/shell 层被剥引号（shell 词法），
         # CMake 直接字面过 -> gcc 收到 `-DFOO="1"`，`#if FOO` 展开成 `#if "1"` 报错
         # （DjVuFile.pro:59 GCONTAINER_NO_MEMBER_TEMPLATES="1"）。剥值端成对引号
         # （首字符是宏名，不能对 d 自身剥首尾；strip 单端会留下半引号）
         defs = [re.sub(r'^([A-Za-z_]\w*)="(.+)"$', r'\1=\2', d) for d in defs]
+        if not any(d.startswith('INTVER=') for d in defs):
+            defs.append('INTVER=' + VERSION_TXT)
+        # OHOS 平台宏（2026-09-05）：__ANDROID__ 不能全局定义（会把 libcxx/ICU 等
+        # 自动带进 android/api-level.h 等 OHOS 不可用分支），只给实际需要它的翻译单
+        # 元所在 target。OOXML/XlsxFormat/Common.cpp 的 `#ifdef __ANDROID__` 提供本地
+        # gcvt（glibc 专有函数，OHOS musl 无）实现；官方 Linux/release 构建走 unified
+        # TU（DocxFormatLib 的 docx_format_logic.cpp 头行 #include "xlsx_format_logic.cpp"
+        # → 后者 #include "../../../XlsxFormat/Common.cpp"，bld5 实测即在此 target 报
+        # gcvt error；旧「仅 XlsFormatLib」target 特判是错经验），故按内容检测（含一层
+        # #include ".../*.cpp" 递归，unified TU 特征）。METAFILE_SUPPORT_SVG 对应 SVG
+        # transformer 类接口本项目未编译（POC 链不需要 SVG 转换）——剔除后 MetaFile
+        # svg 分支不编译。
+        def _includes_xlsx_common(src):
+            """unified TU 检测：源文本或其一层 `#include ".../*.cpp"` 的源文本含
+            XlsxFormat/Common.cpp（官方 Linux release 的 DocxFormatLib 把全部共享
+            源拆成多个 .cpp 逐个 include；docx_format_logic.cpp 头行就 include
+            xlsx_format_logic.cpp，后者再 include Common.cpp —— 两层深度）"""
+            try:
+                t = open(src, encoding='utf-8', errors='ignore').read(4 << 20)
+            except OSError:
+                return False
+            if 'XlsxFormat/Common.cpp' in t:
+                return True
+            for inc in re.findall(r'^\s*#include\s+"([^"]+\.cpp)"', t, re.M):
+                p = os.path.normpath(os.path.join(os.path.dirname(src), inc))
+                if not (os.path.dirname(p).startswith(CORE) and os.path.exists(p)):
+                    continue
+                try:
+                    t2 = open(p, encoding='utf-8', errors='ignore').read(4 << 20)
+                except OSError:
+                    continue
+                if 'XlsxFormat/Common.cpp' in t2:
+                    return True
+            return False
+
+        needs_gcvt = any(_includes_xlsx_common(s) for s in info['sources'])
+        if needs_gcvt and not any(d.startswith('__ANDROID__') for d in defs):
+            defs.append('__ANDROID__')
+        defs = [d for d in defs if not d.startswith('METAFILE_SUPPORT_SVG')]
         defs += MODULE_EXTRA_DEFS.get(tgt, [])
         lines.append(f'target_compile_definitions({tgt} PUBLIC {" ".join(EXTRA_DEF)} {" ".join(defs)})')
         if deps:

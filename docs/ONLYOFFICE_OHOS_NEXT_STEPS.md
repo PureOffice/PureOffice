@@ -20,7 +20,7 @@
 - [x] README 同步（迭代 2 ✅ + 从零复现流程）；KEYPOINTS §10 已含 xlsx 三修（v12 记忆）
 - [x] 提交规范：无 co-author 尾注
 
-**验收**：fresh clone（704KB 主仓）✓；`git submodule status` 四库 pin 正确 ✓；`patch_core_ohos.sh` 连跑两遍幂等 ✓；`pack_web.py` 重生成 163MB 运行时 ✓。
+**验收**：fresh clone（704KB 主仓）✓；`git submodule status` 四库 pin 正确 ✓；`patch_core_ohos.sh` 连跑两遍幂等 ✓；`build_editors_ohos.py`/`desktop/grunt-build.sh` 重生成运行时 ✓。
 
 **决策项（用户拍板）**：index.html 诊断打点（odT/odS/hpX/hpC/edT/edF/PFLIM=15000/fonts 打点）留作调试通道 → 与 §3 正式化清理一并处理。真机三格式截图见会话记录（xlsx 12:53 / docx 12:54 / pptx 12:54）。
 
@@ -53,7 +53,7 @@ cell（无 WordControl）恒返回 null → `OOH_MARK_NOMODEL / OOH_SAVE_NOMODEL
 
 ## 3. 正式化清理（小项，可与 §2 并行）
 
-- [ ] 诊断打点瘦身：`pack_web.py` 内 POC 打点（odT/odS/hpX/hpC/edT/edF/web_console 全量落盘）→ 保留 `__pf` 骨架、`LBIN/DEOC` 可留作 release 后故障定位
+- [x] 诊断打点瘦身：旧 pack_web.py 打点已随废弃；现有 web_console 全量落盘（EditorPage.arkLog 统一入口，2026-09-05）
 - [ ] 探针 field 精简：`cell:`/`drk:`/`dom:` 等仅开发用，正式壳关闭（autoTest 开关已存在，可加 `debugProbe` 开关）
 - [ ] PFLIM 15000 → 正式值（如 2000）与 `pfTail` 分段保留
 - [ ] `docs/ONLYOFFICE_OHOS_PORT_KEYPOINTS.md` 补齐 v12（§10 追加）

@@ -7,6 +7,11 @@
   //      字体顺序须 R,I,B,BI（FONT_INFOS 中 indexI=1/indexB=2 即数组下标）。
   window["__fonts_files"] = @@FONT_FILES_JSON@@;
   window["__fonts_infos"] = @@FONT_INFOS_JSON@@;
+  // 第三张表：字符范围回退注册表（libfont character.js init 消费；[start, end,
+  // FONT_INFOS 行号] 展平三元组）。无它 → CFontByCharacter.Ranges 空 → 中文等
+  // 无字形字符的 fallback 永远失败 → 方块（2026-09-05 最后根因，见
+  // build_editors_ohos.py FONT_RANGES 注释）。
+  window["__fonts_ranges"] = @@FONT_RANGES_JSON@@;
 
   // sdk-all.js（common 清单 = 引擎的另一半：Serialize2/Document/History/GlobalLoaders）
   // 由官方链自动加载：api.js Init → apiBase.js:293 AscCommon.loadSdk(editorName)
@@ -18,7 +23,6 @@
 
   var INSTALL = function() {
     if (installed) return; installed = true;
-    try { console.error('ASC_INSTALL path=' + window.location.pathname); } catch (bx) {}
 
     // ---- 1. CEF 202 方法 → AscNative（ArkTS proxy 同步桥） ----
     window.__ascDesktopEditorMethods = {};
@@ -28,7 +32,8 @@
     var obj = {};
     for (var k in window.__ascDesktopEditorMethods) { obj[k] = window.__ascDesktopEditorMethods[k]; }
 
-    // CEF（desktopinit.js 假设 RendererProcessVariable 已由 C++ 注入）——默认本地主题
+    // CEF（desktopinit.js 假设 RendererProcessVariable 已由 C++ 注入）——默认本地主题：
+    // ArkWeb 场景无 C++ 注入面，给予默认定值（B 架构 native 主题注入就绪后可移除本节）
     if (!window.RendererProcessVariable) {
       window.RendererProcessVariable = {
         theme: { id: 'default-light', type: 'light', system: 'light' },
@@ -41,10 +46,32 @@
     window.AscDesktopEditor = obj;
     window.desktop = obj;
 
+    // ---- 2.1 LoadFontBase64 特化（2026-09-05 中文方块根因修复）----
+    // 官方语义（Externals.js LoadFontAsync 桌面分支）：AscDesktopEditor.LoadFontBase64(id)
+    // 后引擎取 window[id] → AscFonts.CreateFontData4 → 字体流（base64 前缀格式
+    // "<size>;<b64>"，sdkjs stringserialize.js Base64.decode(input, true) 消费）。
+    // 通用包装（方法表占位行展开）只 _call + 解 JSON 返回，从不写 window[id]——
+    // 而 CEF 桌面版是由 C++ 直接写 window[id]。B 架构下桥返回串必须自己回填：
+    try {
+      window.AscDesktopEditor["LoadFontBase64"] = function(id) {
+        var r = window.AscNative && window.AscNative._call("LoadFontBase64", [id]);
+        if (r) {
+          var v = r;
+          try { v = JSON.parse(r); } catch (e3) { v = r; }
+          if (v) { try { window[id] = v; } catch (e3) { console.error('LSO_FB64_SET ' + String(e3)); } }
+        }
+      };
+      console.error('LSO_FB64_OVERRIDDEN');
+    } catch (e) { console.error('LSO_FB64_ERR ' + String(e)); }
+
     // ---- 2.33 桌面打开链注入桥：顶层 postMessage {command:'doffline:loadend', url, b64, len}
     //      → 本页(编辑器 iframe)调用 DesktopOfflineAppDocumentEndLoad(url, b64, len)
     //      —— 等价官方 CEF LocalFile_End 注入（字节只此一入口；asc_openDocumentFromBytes
-    //      Web 链会被 common/Local/common.js onEndLoadFile 覆写截胡，不得使用）
+    //      Web 链会被 common/Local/common.js onEndLoadFile 覆写截胡，不得使用）。
+    //      当前 ArkTS 侧走 openDocumentFromBinary（EditorPage 注入）——本桥为“桌面三件套”
+    //      （native 字体/loadjs/allfonts）就绪后的官方通道，暂休眠（保留协议注释）。
+    //      休眠期安全注（2026-09-05 审查）：启用前必须补 message 源校验（官方 Gateway.js
+    //      _onMessage 有 origin 检查，Gateway.js:183-184；本监听接受任意帧消息）。
     if (!window.__lsoBridgeInstalled) {
       window.__lsoBridgeInstalled = true;
       try {
@@ -55,147 +82,26 @@
             console.error('LSO_OFFLINE_MSG url=' + d.url + ' b64len=' + (d.b64 ? d.b64.length : 'undefined')
               + ' len=' + d.len);
             var _ed2 = (window.Asc && window.Asc.editor) || window.editor;
-            console.error('E1 ed=' + (!!_ed2));
-            try { if (AscCommon.g_oDocumentUrls) { AscCommon.g_oDocumentUrls.documentUrl = d.url; } } catch (e1) { console.error('E2 ' + String(e1)); }
-            try { _ed2.setOpenedAt(Date.now()); } catch (e3) { console.error('E3 ' + String(e3)); }
-            try { AscCommon.g_oIdCounter.m_sUserId = window.AscDesktopEditor.CheckUserId(); } catch (e4) { console.error('E4 ' + String(e4)); }
+            try { if (AscCommon.g_oDocumentUrls) { AscCommon.g_oDocumentUrls.documentUrl = d.url; } } catch (e1) { console.error('LSO_DFB_E2 ' + String(e1)); }
+            try { _ed2.setOpenedAt(Date.now()); } catch (e3) { console.error('LSO_DFB_E3 ' + String(e3)); }
+            try { AscCommon.g_oIdCounter.m_sUserId = window.AscDesktopEditor.CheckUserId(); } catch (e4) { console.error('LSO_DFB_E4 ' + String(e4)); }
             var _bin = AscCommon.Base64.decode(d.b64, false, d.len);
-            console.error('E5 bin=' + (!!_bin) + ' len=' + (_bin && _bin.length));
             var _f2 = new AscCommon.OpenFileResult();
             _f2.data = _bin;
             _f2.bSerFormat = AscCommon.checkStreamSignature(_bin, AscCommon.c_oSerFormat.Signature);
             _f2.url = d.url;
-            console.error('E5b ser=' + _f2.bSerFormat);
-            try {
-              var _ldm0 = _ed2.WordControl && _ed2.WordControl.m_oLogicDocument;
-              console.error('E8 ldm=' + (!!_ldm0) + ' ctor=' + (_ldm0 && _ldm0.constructor && _ldm0.constructor.name)
-                + ' styles=' + (!!(_ldm0 && _ldm0.Styles))
-                + ' ext=' + (!!(_ldm0 && _ldm0.Ext)) + ' root=' + (!!(_ldm0 && _ldm0.Root)));
-            } catch (e8) {
-              console.error('E8_ERR ' + String(e8));
-            }
-            try {
-              var _BR2 = AscCommonWord && AscCommonWord.BinaryFileReader;
-              if (_BR2 && !_BR2.prototype.__brHooked2) {
-                _BR2.prototype.__brHooked2 = true;
-                var _origRead2 = _BR2.prototype.Read;
-                _BR2.prototype.Read = function(data) {
-                  console.error('BR_READ_START len=' + (data && data.length));
-                  try {
-                    var r = _origRead2.call(this, data);
-                    console.error('BR_READ_END r=' + r);
-                    return r;
-                  } catch (e) {
-                    console.error('BR_READ_EXC ' + String(e));
-                    throw e;
-                  }
-                };
-                console.error('BR_HOOKED2');
-              }
-            } catch (hb) { console.error('BR_HOOK_ERR2 ' + String(hb)); }
             try {
               if (_ed2.asc_openDocumentFromBytes) {
                 _ed2.asc_openDocumentFromBytes(_f2.data);
-                console.error('E6 OPENED (asc_oDFB)');
               } else {
                 _ed2.openDocument(_f2);
-                console.error('E6 OPENED');
               }
             } catch (e7) {
-              console.error('E7 ' + String(e7));
+              console.error('LSO_DFB_OPEN_ERR ' + String(e7));
             }
           } catch (x) {
             console.error('LSO_OFFLINE_ERR ' + String(x));
           }
-        }, false);
-      } catch (x) {}
-    }
-
-    // ---- 2.35 打开链 hook（诊断：loadBinary → asc_openDocumentFromBytes 输入确认；确认后移除） ----
-    window.__hookOdFB = function() {
-      try {
-        var e = window.Asc && (window.Asc.editor || window.editor);
-        if (!e || !e.asc_openDocumentFromBytes) return false;
-        if (!e.__ohooked) {
-          e.__ohooked = true;
-          var orig = e.asc_openDocumentFromBytes;
-          e.asc_openDocumentFromBytes = function(data) {
-            var sig = '-';
-            try {
-              sig = String.fromCharCode(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
-            } catch (x) {}
-            console.error('HBB_START len=' + (data && data.length) + ' sig=' + sig);
-            var r = orig.call(this, data);
-            console.error('HBB_END ret=' + r);
-            // cell（XLSY）打开末端：服务器链用 asyncServerIdEndLoaded 完成 serverId 装载，
-            // web 空/离线链无人 kick → workbook 读入后永远停在 loading（POC v12 同坑）：
-            // 打开完成后补 kick + wb.resize/asc_setZoom(1)（POC 实证 factor 必须 1.0）。
-            // 仅限 XLSY（word 的 asc_setZoom 语义不同，不得触及）。
-            if (sig.indexOf('XLSY') === 0 || sig.indexOf('PPTY') === 0) {
-              var _isCell = sig.indexOf('XLSY') === 0;
-              // cell/slide 打开末端：服务器链用 async*EndLoaded 完成 serverId/images 装载，
-              // web 空/离线链无人 kick → 模型读入后停在 loading（POC v12 cell 同坑）。
-              // 各步独立兜底：内层可能抛 UI 状态异常（如 isEditOle），不应中断整体。
-              try {
-                if (this && typeof this.asyncServerIdEndLoaded === 'function') {
-                  this.asyncServerIdEndLoaded();
-                  console.error('HBB_OPEN_KICK serverId');
-                }
-              } catch (kc1) { console.error('HBB_OPEN_KICK_SID_ERR ' + String(kc1)); }
-              if (!_isCell) {
-                // slide 还需 ServerImagesWaitComplete（asyncImagesDocumentEndLoaded）
-                try {
-                  if (this && typeof this.asyncImagesDocumentEndLoaded === 'function') {
-                    this.asyncImagesDocumentEndLoaded();
-                    console.error('HBB_OPEN_KICK images');
-                  }
-                } catch (kc4) { console.error('HBB_OPEN_KICK_IMG_ERR ' + String(kc4)); }
-              }
-              try {
-                if (_isCell && this && this.wbModel && typeof this.wbModel.resize === 'function') { this.wbModel.resize(null); console.error('HBB_OPEN_KICK resize'); }
-              } catch (kc2) { console.error('HBB_OPEN_KICK_RESIZE_ERR ' + String(kc2)); }
-              try {
-                if (this && typeof this.asc_setZoom === 'function') { this.asc_setZoom(1); console.error('HBB_OPEN_KICK zoom'); }
-              } catch (kc3) { console.error('HBB_OPEN_KICK_ZOOM_ERR ' + String(kc3)); }
-            }
-            return r;
-          };
-          // OpenDocumentFromBin 级 hook（BinaryFileReader.Read 结果）
-          if (!e.__ohooked2) {
-            e.__ohooked2 = true;
-            var origBin = e.OpenDocumentFromBin;
-            if (origBin) {
-              e.OpenDocumentFromBin = function(url, gObject) {
-                console.error('HBB_BIN_START url=' + url + ' gObj=' + (gObject && gObject.constructor && gObject.constructor.name)
-                  + ' len=' + (gObject && gObject.length));
-                var r = origBin.call(this, url, gObject);
-                console.error('HBB_BIN_END ret=' + r);
-                return r;
-              };
-            }
-          }
-          console.error('HBB_HOOKED');
-        }
-        return true;
-      } catch (x) {
-        console.error('HBB_ERR ' + String(x));
-        return false;
-      }
-    };
-
-    // ---- 2.4 postMessage 可见性探针（诊断 LSO 字节链；确认后移除） ----
-    if (!window.__ascMsgLog) {
-      window.__ascMsgLog = true;
-      try {
-        window.addEventListener('message', function(e) {
-          try {
-            var d = e.data;
-            if (d && typeof d === 'object' && d.command) {
-              var ab = d.data;
-              console.error('ASC_MSG ' + d.command + ' len='
-                + (ab && ab.byteLength !== undefined ? ab.byteLength : String(ab).slice(0, 60)));
-            }
-          } catch (x) {}
         }, false);
       } catch (x) {}
     }
@@ -217,22 +123,31 @@
 @@SHIM@@
 
     // ---- 3.5 web 构建引擎就绪探针（官方 LocalStartOpen 触发；web sdkjs 无 Local 段时
-    //      仅靠 isLoadFullApi 轮询，到点调 AscDesktopEditor.LocalStartOpen() 送注入时机） ----
+    //      仅靠官方引擎状态位 isLoadFullApi 轮询，到点调 AscDesktopEditor.LocalStartOpen()
+    //      送注入时机；isLoadFullApi ∈ 官方状态位（apiBase.js:296 loadSdk 完成回调内），
+    //      非界面元素判断）。页门控（编辑器页才有 Asc 对象）+ 重试上限 300（90s）——
+    //      欢迎页不再永久空转（2026-09-05 审查）。 ----
     if (!window.__lsoWaitInstalled) {
       window.__lsoWaitInstalled = true;
       (function waitFull() {
+        var _pp = window.location && window.location.pathname || '';
+        if (_pp.indexOf('/main/index.html') < 0) { return; }
         try {
           var e = window.Asc && (window.Asc.editor || window.editor);
           if (e && e.isLoadFullApi && !window.__lsoDispatched) {
             window.__lsoDispatched = true;
-            console.error('LSO_WAITFULL -> LocalStartOpen dispatched');
             if (window.AscNative && window.AscNative._call) {
-              try { window.AscNative._call('LocalStartOpen', []); } catch (wx) {}
+              try { window.AscNative._call('LocalStartOpen', []); }
+              catch (wx) {
+                console.error('LSO_LOCALSTARTOPEN_ERR ' + String(wx));
+                window.__lsoDispatched = false; // 注入机会丢失不得无痕迹：复位后随页面重启重试
+              }
             }
             return;
           }
         } catch (x) {}
-        setTimeout(waitFull, 300);
+        if ((window.__lsoWaitN = (window.__lsoWaitN || 0) + 1) < 300) { setTimeout(waitFull, 300); }
+        else { console.error('LSO_WAITFULL_GIVEUP'); }
       })();
     }
 

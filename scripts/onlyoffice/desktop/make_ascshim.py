@@ -3,21 +3,24 @@
 """Generate entry/src/main/resources/rawfile/onlyoffice/ascshim.js
 
 拼接 scripts/onlyoffice/desktop/src/*.js（页面适配 JS 源码，按主题分文件）：
-  00_boot.js   IIFE 引导 + cell 打开剖面（诊断）
-  10_engine.js Gateway 踢闸（serverId/images 引擎闸门适配）
-  20_bridge.js AscDesktopEditor 装配（方法表/官方 shim/字体注册表/字节桥）
-  30_open.js   DI 打开链（loadConfig 补发/CDocInfo/权限/踢闸/m7 工具）
+  09_fonts.js  字体字节预载（2026-09-05 中文方块根因：CJK 大字体文件晚于
+               首次渲染到达 → LoadFont face=null → HB_ShapeString 失败方块；
+               预取 + loader 喂字节，字体先于渲染就绪）
+  00_boot.js   外层头/公共工具（__lsoB64；原 cell 剖面诊断已移除）
+  10_engine.js Gateway 踢闸（serverId/images 引擎闸门适配 + 字节打点）
+  20_bridge.js AscDesktopEditor 装配（方法表/官方 shim/字体注册表/就绪探针）
+  30_open.js   DI 打开链（loadConfig 补发/CDocInfo/权限/m7 验收工具）
   40_save.js   保存/关闭链适配（SaveDocument 落盘/requestClose/错误拦截）
   50_init.js   初始化尾（AscNative 等待循环）
 
 src 内以占位符接入脚本动态内容（一一对应下面 .replace）：
   @@METHOD_JS@@       方法表装配（asc_methods.txt 转 JS 方法体）
   @@SHIM@@            官方 InitJSContext shim（ascdesktop_shim_raw.js）
-  @@FONT_FILES_JSON@@ 字体文件表（build_editors_ohos.FONT_INFOS → JSON）
+  @@FONT_FILES_JSON@@ 字体文件表（build_editors_ohos.FONT_FILES，同源不重复定义）
   @@FONT_INFOS_JSON@@ 字体元数据表
 
 产物校验：node --check（JS 语法硬校验，失败即非零退出；宿主机无 node 时降级告警）。
-修改页面适配请改 src/*.js 后重新生成本脚本；**ascshim.js 是生成产物，勿手改**。
+修改页面适配请改 src/*.js 后重新生成；**ascshim.js 是生成产物，勿手改**。
 """
 import os
 import json
@@ -27,16 +30,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
-from build_editors_ohos import FONT_INFOS  # noqa: E402
-# 字体数组顺序必须 R,I,B,BI（FONT_INFOS 的 indexI/indexB 引用下标）——POC 实证顺序
-FONT_FILES = [
-    'LiberationSans-Regular.ttf', 'LiberationSans-Italic.ttf',
-    'LiberationSans-Bold.ttf', 'LiberationSans-BoldItalic.ttf',
-    'LiberationSerif-Regular.ttf', 'LiberationSerif-Italic.ttf',
-    'LiberationSerif-Bold.ttf', 'LiberationSerif-BoldItalic.ttf',
-    'LiberationMono-Regular.ttf', 'LiberationMono-Italic.ttf',
-    'LiberationMono-Bold.ttf', 'LiberationMono-BoldItalic.ttf',
-]
+# 字体表唯一来源在 build_editors_ohos.py（FONT_INFOS/FONT_FILES/FONT_RANGES；
+# R,I,B,BI 顺序契约同注那里——两处独立定义会漂移导致字体注册表错位，
+# 2026-09-05 审查收敛；FONT_RANGES = 引擎 CFontByCharacter 注册表第三张注入表）
+from build_editors_ohos import FONT_INFOS, FONT_FILES, FONT_RANGES  # noqa: E402
 METHODS = [l.strip() for l in open(os.path.join(HERE, 'asc_methods.txt')) if l.strip()]
 SHIM = open(os.path.join(HERE, 'ascdesktop_shim_raw.js'), encoding='utf-8').read()
 
@@ -73,7 +70,7 @@ METHOD_JS = '\n'.join(method_lines)
 SHIM_INDENTED = '\n'.join('    ' + ln for ln in SHIM.split('\n'))
 
 SRC_DIR = os.path.join(HERE, 'src')
-PARTS = ['00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js']
+PARTS = ['09_fonts.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 
@@ -83,26 +80,36 @@ def build() -> str:
     return (js.replace('@@METHOD_JS@@', METHOD_JS)
                .replace('@@SHIM@@', SHIM_INDENTED)
                .replace('@@FONT_FILES_JSON@@', json.dumps(FONT_FILES))
-               .replace('@@FONT_INFOS_JSON@@', json.dumps(FONT_INFOS)))
+               .replace('@@FONT_INFOS_JSON@@', json.dumps(FONT_INFOS))
+               .replace('@@FONT_RANGES_JSON@@', json.dumps(FONT_RANGES)))
 
 
 JS = build()
-out = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
-open(out, 'w').write(JS)
+with open(OUT, 'w', encoding='utf-8') as f:
+    f.write(JS)
 
-# 语法硬校验：node --check（宿主机 node 为 web-apps 构建链依赖，必然存在）
+# 语法硬校验：node --check（宿主机 node 为 web-apps 构建链依赖，必然存在；
+# 缺失时告警不阻断——2026-09-05 审查补上 else 分支的明确提示）
 if shutil.which('node'):
     import tempfile
-    with tempfile.NamedTemporaryFile('w', suffix='.js', delete=False) as tf:
-        tf.write(JS)
-        tmp = tf.name
-    rc = subprocess.run(['node', '--check', tmp], capture_output=True, text=True)
-    if rc.returncode != 0:
-        print(rc.stderr, file=sys.stderr)
-        sys.exit(f'node --check FAILED on generated ascshim.js: {out}')
-    print('node --check: OK')
+    tmp = tempfile.mktemp(suffix='.js')
+    try:
+        with open(tmp, 'w', encoding='utf-8') as tf:
+            tf.write(JS)
+        rc = subprocess.run(['node', '--check', tmp], capture_output=True, text=True)
+        if rc.returncode != 0:
+            print(rc.stderr, file=sys.stderr)
+            sys.exit(f'node --check FAILED on generated ascshim.js: {OUT}')
+        print('node --check: OK')
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+else:
+    print('!! node 未安装：跳过 ascshim 语法校验（仅告警，不阻断）', file=sys.stderr)
 
 print(f'total methods: {len(METHODS)}')
 print(f'shim bytes: {len(SHIM)}')
 print(f'parts: {", ".join(PARTS)}')
-print(f'out: {out}')
+print(f'out: {OUT}')

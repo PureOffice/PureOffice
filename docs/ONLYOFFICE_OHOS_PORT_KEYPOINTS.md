@@ -124,7 +124,7 @@ if (isDocumentLoadComplete || !ServerIdWaitComplete || !FontLoadWaitComplete) re
 - 剩余断点（10/31 晨）：launch 空文档 + loadBinary 重开 → toolbar✅ 但 WorkbookView 停留旧空模型（cells 不画）；launch 只 init + loadBinary 首开 → grid✅ 但 toolbar 缺（toolbar 由 Gateway loadDocument 建）——**cell 单机不支持「二次打开」语义，需 patch cell api 使重开重建 WorkbookView（待办）**。
 
 **构建产物级：**
-- CSS：宿主 `lessc` 预编译 `resources/less/app.less` → `resources/css/app.css`（三编辑器；`precompile_css` in pack_web.py）。
+- CSS：宿主 `lessc` 预编译 `resources/less/app.less` → `resources/css/app.css`（三编辑器；`precompile_css`（旧 pack_web.py 时代；现 CSS 由官方 grunt 构建产物提供））。
 - `.wasm` → `application/wasm` MIME（rawfileLoader.ets）——fonts.js wasm 流式编译必需。
 - `PFLIM 400→15000` + `PFO_P1..P7` 分段（2500 字符各段）。
 - 诊断 fallback：web console 全量落盘 `files/web_console.txt`（EditorPage onConsole append；hilog 在部分环境抓不到 [web]）。
@@ -176,3 +176,45 @@ word/pptx 下恒 false 属探针局限，非功能异常——以截图/产物�
 **样本教训**：samples/sample.pptx 原为 POC2 极简产物（`<p:spPr/>` 无坐标、
 bodyPr 空 → 引擎渲染堆字形），已重制为带 xfrm/off/ext/bodyPr 的规范布局
 （4958B）；「渲染内容怪异」先验样本结构再疑引擎。
+
+## 12. 字体链最终定论（2026-09-05 默认中文 A+B 方案，已真机）
+
+**运行时脚本矩阵**（三份共存、职责不同——一切分析必须先分清）：
+- `sdk-all-min.js`（app.js:58 require）：**web 主体**——AscFonts 创建（IIFE）、
+  `AscFonts.load`（loadScript `libfont/engine/fonts*.js`）、FontPickerByCharacter、
+  `asc_insertSymbol` 等；**无 CFontFileLoader/LoadFontAsync/LoadFontBase64**。
+- `sdk-all.js` 28MB（apiBase.loadSdk → loadScript）：**Externals 段**——
+  `checkAllFonts()` eval 即执行（读 `__fonts_files/__fonts_infos` 建 13 个
+  CFontFileLoader，随后 **delete 两张表**——PROF_FONT `infos=0` 即此，非缺表）
+  + CFontFileLoader/LoadFontAsync（桌面/ web XHR 双分支）。
+- `fonts.js`（wasm 包装）：FT_*/HB 低层；`fonts_native.js` 为 C++ 引擎适配层。
+
+**根因**：LoadFontAsync 的调用者只在**渲染期按需链**（FontPickerByCharacter.
+checkText / asc_insertSymbol / watermark → LoadDocumentFonts2 → CheckFontLoadStyles
+→ LoadFontAsync）。9.25MB HOS SC XHR 晚于首帧渲染（实测 8109/8165 次 face=null；
+~15s 后字节到达，face=14231976 / gid中=7517 全正常）→ 首帧方块、重绘后正常。
+「切语言后恢复」本质即触发重绘、字体已就绪。LoadFontBase64 桥/预取 hook 零触发
+——目标函数不在调用路径上。
+
+**方案 A（ascshim 09_fonts.js，真正效）**：页面头预取字节（绝对 URL
+`http://localhost/onlyoffice/fonts/` + 相对兜底；rawfile 为 **pre_xor 加密态**
+→ 装填前 32B XOR guidOdttf 还原）→ 哨兵等 28MB `checkAllFonts` 建表 →
+`FontStream` push `g_fonts_streams` + `SetStreamIndex` + `Status=0` +
+`CreateNativeStreamByIndex`（wasm 内存转移）。此后任何 LoadFont 立即有流——
+不依赖任何异步加载链，竞态免疫。**第 3 张注入表 `__fonts_ranges` 必须存在**
+（FontPicker Ranges 空 → 回退即失败）；FONT_INFOS/AllFonts 契约同源
+（build_editors_ohos import 单点）。
+
+**方案 B（build_editors_ohos `make_cjk_subset`）**：GB2312 全集+ASCII/Latin-1+
+CJK 标点+全角 → 9.26MB 子集 → **1.93MB/7641 字符**。幂等（产物 mtime 复用），
+断言链：尺寸 100KB~5MB + cmap 含 4E2D/41（防空壳子集）+ pre_xor 返回值。
+pyftsubset 依赖 fontTools（已录注释）。
+
+**验收键**：`FONT_WARM_BYTES→FONT_WARM_FILLED`（装填）→ 首帧 `PROF_LF ...
+face=非null gid中=369 load中=0 err=0`（子集后 GID 重排 369；修复前 face=null
+8109 次）；`FACE-NULL=0`（实测 18893 次全有效）。
+
+**遗留观察项**：`PROF_HBS` 仍返回 null（探针 `arguments[0]` 取的是 textShaper
+对象、txt 恒空，参数读取存疑；且 hb=3376640 已有效、GID/FT_Load 全通）——
+正文字形走 CacheGlyph 路径无黑字，不阻断中文渲染，如再遇 HBS 路径场景先从
+textshaper.js:124 实参开始取。

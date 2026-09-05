@@ -3,7 +3,7 @@
     //      打开/保存链（uitest 无法向 contenteditable 输字、无法注入系统 picker 列表交互）。
     //      产品路径不拼该参数 → 不生效；2026-09-04 已验证 docx：M7AUTO-EDIT-OK 进 save.docx
     //      word/document.xml，xlsx/pptx 同段（asc_PasteData Text=1 引擎常量） ----
-    if (/[?&]m7auto=1/.test(window.location.search) && !window.__m7auto) {
+    if (/[?&]m7auto=1(&|$)/.test(window.location.search) && !window.__m7auto) {
       window.__m7auto = true;
       (function() {
         var _n = 0;
@@ -23,45 +23,32 @@
         };
         var _doSave = function() {
           // 直接序列化（等同 asc_Save 覆写后半程；绕开守卫的 isLongAction —— 文档加载
-          // 长事务 20s 不结束（模型已就绪可读可写），守卫式保存永远打不穿）
-          setTimeout(function() {
-            try {
-              var _ap2 = _getApi();
-              var _oldN = window.native;
-              var _nb2;
-              window.native = { Save_End: function() {} };
-              try {
-                _nb2 = _ap2.asc_nativeGetFileData();
-              } finally {
-                window.native = _oldN;
-              }
-              if (_nb2 && _nb2.byteLength) {
-                var _bio = '';
-                for (var _i7 = 0; _i7 < _nb2.length; _i7 += 0x8000) {
-                  _bio += String.fromCharCode.apply(null, _nb2.slice(_i7, _i7 + 0x8000));
-                }
-                var _b64 = btoa(_bio);
-                var _rr = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', _b64]));
-                console.error('M7AUTO_DIRECT_SAVE len=' + _nb2.byteLength + ' ret=' + _rr);
-              } else {
-                console.error('M7AUTO_DIRECT_EMPTY');
-              }
-            } catch (x) { console.error('M7AUTO_DIRECT_ERR ' + String(x)); }
-          }, 2500);
+          // 长事务不结束（模型已就绪可读可写），守卫式保存永远打不穿）。
+          // 事件到达（asc_onDocumentContentReady）即加载终了 → 不再延时（旧 2500ms 是
+          // 配合轮询判据的缓冲，事件语义下不需要）。
+          try {
+            var _ap2 = _getApi();
+            // 与 40_save 共用 __lsoNativeSaveEnd（临时挂 Native.Save_End 换挂逻辑的单一点；
+            // 2026-09-05 审查：原内联换成 window.native 与其重复）
+            var _nb2 = window.__lsoNativeSaveEnd(function() {
+              return _ap2.asc_nativeGetFileData();
+            });
+            if (_nb2 && _nb2.byteLength) {
+              var _rr = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_nb2)]));
+              console.error('M7AUTO_DIRECT_SAVE len=' + _nb2.byteLength + ' ret=' + _rr);
+            } else {
+              console.error('M7AUTO_DIRECT_EMPTY');
+            }
+          } catch (x) { console.error('M7AUTO_DIRECT_ERR ' + String(x)); }
         };
-        var _try = function() {
+        var _onDocReady = function() {
           try {
             var _ap = _getApi();
-            // 文档模型就绪（asc_openDocumentFromBytes 完成、private_GetLogicDocument 有效）
-            // 才插入 —— 早于它 asc_AddText 空转（doc=null，内容不进模型/不进存盘）
-            var _docM = _ap && _ap.private_GetLogicDocument ? _ap.private_GetLogicDocument() : null;
-            if (!_docM && _ap && _ap.wbModel) { _docM = _ap.wbModel; }     // cell: 模型就绪（wb=WorkbookView 依赖 GUI 懒建，序列化只需 wbModel）
-            if (!_docM && _ap && _ap.WordControl && _ap.WordControl.m_oLogicDocument) {
-              _docM = _ap.WordControl.m_oLogicDocument;                   // slide
-            }
+            // 官方事件 asc_onDocumentContentReady（apiBase.js:1519）已证文档加载完成
+            // （=旧轮询判据 private_GetLogicDocument/wbModel 的等价且更权威时机）
             var _ftq = (String(window.location.search).match(/[?&]fileType=([^&]+)/) || [])[1] || 'docx';
             var _insOk = false;
-            if (_docM && _ftq === 'docx' && _ap && typeof _ap.asc_AddText === 'function') {
+            if (_ftq === 'docx' && _ap && typeof _ap.asc_AddText === 'function') {
               // docx：插入文本+保存（验证编辑内容进保存产物）
               _ap.asc_AddText('M7AUTO-EDIT-OK', null);
               _insOk = true;
@@ -70,57 +57,47 @@
             // GUI 懒建，v13 已知 toolbar 未 init) —— 直接序列化"已打开模型"（未修改同样产出
             // 完整文件，验证 xlst_bin2xlsx/pptt_bin2pptx 落盘链）
             if (_insOk) {
-              var _cw = _ap.asc_GetCurrentWord ? String(_ap.asc_GetCurrentWord(0)).slice(0, 30) : 'na';
-              console.error('M7AUTO_INSERTED ft=' + _ftq + ' cw=[' + _cw + ']');
+              console.error('M7AUTO_INSERTED ft=' + _ftq);
               _doSave();
               return;
             }
-            // cell/slide：模型（wbModel/WordControl）就绪即序列化（不插入 —— 无 GUI 输入链；
-            // 未修改模型序列化同样产出完整文件，验证 xlst_bin2xlsx/pptt_bin2pptx 落盘链）
-            if (!_insOk && _docM) {
-              console.error('M7AUTO_SAVE_DIRECT ft=' + _ftq);
-              _doSave();
-              return;
-            }
-            if (_n === 0 || _n === 10 || _n === 20) {
-              var _diag = {
-                ns: (String(window.location.pathname || '').indexOf('/spreadsheeteditor/') >= 0 ? 'SSE'
-                  : String(window.location.pathname || '').indexOf('/presentationeditor/') >= 0 ? 'PE' : 'DE'),
-                main: !!(window.DE || window.SSE || window.PE),
-                mainApiFn: (window.SSE && window.SSE.controllers && window.SSE.controllers.Main
-                  && window.SSE.controllers.Main.api) ? 1 : 0,
-                wb: !!(_ap && _ap.wb),
-                wbModel: !!(_ap && _ap.wbModel),
-                paste: _ap ? String(typeof _ap.asc_PasteData) : 'na',
-                save: _ap ? String(typeof _ap.asc_Save) : 'na',
-                con: _ap && _ap.constructor ? (_ap.constructor.name || 'anon') : 'na'
-              };
-              console.error('M7AUTO_PDIAG n=' + _n + ' ' + JSON.stringify(_diag));
-            }
-          } catch (x) { console.error('M7AUTO_INSERT_ERR ' + String(x)); }
-          if (++_n < 120) { setTimeout(_try, 700); }
-          else { console.error('M7AUTO_TIMEOUT'); }
+            console.error('M7AUTO_SAVE_DIRECT ft=' + _ftq);
+            _doSave();
+          } catch (x) { console.error('M7AUTO_ACCEPT_ERR ' + String(x)); }
         };
-        setTimeout(_try, 1500);
+        var _reg = function() {
+          var _ap = _getApi();
+          // 等 API 对象就绪（等对象而非等模型/界面元素——官方 api 出现于 onLaunch 完成）
+          if (!_ap || typeof _ap.asc_registerCallback !== 'function') { setTimeout(_reg, 300); return; }
+          try {
+            _ap.asc_registerCallback('asc_onDocumentContentReady', function() {
+              console.error('M7AUTO_DOC_READY');
+              _onDocReady();
+            });
+          } catch (e) { console.error('M7AUTO_REG_ERR ' + String(e)); }
+        };
+        setTimeout(_reg, 1200);
       })();
     }
 
     // ---- 3.55b 欢迎页 m7open 验收段：?m7open=<name>（如 m7-open-test.docx / sample.xlsx）——
     //      欢迎页面加载就绪后自动发官方 open:recent（路径 = 沙箱 filesDir/<name>），等价
-    //      「打开本地文件 → 用户点选该文件」；与 3.55 m7auto 配套做全自动开关验收链。 ----
-    try { console.error('M7OPEN_COND search=' + window.location.search + ' flag=' + window.__m7open
-      + ' sdk=' + typeof (window.sdk && window.sdk.command) + ' asc=' + !!window.AscNative); } catch (cb) {}
+    //      「打开本地文件 → 用户点选该文件」；与 3.55 m7auto 配套做全自动开关验收链。
+    //      门控：URL 带 m7open 参数才触发（产品 URL 无此参数 = 零代价）——M7OPEN_COND 打点
+    //      仅在参数存在时输出（2026-09-05：原无条件打点改为参数内）。 ----
     if (/[?&]m7open=([^&]+)/.test(window.location.search) && !window.__m7open) {
       var _m7f = (String(window.location.search).match(/[?&]m7open=([^&]+)/) || [])[1];
       _m7f = decodeURIComponent(_m7f);
       window.__m7open = true;
+      try { console.error('M7OPEN_COND search=' + window.location.search + ' sdk=' + typeof (window.sdk && window.sdk.command) + ' asc=' + !!window.AscNative); } catch (cb) {}
       (function() {
         var _t2 = 0;
         var _try2 = function() {
           try {
             if (window.sdk && window.sdk.command && window.AscNative && window.AscNative._call) {
               var _fd2 = String(window.AscNative._call('getFilesDir', []) || '');
-              var _ext2 = (_m7f.split('.')[1] || 'docx').toLowerCase();
+              // 扩展名取末段（文件名可含多点）
+              var _ext2 = (_m7f.match(/\.([a-z0-9]+)$/i) || [])[1] || 'docx';
               var _type2 = _ext2 === 'xlsx' ? 0x101 : _ext2 === 'pptx' ? 0x81 : 0x41;
               window.sdk.command('open:recent', JSON.stringify({
                 id: 99, name: _m7f, path: _fd2 + '/' + _m7f, type: _type2
@@ -138,9 +115,14 @@
       })();
     }
 
-    // ---- 3.6 字体链修复：官方 shim loadLocalFile 请求 ascdesktop://fonts/（CEF 拦截），
-    //      ArkWeb 无此 scheme，XHR 永远 pending → 字体回调 null → BIN 读取 undefined.length 崩。
-    //      改经 http://localhost/onlyoffice/fonts/（rawfileLoader 提供已 pre_xor 字体，POC 链同源）。
+    // ---- 3.6 字体链修复（历史注记，2026-09-05 审查）：官方 shim loadLocalFile 请求
+    //      ascdesktop://fonts/（CEF 拦截），ArkWeb 无此 scheme，XHR 永远 pending →
+    //      字体回调 null → BIN 读取 undefined.length 崩；原修复改经
+    //      http://localhost/onlyoffice/fonts/（rawfileLoader 提供已 pre_xor 字体）。
+    //      当前在编辑器页 3.7 段删除 window.AscDesktopEditor（web 语义），且 sdkjs 唯一
+    //      调用点 cell/api.js:616 自身以 if (window["AscDesktopEditor"]) 门控 → **本段在
+    //      编辑器页永不执行**（字体实际走 web 链 Externals.js LoadFontArrayBuffer XHR，同 URL）。
+    //      保留以备桌面语义启用；如确认桌面色态启用请同步 3.7 门控。 ----
     window.AscDesktopEditor.loadLocalFile = function(url, callback, start, len) {
       try {
         var loadUrl = url;
@@ -175,6 +157,10 @@
             // 否则 onEndLoadFile 的 editorId 校验会拒绝（"打开文件错误"）。
             var _ftq = (window.location.search || '').match(/[?&]fileType=([^&]+)/);
             var _ft = _ftq ? decodeURIComponent(_ftq[1]) : 'docx';
+            // 标题取自 URL（EditorPage.editorUrl 带 title=Unnamed.xxx）；缺省 'sample'
+            // 兜底（POC 遗留默认值，未传 title 时保持旧行为）
+            var _tq = (window.location.search || '').match(/[?&]title=([^&]+)/);
+            var _title = _tq ? decodeURIComponent(_tq[1]) : 'sample';
             var _dt = _ft === 'xlsx' ? 'cell' : _ft === 'pptx' ? 'slide' : 'word';
             var _cfg = {
               documentType: _dt,
@@ -204,12 +190,14 @@
                 }
               },
               document: {
-                key: 'k' + Date.now(), url: '_offline_', title: 'sample', fileType: _ft,
+                key: 'k' + Date.now(), url: '_offline_', title: _title, fileType: _ft,
                 permissions: {edit: true, download: true}
               }
             };
             var _k = ('' + _cfg.document.key + Math.random().toString(16).substring(2)).replace(/[^0-9a-f]/g, '');
-            _cfg.document.key = (_k.charAt(0) === '0' ? '1' : '') + _k.substring(1);
+            // key 以 '1' 开头（首字符 '0' 时为 0x 前缀语义接 1；非 '0' 原样保留——
+            // 2026-09-05 审查修复：原实现非 '0' 时丢弃首字符）
+            _cfg.document.key = _k.charAt(0) === '0' ? '1' + _k.substring(1) : _k;
             // 与官方 api.js _onAppReady 相同：_init(_config.editorConfig)（内层 editorConfig，
             // 不是 DocsAPI 顶层配置！Main.js loadConfig $.extend(editorConfig, data.config) 直接
             // 取顶层 customization/user 等 → 传 _cfg 会 undefined）。
@@ -223,42 +211,25 @@
               // 'lang'。预制默认空对象使 loadConfig 可执行（$.extend 后即填全）。
               _m.editorConfig = _m.editorConfig || {};
               _m.appOptions = _m.appOptions || {};
-              // 无服务器环境下 unhandled-rejection → asc_onError(EditingError,-25) 弹
-              // "'下载为'选项将文件备份保存到驱动器"（底层链无 downloadAs 支持）——
-              // 降级语义：静默 + 日志（等待保存链实现后放开）。
-              if (!window.__lsoOnErrHooked) {
-                window.__lsoOnErrHooked = true;
-                var _oe = _m.onError;
-                var _onErrWrap = function(id, level, data, cb) {
-                  if (id === -25 || id === (window.Asc && window.Asc.c_oAscError && window.Asc.c_oAscError.ID && window.Asc.c_oAscError.ID.EditingError)) {
-                    console.error('LSO_ONERR_IGN EditingError(-25)');
-                    return;
-                  }
-                  return _oe ? _oe.call(window[_ns] && window[_ns].controllers && window[_ns].controllers.Main, id, level, data, cb) : undefined;
-                };
-                _m.onError = _onErrWrap;
-                // onLaunch 时 asc_registerCallback 已绑旧 _m.onError 引用 → 必须重新注册
-                try {
-                  if (_m.api && typeof _m.api.asc_registerCallback === 'function') {
-                    _m.api.asc_registerCallback('asc_onError', _onErrWrap);
-                  }
-                } catch (rr) { console.error('LSO_ONERR_REG_ERR ' + String(rr)); }
-              }
+              // -25(EditingError) 拦截已在 40_save.js 的 sendEvent 层完成（更早生效，
+              // 任何 handler 触达前吞掉；本处 onError 级拦截与它重复，2026-09-05 移除）
               try {
                 _m.loadConfig({config: _cfg.editorConfig});
                 console.error('LSO_LC_OK ec=' + (typeof _m.editorConfig) + ' lang=' + ((_m.editorConfig || {}).lang)
                   + ' cfgLang=' + _cfg.editorConfig.lang + ' user=' + (typeof _m.appOptions.user));
                 // 全 controller init 补齐（2026-09-04，.lang 级联崩溃根因）：3.4 只直调
                 // Main.loadConfig，Gateway('init') 从未触发 → 其他 controller 的 init 链
-                // （Gateway.on('init') 注册，如 FormulaDialog.js:177 loadConfig）全部饿死 →
+                // （Gateway.on('init') 注册，如 FormulaDialog.js:174 loadConfig）全部饿死 →
                 // FormulaDialog.appOptions 未初始化 → applyModeCommonElements → FormulaDialog.
                 // setApi 内 appOptions.lang 读崩（"reading 'lang'"）。Gateway.trigger 非公开
                 // API（Gateway.js 无 trigger 暴露）→ 遍历 controller 表补发 loadConfig
                 // （官方 init 协议对每 controller 同构；Main 二次调用幂等）。
+                // 命名空间按页面取（window[_ns].controllers——原硬编码 SSE 只覆盖 cell，
+                // word/slide 打误导 N=0，2026-09-05 审查修复）。
                 try {
                   var _app2 = _m.getApplication();
                   var _nInit = 0;
-                  for (var cName in (window.SSE && window.SSE.controllers || {})) {
+                  for (var cName in (window[_ns] && window[_ns].controllers || {})) {
                     try {
                       var _ci = _app2.getController(cName);
                       if (_ci && typeof _ci.loadConfig === 'function') {
@@ -355,25 +326,8 @@
                       _perm.setRights(window.Asc.c_oRights.Edit);
                       _perm.setIsLight(false);
                       _perm.setBuildVersion(_pageVer);
-                      // wrap 探针：onEditorPermissions 链内方法分段 ENTER 打点（定位崩前段）
-                      if (!_m.__permWrapped) {
-                        _m.__permWrapped = true;
-                        ['onServerVersion', 'onLanguageLoaded', 'applyModeCommonElements',
-                          'applyModeEditorElements', 'loadCoAuthSettings', 'onEditorPermissions'].forEach(function (mn) {
-                          var _m2 = _m[mn];
-                          if (typeof _m2 === 'function') {
-                            var _b = _m2.bind(_m);
-                            _m[mn] = function() {
-                              console.error('LSO_PERM_ENTER ' + mn);
-                              try { return _b.apply(_m, arguments); }
-                              catch (pp) {
-                                try { console.error('LSO_PERM_CB_ERR ' + mn + ' ' + (pp && pp.stack || String(pp))); } catch (z) {}
-                                throw pp;
-                              }
-                            };
-                          }
-                        });
-                      }
+                      // （2026-09-05 稳定化：原 PERM_ENTER 探针 wrap 移除——诊断打点，
+                      //  定位工作已完成；权限分发异常现在由页面 console 直接可见）
                       _m.onEditorPermissions.call(_m, _perm);
                       console.error('LSO_PERM_DISPATCH_OK ver=' + _pageVer);
                     } else {
@@ -400,10 +354,6 @@
         (function _lsoInitLoop() {
           var _o = window[_ns];
           var _mr2 = _o && _o.controllers && _o.controllers.Main;
-          if (_lsoInitTries === 0 || _lsoInitTries === 5 || _lsoInitTries === 59) {
-            console.error('LSO_NSCHECK ns=' + _ns + ' app=' + (typeof _o) + ' main=' + (typeof _mr2)
-              + ' api=' + (_mr2 && _mr2.api ? 1 : 0));
-          }
           // 就绪信号 = Main 实例 + api（Viewport.getApi，onLaunch 已完成）：
           // 只判方法名字（loadConfig 属性恒存在于 Backbone controller）会在 onLaunch 中段
           // 触发 → editorConfig 未初始化 → loadConfig 内 'lang' 崩。
@@ -419,3 +369,18 @@
       }
     } catch (nix) {}
 
+
+    // ---- 3.9（已移除，2026-09-05 稳定化）：插件装配时序包装。官方 web 链本就保证
+    //      「文档加载完成 → 装配插件」：onDocumentContentReady（Main.js:1298）→ app:ready
+    //      → pluginsController.setApi(Main.js:1463) → loadPlugins → asc_pluginsRegister
+    //      （Plugins.js:259）；官方另有 preSetupPlugins 延迟补发（apiBase.js:3662）。
+    //      「1500/4000ms + loading-mask 消失 + 30s 超时」的包装属于重复且不可靠的
+    //      权宜实现，删除。若再遇插件装配与文档打开的异常：不回加包装，先用官方事件
+    //      （asc_registerCallback('asc_onDocumentContentReady'/'asc_onPluginShow')）打点取证。
+
+    // ---- 3.10（已撤回，2026-09-05 用户决策：专注基础功能）：AI 插件 provider 预配置
+    //      （localStorage onlyoffice_ai_plugin_storage_key + ai-mock 端点）与 3.11 AI 按钮
+    //      点击诊断一起撤除。AI 后续启用时：恢复该段 + build_editors_ohos.py 的 AI 插件
+    //      安装步骤 + EditorPage smoke 的 AI 探针（git 历史可查）。
+
+    // ---- 3.11（已撤回，见 3.10 说明）。

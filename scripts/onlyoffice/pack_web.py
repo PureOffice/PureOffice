@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Pack ONLYOFFICE web-apps(sdkjs) dev 树子集到 HAP rawfile。
+"""【已废弃 —— 2026-09-05 起不再使用，仅历史留存】
+
+本脚本是 POC 时代的「超大补丁打包器」（约 1600 行，直接给官方文件打补丁），
+已被 build_editors_ohos.py（官方构建产物装配 + ascshim 注入）全面替代。
+当前唯一部署入口： scripts/onlyoffice/build_editors_ohos.py
+  （运行 grunt-build.sh → build_editors_ohos.py → assembleHap，见其头部注释）
+
+请勿再运行或参考本文件。新增 rawfile 资源请改 build_editors_ohos.py。
+已知断点：--dry 分支引用未定义 SDK_KEEP（NameError，2026-09-05 审查记录），勿用。
+
+--- 以下为历史文档 ---
+Pack ONLYOFFICE web-apps(sdkjs) dev 树子集到 HAP rawfile。
 
 目标结构（与 web-apps 源码相对路径一致，index.html 原样生效）：
   rawfile/onlyoffice/

@@ -14,16 +14,24 @@ __pycache__/
 *.pyc
 # convertershell NAPI 模块产物（hvigor/build_convertershell.sh 生成，99MB+）
 entry/src/main/cpp/types/libconvertershell/libs/
-# rawfile 编辑器运行时资源：pack 产物，python3 scripts/onlyoffice/pack_web.py 重生成
+# rawfile 编辑器运行时资源：构建产物，python3 scripts/onlyoffice/build_editors_ohos.py 重生成
 entry/src/main/resources/rawfile/onlyoffice/.hvigor/
 entry/src/main/resources/rawfile/onlyoffice/fonts/
 entry/src/main/resources/rawfile/onlyoffice/sdkjs/
 entry/src/main/resources/rawfile/onlyoffice/webapps/
 entry/src/main/resources/rawfile/onlyoffice/themes.json
-entry/src/main/resources/rawfile/onlyoffice/plugins.json
+# smoke 诊断脚本（源 scripts/onlyoffice/smoke/，构建脚本安装）
+entry/src/main/resources/rawfile/onlyoffice/smoke/
+# 版本号（构建期内容哈希生成——阶段3，替代手改 VERSION_BUMP）
+entry/src/main/resources/rawfile/onlyoffice/version.json
+# 注：ascshim.js 与 index.html（loginpage 欢迎页）同为构建产物却入库跟踪（决策：
+#   fresh clone 不用先跑 make_ascshim/grunt 即可编译；两者均由
+#   scripts/onlyoffice/desktop/make_ascshim.py 与 grunt-build.sh 重生成，升级时同步提交）
 # 样本（sample.*）是测试资产，保留跟踪；document.json/editor.html/document.docx 已退役删除
 # native 构建产物/工具链拷贝
 entry/libs/
 entry/.cxx/
 # 构建与临时产物
 .temp/
+# CJK 子集化中间产物（build_editors_ohos.make_cjk_subset 幂等再生；源字体保留入库）
+scripts/onlyoffice/templates_src/fonts/HarmonyOS_Sans_SC.subset.ttf

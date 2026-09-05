@@ -4,25 +4,19 @@
 // xml: x2t 命令行同款参数 XML，如
 //   <Convert><m_sFileFrom>/data/xxx/in.docx</m_sFileFrom><m_sFileTo>/data/xxx/out.pdf</m_sFileTo></Convert>
 // 返回 x2t 原始错误码：0 = 成功（SUCCEEDED_X2T）；0x8004350 = AVS_FILEUTILS_ERROR_CONVERT（转换失败码）。
+//
+// 历史注记：原导出 x2tConvert（异步）与 x2tVersion 无任何调用者（2026-09-05 审查删除）；
+// 产品路径（打开/保存链）即使用 x2tConvertSync——NAPI 同步语义，转换对象为单个
+// 文档（真机实测秒级，无 ANR）；若未来转大文件需改 worker 执行。
 import * as convertershell_so from 'libconvertershell.so';
 
 interface X2TCore {
   convertSync(xml: string): number;
-  convert(xml: string): Promise<number>;
-  version(): string;
 }
 
 const core: X2TCore = convertershell_so as X2TCore;
 
+/** 同步文档转换（NAPI 同步调用；0=成功，错误码见头注释） */
 export function x2tConvertSync(xml: string): number {
-  // 同步转换（调试/诊断用；正式接口为 x2tConvert 异步）
   return core.convertSync(xml);
-}
-
-export function x2tConvert(xml: string): Promise<number> {
-  return core.convert(xml);
-}
-
-export function x2tVersion(): string {
-  return core.version();
 }

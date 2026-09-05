@@ -4,7 +4,11 @@
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR aarch64)
 
-set(OHOS_NDK_ROOT "/apps/harmony/sdk/default/openharmony/native" CACHE PATH "OHOS NDK root")
+# NDK 根：环境变量 OHOS_NDK_ROOT 优先（换机/新 SDK 用 env 覆盖，勿改本文件——2026-09-05 审查补）
+set(OHOS_NDK_ROOT "$ENV{OHOS_NDK_ROOT}" CACHE PATH "OHOS NDK root")
+if(NOT OHOS_NDK_ROOT)
+  set(OHOS_NDK_ROOT "/apps/harmony/sdk/default/openharmony/native" CACHE PATH "OHOS NDK root" FORCE)
+endif()
 
 set(TOOLCHAIN_TRIPLE "aarch64-linux-ohos")
 

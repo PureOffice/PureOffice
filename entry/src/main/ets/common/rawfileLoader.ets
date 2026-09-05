@@ -26,7 +26,8 @@ function mimeTypeFor(path: string): string {
 }
 
 /**
- * 提取 URL 路径部分（去掉 host/查询串/锚点，保持解码后相对路径）。
+ * 提取 URL 路径部分：先剥离 query/锚点再解码（decodeURIComponent 对畸形 % 编码抛
+ * URIError——解析失败仅告警，返回原样本由调用侧 404 兜底）。
  * 入参形如 http://localhost/userfile/sample.docx?v=2 或 onlyoffice://webapps/...
  */
 function urlPathOnly(rawUrl: string): string {
@@ -37,25 +38,35 @@ function urlPathOnly(rawUrl: string): string {
   } else {
     p = p.replace(/^onlyoffice:\/\/+/, '');
   }
-  p = decodeURIComponent(p);
-  const q = p.indexOf('?');
-  if (q >= 0) {
-    p = p.substring(0, q);
+  let q = p.indexOf('?');
+  if (q < 0) {
+    q = p.length;
+  }
+  let h = p.indexOf('#');
+  if (h < 0 || h > q) {
+    h = q;
+  }
+  p = p.substring(0, h);
+  try {
+    p = decodeURIComponent(p);
+  } catch (e) {
+    console.error('url decode err: ' + rawUrl);
   }
   return p;
 }
 
 /** 用户文件：沙箱 filesDir/<name> → ArrayBuffer */
-function loadUserFile(filesDir: string, rel: string): ArrayBuffer | null {
+function loadUserFile(filesDir: string, rel: string, log: (m: string) => void): ArrayBuffer | null {
   // 防目录穿越：只允许单一文件名（不允许 / 和 ..）
   if (rel.indexOf('/') >= 0 || rel.indexOf('\\') >= 0 || rel.indexOf('..') >= 0) {
-    console.error('userfile bad path: ' + rel);
+    log('userfile bad path: ' + rel);
     return null;
   }
   const fp = filesDir + '/' + rel;
   try {
     const st = fs.statSync(fp);
     if (st.isDirectory()) {
+      log('userfile dir: ' + fp);
       return null;
     }
     const o = fs.openSync(fp, fs.OpenMode.READ_ONLY);
@@ -64,7 +75,7 @@ function loadUserFile(filesDir: string, rel: string): ArrayBuffer | null {
     fs.closeSync(o);
     return buf;
   } catch (e) {
-    console.error('userfile miss: ' + fp + ' ' + String(e));
+    log('userfile miss: ' + fp + ' ' + String(e));
     return null;
   }
 }
@@ -95,8 +106,8 @@ function readyResp(resp: WebResourceResponse): WebResourceResponse {
 }
 
 // 把页面 URL 映射到 rawfile 路径 onlyoffice/xxx，支持两种形态：
-//   http://localhost/onlyoffice/xxx  （标准 scheme，XHR/fetch 走正常 CORS 路径）
-//   onlyoffice://xxx                 （自定义 scheme，仅作注释保留）
+//   http://localhost/onlyoffice/xxx  （标准 scheme，XHR/fetch 走正常 CORS 路径——实际使用）
+//   onlyoffice://xxx                 （自定义 scheme；urlPathOnly 兼容剥离，当前无生产者）
 function pathToRawFile(rawUrl: string): string {
   let p = urlPathOnly(rawUrl);
   if (!p.startsWith(BASE_DIR)) {
@@ -110,20 +121,23 @@ function pathToRawFile(rawUrl: string): string {
  *   http://localhost/onlyoffice/xxx → rawfile（前端资源，本地化）
  *   http://localhost/userfile/<name> → 沙箱 filesDir/<name>（用户文档，迭代 1 真文件打开链）
  * filesDir 为 context.filesDir；沙箱文件不存在时返回 404 文本，不抛。
+ * log：可选的 ArkTS 日志注入（EditorPage.arkLog → web_console.txt；缺省 console.error）。
  */
 export function loadRaw(
   request: WebResourceRequest,
   resMgr: resourceManager.ResourceManager,
-  filesDir: string
+  filesDir: string,
+  log?: (m: string) => void
 ): WebResourceResponse {
+  const _log: (m: string) => void = log ?? ((m: string) => console.error(m));
   const url = request.getRequestUrl();
   const p = urlPathOnly(url);
   if (p.startsWith(USERFILE_PREFIX)) {
-    const ab = loadUserFile(filesDir, p.substring(USERFILE_PREFIX.length));
+    const ab = loadUserFile(filesDir, p.substring(USERFILE_PREFIX.length), _log);
     if (ab === null) {
       return notFoundResp(url);
     }
-    console.error('userfile hit: ' + p + ' bytes=' + ab.byteLength);
+    _log('userfile hit: ' + p + ' bytes=' + ab.byteLength);
     const resp = new WebResourceResponse();
     resp.setResponseMimeType(mimeTypeFor(p));
     resp.setResponseEncoding('utf-8');
@@ -141,7 +155,7 @@ export function loadRaw(
     resp.setResponseData(ab);
     return readyResp(resp);
   } catch (e) {
-    console.error('rawfile miss: ' + rawPath + ' ' + String(e));
+    _log('rawfile miss: ' + rawPath + ' ' + String(e));
     return notFoundResp(url);
   }
 }
