@@ -205,6 +205,104 @@ def make_cjk_subset(src):
     return CJK_SUBSET_OUT
 
 
+# —— 字体缩略图精灵生成（2026-09-05 字族下拉终极修复，资源侧；非工控注入）——
+# 官方 web 语义 CThumbnailLoader（ComboBoxFonts.js:98-120）XHR
+#   sdkjs/common/Images/fonts_thumbnail_ea@<ratio>x.png.bin（官方 RLE alpha 蒙版
+#   格式：12B 大端头 width/heightOne/count + 字节流—— 0x00,len(≤255)=透明 run，
+#   其它值=像素（255-tmp, tmp alpha）；解码器 ComboBoxFonts.js:131-234）。
+# 前置缺陷：资源缺失 → rawfileLoader 404 响应仍触发 XHR onload → 404 页字节被
+#   当 RLE 头解码 → createImageData 巨值 → OOM → 菜单渲染崩（真机日志
+#   Uncaught RangeError ...ComboBoxFonts.js:243）。弃用方案（已回滚，勿回退）：
+#   覆盖 Common.Controllers.Desktop 桩——① 官方 Desktop.js:786 requirejs 模块
+#   晚于 ascshim eval 会覆盖桩；② window.native 语义会改引擎 AscFonts.load 走
+#   native 分支（sdk-all-min.js:49957）」；③ isActive=true 窗口触发桌面语义
+#   启动链 → 应用启动崩溃（实测）。
+# 本生成器：官方格式的「全透明格」精灵（列表显示字体名，预览格透明——后续可由
+#   PIL 渲染字形升级，头/格尺寸已与官方一致）。幂等（产物存在即跳过）。断言：
+#   12B 头正确 + 非空文件（防空壳）。
+FONT_SPRITES_RATIOS = [(1.0, ''), (1.25, '@1.25x'), (1.5, '@1.5x'),
+                       (1.75, '@1.75x'), (2.0, '@2x')]
+FONT_SPRITE_COL_W = 300     # 与 ComboBoxFonts.js:53 iconWidth 一致
+FONT_SPRITE_ROW_H = 28      # 与 Asc.FONT_THUMBNAIL_HEIGHT||28 一致
+
+
+def make_fonts_sprites(count):
+    """生成 5×2（ea/ascii）×ratio 精灵 → rawfile/onlyoffice/sdkjs/common/Images/。
+    count = 普通字族数（FONT_INFOS 行数 == UI asc_onInitEditorFonts 收到的 n）。
+    每个格子以**该字族对应字体文件**渲染「字族名样例」→ 官方 RLE alpha
+    蒙版编码（0x00,len=透明 run；其余字节=alpha，解码 RGB=255-bt 黑字）。
+    依赖 Pillow（pip install pillow；生成器缺时透明格降级+告警不阻断——
+    但正式包要求含字形：缺失时 raise。全透明格=菜单项空白（实机已见）。
+    每次覆盖重写（内容随字体源变——不做缓存；构建可复现）。"""
+    import struct
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        raise SystemExit('make_fonts_sprites 需要 Pillow：pip install pillow（或设'
+                         ' OHOS_*FONTS 未安装？）')
+    d = os.path.join(SDK_DST, 'common', 'Images')
+    os.makedirs(d, exist_ok=True)
+    ok = 0
+    for postfix in ('_ea', ''):   # zh/ja/ko 用 _ea，其余 ascii（组件按 Locale 选）
+        for ratio, suffix in FONT_SPRITES_RATIOS:
+            fn = 'fonts_thumbnail%s%s.png.bin' % (postfix, suffix)
+            p = os.path.join(d, fn)
+            w = int(FONT_SPRITE_COL_W * ratio)
+            h = int(FONT_SPRITE_ROW_H * ratio)
+            # —— 画布：count 行，每行一格（字族名样例渲染）——
+            img = Image.new('RGBA', (w, h * count), (0, 0, 0, 0))
+            dr = ImageDraw.Draw(img)
+            fsize = int(20 * ratio)
+            for i in range(count):
+                row = FONT_INFOS[i]
+                ff = FONT_FILES[row[1]]          # CFontInfo indexR → 字体文件
+                src = os.path.join(FONT_SRC_BY_FILE[ff], ff)
+                try:
+                    f = ImageFont.truetype(src, fsize)
+                except OSError:
+                    f = None
+                # y 基线：格中部（28*ratio 高格）
+                y = i * h + int(h * 0.06)
+                if f is not None:
+                    dr.text((int(10 * ratio), y), str(row[0]), font=f,
+                            fill=(255, 0, 0, 255))
+                else:
+                    dr.text((int(10 * ratio), y), '?', font=ImageFont.load_default(),
+                            fill=(255, 0, 0, 255))
+            # —— RLE 编码（官方协议）——
+            px = img.load()
+            out = bytearray(struct.pack('>III', w, h, count))
+            total = w * h * count
+            i = 0
+            while i < total:
+                ci = i // (w * h)                # 当前格
+                pi = i % (w * h)
+                a = px[pi % w, ci * h + pi // w][3]
+                if a == 0:
+                    j = i
+                    while j < total and j - i < 255:
+                        cj = j // (w * h)
+                        pj = j % (w * h)
+                        if px[pj % w, cj * h + pj // w][3] != 0:
+                            break
+                        j += 1
+                    out += bytes([0, j - i])
+                    i = j
+                else:
+                    out.append(a)
+                    i += 1
+            with open(p, 'wb') as f2:
+                f2.write(bytes(out))
+            if os.path.getsize(p) < 4096:
+                raise SystemExit('字体精灵生成异常（过小 %d）：%s'
+                                 % (os.path.getsize(p), p))
+            ok += 1
+    if ok < 10:
+        raise SystemExit('字体精灵文件数异常：%d（预期 10）' % ok)
+    print('  精灵格渲染：每格 %d×%d，%d 字族，%d 文件（RLE off' % (w, h, count, ok))
+    return ok
+
+
 def make_font_selection_bin(fonts):
     """最小 g_fonts_selection_bin（CFontSelect v0 序列化，little-endian）
     ——与 POC 同契约（引擎服务器字体索引，在 AllFonts.js 里注入）
@@ -421,6 +519,12 @@ def main():
             raise SystemExit('字体预加密失败：%s' % fn)
         fonts_ok += 1
     print('  字体 → %s (%d/%d files)' % (FONT_DST, fonts_ok, len(FONT_FILES)))
+
+    # 5.5 字体缩略图精灵（官方 web 语义 CThumbnailLoader 消费——字族下拉真源，
+    #     详见 make_fonts_sprites 注释；缺失=404 字节当 RLE 头→createImageData
+    #     OOM→菜单渲染崩，真机 ComboBoxFonts.js:243 实证）
+    n_spr = make_fonts_sprites(len(FONT_INFOS))
+    print('  字体精灵 → sdkjs/common/Images (%d files)' % n_spr)
 
     # 6. 欢迎页 loginpage → rawfile/onlyoffice/index.html
     if os.path.isfile(LOGIN):

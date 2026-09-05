@@ -345,6 +345,49 @@
           } catch (ix) {
             console.error('LSO_INIT_ERR ' + String(ix) + (ix && ix.stack ? ' | ' + ix.stack.slice(0, 1200) : ''));
           }
+          // 字族下拉数据源补发（2026-09-05 用户报修「字体列表无法下拉」）：
+          // UI 层 Common.Controllers.Fonts.setApi 注册 asc_onInitEditorFonts →
+          // onApiLoadFonts → cachedStore.add → trigger('fonts:load') →
+          // ComboBoxFonts 实例 fillFonts 填自身 store（Fonts.js:156/343）。事件
+          // 官方由 g_font_loader.LoadDocumentFonts → Api.sync_InitEditorFonts 发出
+          // （sdk-all.js:244037），真机此链未跑（同 LoadFontAsync 因：web 语义
+          // apiBase 不在路径）→ store 恒空 → ComboBoxFonts.onBeforeShowMenu
+          // （ComboBoxFonts.js:661）preventDefault → 下拉打不开。
+          // 补发判据（双条件轮询，勿改回一次性——实测一次性命中两个时机盲区：
+          //   ① _sendInit 时刻 28MB checkAllFonts（g_font_infos）未必已 eval；
+          //   ② 各 ComboBoxFonts 实例 init 时才订阅 fonts:load（Toolbar 晚建））：
+          //   A. AscFonts.g_font_infos 已建（28MB checkAllFonts 完成）
+          //   B. Common.NotificationCenter._events['fonts:load'] 已挂（订阅者就位）
+          //     ——与 Fonts.js:127 同判据。
+          (function lsoSendFonts() {
+            try {
+              if (window.__lsoFontsSent) { return; }
+              var _fi0 = window.AscFonts && window.AscFonts.g_font_infos;
+              var _nc = window.Common && window.Common.NotificationCenter;
+              var _subs = _nc && _nc._events && _nc._events['fonts:load'];
+              if (!_fi0 || !_fi0.length || !_subs) {
+                if ((window.__lsoFontsN = (window.__lsoFontsN || 0) + 1) < 150) {
+                  setTimeout(lsoSendFonts, 200); return;
+                }
+                console.error('LSO_UI_FONTS_GIVEUP infos=' + (_fi0 ? _fi0.length : 'U')
+                  + ' subs=' + !!_subs);
+                return;
+              }
+              var _cf = [];
+              for (var _fi2 = 0; _fi2 < _fi0.length; _fi2++) {
+                if (_fi0[_fi2].Name === 'ASCW3') { continue; } // 特殊符号字体不入 UI 列表
+                _cf.push(new window.AscFonts.CFont(_fi0[_fi2].Name, '', _fi0[_fi2].Thumbnail || 0));
+              }
+              if (typeof _m.api.sync_InitEditorFonts !== 'function') {
+                console.error('LSO_UI_FONTS_NOSUPPORT'); return;
+              }
+              window.__lsoFontsSent = true;
+              _m.api.sync_InitEditorFonts(_cf);
+              console.error('LSO_UI_FONTS n=' + _cf.length);
+            } catch (fex) {
+              console.error('LSO_UI_FONTS_ERR ' + String(fex));
+            }
+          })();
         };
         // 应用命名空间随编辑器而异：DE(document)/SSE(spreadsheet)/PE(presentation)，
         // 不能用 window.DE（cell 页 DE=undefined → Main 永远找不到 → 不开文档）

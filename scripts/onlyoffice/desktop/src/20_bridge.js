@@ -12,6 +12,13 @@
   // 无字形字符的 fallback 永远失败 → 方块（2026-09-05 最后根因，见
   // build_editors_ohos.py FONT_RANGES 注释）。
   window["__fonts_ranges"] = @@FONT_RANGES_JSON@@;
+  // （0.3 已回滚，2026-09-05）字族下拉「精灵缺失」修复走**资源侧**：官方 web 语义
+  // （Common.Controllers.Desktop.isActive=false → CThumbnailLoader XHR
+  //    sdkjs/common/Images/fonts_thumbnail_ea@*.png.bin）由构建链生成精灵产物
+  //   （build_editors_ohos.make_fonts_sprites，官方 RLE 格式）——不注入/覆盖
+  //   Desktop 控制器（曾试用桩：官方 Desktop.js:786 在 requirejs 模块晚于本页
+  //   定义会覆盖桩；且 window.native 语义会使引擎 AscFonts.load 走 native 分支
+  //   （sdk-all-min.js 49957）——弃，谨记勿回退）。
 
   // sdk-all.js（common 清单 = 引擎的另一半：Serialize2/Document/History/GlobalLoaders）
   // 由官方链自动加载：api.js Init → apiBase.js:293 AscCommon.loadSdk(editorName)

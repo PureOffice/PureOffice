@@ -218,3 +218,49 @@ face=非null gid中=369 load中=0 err=0`（子集后 GID 重排 369；修复前 
 对象、txt 恒空，参数读取存疑；且 hb=3376640 已有效、GID/FT_Load 全通）——
 正文字形走 CacheGlyph 路径无黑字，不阻断中文渲染，如再遇 HBS 路径场景先从
 textshaper.js:124 实参开始取。
+
+## 13. 字族下拉无法展开（2026-09-05 终局：官方 web 语义的资源侧修复，已真机✓）
+
+**链路（全链实证）**：`ComboBoxFonts.onBeforeShowMenu`（store 空 → preventDefault，
+ComboBoxFonts.js:661）← `fillFonts` 卡在第一步 `loadSprite(callback)`
+（ComboBoxFonts.js:556——精灵不回调则永无 store.set）← `CThumbnailLoader.load`：
+官方 web 语义（Desktop.isActive=false）→ `supportBinaryFormat=true` → XHR
+`sdkjs/common/Images/fonts_thumbnail_ea@2x.png.bin`（+`.bin` 由组件自拼）——
+**资源缺失** → 浏览器对 404 仍触发 `xhr.onload` → **404 页字节被当 RLE 解码**
+（12B 头 width 爆炸）→ `createImageData(巨值)` Out of memory 抛 RangeError
+（真机日志 `Uncaught RangeError ...ComboBoxFonts.js:243`）→ 菜单渲染崩 → 展开
+失效。
+
+**修复（两级，均官方协议，无注入/无覆盖）**：
+1. **数据侧**：ascshim 30_open 打开链补发 `api.sync_InitEditorFonts(CFont 数组)`
+   （官方 LoadDocumentFonts 同构语义，sdk-all.js:244037；双条件轮询：`g_font_infos`
+   就绪 ∧ `NotificationCenter._events['fonts:load']` 订阅就位——一次性早发命中
+   两个时机盲区，实测 LSO_UI_FONTS n=18；`__lsoFontsSent` 防重）。
+2. **资源侧**：build_editors_ohos `make_fonts_sprites`——官方 RLE 格式精灵
+   （12B 大端头 width/heightOne/count + 0x00,len 透明 run / 其余=alpha 字节）
+   `fonts_thumbnail_{ea,_}@<ratio>x.png.bin` ×5 ratio，每格以该字族字体文件
+   PIL 渲染「字族名样例」（18 格 300×28×ratio），仅记录待升级点：PIL 渲染字形
+   预览为黑字蒙版；后继可切官方桌面 getFontsSprite（native 通道）。
+
+**弃用记录（勿回退）**：曾以覆盖/桩 Common.Controllers.Desktop 实现——
+① 官方 Desktop.js:786 在 requirejs 模块中晚于 ascshim 定义会覆盖桩；
+② `window.native` 语义会把引擎 `AscFonts.load` 切到 native 分支
+（sdk-all-min.js:49957——wasm fonts.js 不加载）；
+③ `isActive=true` 窗口会激活桌面语义启动链（应用启动崩溃，实测）。
+正路 = 官方 web 语义（isActive=false）+ 资源产物，或完整桌面语义迁移
+（见 §14 路线）。
+
+**验收键**：`PROF_CLICK_CAP`（点击到组件）+ `PROF_PREV`（prevent 判定）+ 菜单
+DOM；修复后真机截图：18 字体项列出、正文中文字形正常、文档语言=中文-
+中华人民共和国。
+
+## 14. B 架构适配路线（2026-09-05 用户探讨：fork 定制 vs 当前 ascshim）
+
+三种 hack 来源：① 产物/资源缺失（仓库/构建链补齐——非源码问题）；
+② 语义错配（引擎/ web 对无宿主假设——源码级修整收益高）；
+③ 宿主接口缺失（B 架构缺 C++ 那层——**官方本就为宿主设计了接入面：
+desktop-apps 渲染层**）。
+**推荐**：fork 对象 = `third_party/desktop-apps`（非 sdkjs/web-apps——后者
+release 升级会冻结）；构建切官方 --desktop 语义；B 架构补 native 三件套
+（字体精灵/loadjs/AllFonts——KEYPOINTS 既有规划）。在「native libfont 编译件」
+到位后立项；当前 ascshim 方案与之一致（ascshim 的适配内容即官方渲染层同构）。
