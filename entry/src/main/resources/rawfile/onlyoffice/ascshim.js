@@ -1370,6 +1370,40 @@
     } catch (hx) { console.error('LSO_HDR_HIDE_ERR ' + String(hx)); }
   })();
 
+  // ---- 3.10 欢迎页导航精简（2026-09-05 用户：去掉左侧"云服务"与左下角"设置"）----
+  // loginpage（/onlyoffice/index.html）左侧导航由 panels.js 静态模板渲染：
+  //   "云服务" = #idx-sidebar-portals（panelconnect.js 灌入 providers/添加云；其后
+  //   紧跟 li.menu-item.devider 分隔线，二者一起藏，避免残留孤线）；
+  //   "设置"   = .tool-menu a[action="settings"] 的父 .menu-item。
+  // 官方无配置可关（模板固定），官方产物不动 → 页适配层隐藏（与 3.9 同风格）。
+  // MutationObserver 等 panels.js $(document).ready 渲染后生效，防 re-render 弹回；
+  // 退出/入口路径不受影响（主页/打开本地文件/模板仍在）。
+  (function _hideWelcomeNav() {
+    try {
+      var _wp = (window.location || {}).pathname || '';
+      if (_wp.indexOf('/onlyoffice/index.html') < 0) { return; }
+      var _whide = function() {
+        var _c = document.getElementById('idx-sidebar-portals');
+        if (_c) { _c.style.display = 'none'; }
+        var _d = document.getElementById('idx-sidebar-portals')
+          && document.getElementById('idx-sidebar-portals').nextElementSibling;
+        if (_d && _d.className.indexOf('devider') >= 0) { _d.style.display = 'none'; }
+        var _s = document.querySelector('.tool-menu a[action="settings"]');
+        if (_s && _s.closest) { _s.closest('.menu-item').style.display = 'none'; }
+      };
+      var _wobs = new MutationObserver(_whide);
+      if (document.body) {
+        _wobs.observe(document.body, {childList: true, subtree: true});
+      } else {
+        document.addEventListener('DOMContentLoaded', function() {
+          _wobs.observe(document.body, {childList: true, subtree: true});
+        });
+      }
+      _whide();
+      console.error('LSO_WELCOME_NAV_HIDDEN');
+    } catch (wx) { console.error('LSO_WELNAV_ERR ' + String(wx)); }
+  })();
+
     // ---- 4. 初始化尾 ----
     if (window.AscNative && window.AscNative._onReady) window.AscNative._onReady();
   };
