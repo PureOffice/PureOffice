@@ -55,8 +55,6 @@ struct EditorPage {
 
   /** M7 诊断直达配额：onPageEnd 时打开样本（welcome 完成后才触发，避开加载竞争） */
   private m7DirectQueued: boolean = false;
-  /** 启动清 webview 缓存 guard（2026-09-05：once per app 启动） */
-  private cacheCleared: boolean = false;
   /**
    * 保存目标（单一事实源）——页面 asc_Save 经 save:type 同步询问本值：
    *   'none'    —— 新建（无文件身份）：用户保存=弹另存为；autosave=跳过
@@ -643,14 +641,15 @@ struct EditorPage {
   }
 
   /** rawfile 样本复制到沙箱 filesDir（open 链走 userfile/ 前缀；编辑/转换产物也在 filesDir）。
-   *  仅自动验收态拷贝（m7Target 非空——阶段2 验收与产品分离）：产品路径不产生任何验收样本文件。 */
+   *  仅自动验收态拷贝（m7Target 非空——阶段2 验收与产品分离）：产品路径不产生任何验收样本文件。
+   *  样本集中 at rawfile/onlyoffice/smoke/（2026-09-06 用户：smoke 文件单独目录存放）。 */
   private copySandboxSamples(): void {
     if (!this.resourceManager || this.m7Target.length === 0) {
       return;
     }
     for (const name of ['sample.docx', 'sample.xlsx', 'sample.pptx', 'm7-open-test.docx']) {
       try {
-        const raw = this.resourceManager.getRawFileContentSync('onlyoffice/' + name) as Uint8Array;
+        const raw = this.resourceManager.getRawFileContentSync('onlyoffice/smoke/' + name) as Uint8Array;
         const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
         if (!writeFileBuf(this.hostFilesDir + '/' + name, ab)) {
           this.arkLog('SAMPLE_COPY_ERR ' + name);
@@ -676,20 +675,9 @@ struct EditorPage {
           // registerJavaScriptProxy 的对象要到页面 (re)load 才出现在 window，故在
           // onControllerAttached（早于加载）注册才对本页生效。
           // 同步方法表：'_call'（JS 端阻塞取返回——官方 CEF V8 语义）、'_onReady'（安装完成）。
-          // 启动清 webview 缓存（2026-09-05「创建新 docx 偶显历史文档」根治）：History
-          // 渲染蓄藏在 webview 持久化缓存（data/storage/el2/base/cache/web/Cache——
-          // install -r 保留；用户实测：卸载重装（清 data）后不再复现）。每次 app
-          // 启动清一次 = 常驻干净态；removeCache 需 web 组件已 attach（本回调时机），
-          // once guard 防多次清。遗漏/异常不阻断主流程。
-          if (!this.cacheCleared) {
-            this.cacheCleared = true;
-            try {
-              this.controller.removeCache(true);
-              this.arkLog('CACHE_CLEARED');
-            } catch (ce) {
-              this.arkLog('CACHE_CLEAR_ERR ' + String(ce));
-            }
-          }
+          // 注：2026-09-05「启动清 webview 缓存（CACHE_CLEARED）」已撤回——History 假帧
+          // 真因=引擎内置空文档范文（getEmpty，word/document/editor.js:41）被 web 语义
+          // loadDocument 装载，与 webview 缓存无关（当时归因错误，卸载重装仍复现即证）。
           // ascNative 字段保持强引用（registerJavaScriptProxy 代理对象避免被回收）。
           const nativeDispatch = new AscNativeDispatch(this.hostFilesDir, ((m: string) => this.arkLog(m)));
           // LoadFontBase64 桥（引擎桌面路径取字体字节）：rawfile/onlyoffice/fonts/<id>
@@ -717,7 +705,7 @@ struct EditorPage {
           if (this.m7DirectQueued && cu.indexOf('/main/index.html') < 0) {
             this.m7DirectQueued = false;
             try {
-              const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/' + this.m7Target) as Uint8Array;
+              const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/smoke/' + this.m7Target) as Uint8Array;
               const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
               const ext = this.m7Target.substring(this.m7Target.lastIndexOf('.') + 1).toLowerCase();
               this.arkLog('M7_DIRECT_OPEN ' + this.m7Target + ' len=' + ab.byteLength);

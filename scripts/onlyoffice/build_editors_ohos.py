@@ -25,6 +25,9 @@
      EditorPage.ets 构建期不再手工递增 VERSION_BUMP）
   9. 【阶段3】smoke 页面脚本 → rawfile/onlyoffice/smoke/（自动验收诊断注入源；
      见 scripts/onlyoffice/smoke/*.js）
+  10. smoke 验收样本（样本 docx/xlsx/pptx、demo-cn.*）集中 at rawfile/onlyoffice/smoke/
+     （2026-09-06 用户：smoke 相关文件单独目录存放；EditorPage.ets 读取路径同步
+     onlyoffice/smoke/ 前缀；样本源为手工维护文件，随包资源直接放在该目录）
 
 == 注 ==
   AI 插件功能已按期撤回（2026-09-05 用户决策：专注基础功能）——plugins.json 接线、
@@ -442,8 +445,10 @@ SMOKE_DST = os.path.join(DST, 'smoke')
 
 
 def install_smoke():
-    """拷贝 scripts/onlyoffice/smoke/*.js → rawfile/onlyoffice/smoke/（多行可读的页面
-    JS——EditorPage smoke 注入用；原来是 TS 字符串单行"缩成一坨"，此处外置为文件）。"""
+    """拷贝 scripts/onlyoffice/smoke/ → rawfile/onlyoffice/smoke/（整目录替换）：
+    *.js 页面诊断脚本（EditorPage smoke 注入）+ samples/ 验收样本（sample.*、
+    m7-open-test.docx、demo-cn.*——2026-09-06 用户：smoke 文件单独目录；源就是
+    scripts/onlyoffice/smoke/，勿在 rawfile 内手工放置 smoke 文件——会被 rmtree 覆盖）。"""
     if not os.path.isdir(SMOKE_SRC):
         raise SystemExit('scripts/onlyoffice/smoke 不存在（smoke 诊断脚本源）')
     if os.path.isdir(SMOKE_DST):

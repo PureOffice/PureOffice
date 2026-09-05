@@ -13,6 +13,9 @@ import { u8ToStr } from './bytes';
  * smoke 页面脚本外置在 rawfile/onlyoffice/smoke/*.js（源：scripts/onlyoffice/smoke/，
  * 多行可读、node --check 校验），EditorPage 注入前经本模块读取 —— 不再以 TS 字符串
  * 单行内嵌在页面代码里（维护性）。
+ * 验收样本同样集中 at rawfile/onlyoffice/smoke/（sample.*、m7-open-test.docx、
+ * demo-cn.*；2026-09-06 用户：smoke 文件单独目录存放）——本模块 m7file 文件名
+ * 语义 = smoke/ 目录下的文件名（沙箱拷贝名不变）。
  */
 export class Smoke {
   /** 验收样本名；空 = 产品态（无任何 smoke 行为） */

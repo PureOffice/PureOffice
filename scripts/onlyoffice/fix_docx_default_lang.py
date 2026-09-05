@@ -70,10 +70,13 @@ def fix_one(path: str) -> str:
 
 
 def main() -> int:
+    # 样本集中 at rawfile/onlyoffice/smoke/（2026-09-06 用户：smoke 文件单独目录；
+    # 原 RAW 根扫描 sample*/demo* 已随移动失效）
     docs = []
-    for fn in sorted(os.listdir(RAW)):
-        if (fn.endswith('.docx')) and (fn.startswith('sample') or fn.startswith('demo')):
-            docs.append(os.path.join(RAW, fn))
+    smk = os.path.join(RAW, 'smoke')
+    if os.path.isdir(smk):
+        docs += [os.path.join(smk, f) for f in sorted(os.listdir(smk))
+                 if f.endswith('.docx') and (f.startswith('sample') or f.startswith('demo'))]
     tpl = os.path.join(RAW, 'templates')
     if os.path.isdir(tpl):
         docs += [os.path.join(tpl, f) for f in sorted(os.listdir(tpl)) if f.endswith('.docx')]

@@ -261,7 +261,19 @@
               } catch (le) {
                 console.error('LSO_LC_ERR ' + String(le));
               }
-              if (_dt === 'word') {
+              if (_dt === 'word' && !window.__lsoWordDI) {
+                // （2026-09-06 根因）word 不再走 loadDocument——官方链 loadDocument →
+                // onEndLoadDocInfo → _openEmptyDocument（apiBase.js:1429）→ AscCommon.getEmpty()
+                // （word/document/editor.js:41 "DOCY;v2;50190;…" 内置 History 范文，官方桌面版
+                // 新建默认内容；base64 编码——此前"全文搜无"的根因）装载范文并渲染 7 页；
+                // 真字节 ReplaceContent 后绘制层范文帧残留（重排版时序差）→ 用户所见
+                // 「History」。官方 Desktop 语义 = 不打开空文档（sdkjs/common/Local/common.js:40-64
+                // 「非 iframe 编辑器不打开空文档」，等待 LocalStartOpen 直接注入真字节）。
+                // 对齐：word 改走 DI 链（asc_setDocInfo+权限分发——loadDocument 的公因子，
+                // cell/slide 三格式已验证，DI 链无 _openEmptyDocument 路径）。首帧=真文档。
+                window.__lsoWordDI = true;
+              }
+              if (_dt === 'word' && !window.__lsoWordDI) {
                 // 官方 loadDocument（word 已实机验证可用；cell/slide 会崩 'lang' —— 见下）
                 _m.loadDocument({doc: _cfg.document});
                 console.error('LSO_LD_OK');
