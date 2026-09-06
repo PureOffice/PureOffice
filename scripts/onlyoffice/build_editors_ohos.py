@@ -79,7 +79,11 @@ FONT_FILES = ['LiberationSans-Regular.ttf', 'LiberationSans-Italic.ttf',
               'LiberationSerif-Bold.ttf', 'LiberationSerif-BoldItalic.ttf',
               'LiberationMono-Regular.ttf', 'LiberationMono-Italic.ttf',
               'LiberationMono-Bold.ttf', 'LiberationMono-BoldItalic.ttf',
-              'HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf']
+              'HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf',
+              # 下标 14/15 = 仿宋/楷体（2026-09-07 字体扩充：Fandol 字体集，CTAN
+              # fandol v0.3，GPL + GPL font exception——随包分发合规）。来源/转换
+              # 见 FONT_SUBSETS 注释（CFF→glyf 同宋体链）。
+              'FandolFang.ttf', 'FandolKai.ttf']
 # 字体文件来源目录：Liberation → SYSTEM_FONTS_DIR；CJK → templates_src/fonts
 # （CJK 源为 HarmonyOS SDK previewer 字体经转换/子集化的**静态 glyf TTF**。
 # 踩坑记录（2026-09-05，勿回退）：
@@ -105,6 +109,8 @@ FONT_FILES = ['LiberationSans-Regular.ttf', 'LiberationSans-Italic.ttf',
 FONT_SRC_BY_FILE = {fn: SYSTEM_FONTS_DIR for fn in FONT_FILES[:12]}
 FONT_SRC_BY_FILE['HarmonyOS_Sans_SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
 FONT_SRC_BY_FILE['NotoSerifCJK-SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
+FONT_SRC_BY_FILE['FandolFang.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
+FONT_SRC_BY_FILE['FandolKai.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
 
 # 子集映射：final 名（FONT_FILES/rawfile fonts/ 里的名字）→ (全量源文件, 子集产物,
 # 注册面名——渲染槽 name 匹配用；CJK 族注册行名须一致。宋体=SimSun（引擎把
@@ -114,6 +120,20 @@ FONT_SRC_BY_FILE['NotoSerifCJK-SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoff
 FONT_SUBSETS = {
     'HarmonyOS_Sans_SC.ttf': ('HarmonyOS_Sans_SC.ttf', 'HarmonyOS_Sans_SC.subset.ttf', None),
     'NotoSerifCJK-SC.ttf': ('NotoSerifCJK-SC.ttf', 'NotoSerifCJK-SC.subset.ttf', 'SimSun'),
+    # 仿宋/楷体（2026-09-07 字体扩充，用户「支持更多字体」目标）：Fandol（CTAN
+    # fandol v0.3，GPL + GPL font exception）。官方包里是 **CFF OTF**（fandol/
+    # FandolFang-Regular.otf）——引擎 wasm libfont 只吃 glyf TrueType（CFF 崩，
+    # 2026-09-05 实测）→ 先 otf2ttf（见 FONT_SRC_BY_FILE 注释同款命令）：
+    #   otf2ttf -o templates_src/fonts/FandolFang.ttf --face-index 0 --overwrite \
+    #     $CTAN_FANDOL/FandolFang-Regular.otf
+    # 产物 7.6/8.8MB（**全量不入库**——可从 CTAN mirrors.ctan.org/fonts/fandol.zip
+    # 复现；subset 入库，全新克隆由 make_cjk_subset 幂等复用，同宋体策略）。
+    # 注册面名：FandolFang 官方内部 name='FandolFang R'（含空格+后缀，与
+    # 「FandolFang」不符 → name 重写 family='FandolFang' 强制统一，Kai 同理）。
+    # subset 实测 5.7/6.8MB（楷体笔画复杂大过宋体——make_cjk_subset 上限已
+    # 放宽至 8MB，2026-09-07）。
+    'FandolFang.ttf': ('FandolFang.ttf', 'FandolFang.subset.ttf', 'FandolFang'),
+    'FandolKai.ttf': ('FandolKai.ttf', 'FandolKai.subset.ttf', 'FandolKai'),
 }
 
 # 字体注册表（引擎 Externals.js checkAllFonts 契约）
@@ -167,6 +187,23 @@ FONT_INFOS = [
     ["simsun.ttf", 13, 0, 13, 0, 13, 0, 13, 0],
     ["simhei.ttf", 12, 0, 12, 0, 12, 0, 12, 0],
     ["msyh.ttf", 12, 0, 12, 0, 12, 0, 12, 0],
+    # 仿宋/楷体族（2026-09-07 字体扩充）。约定同宋体区：行名须与 wasm face
+    # family Name 一致（FONT_SUBSETS 的注册面名=FandolFang/FandolKai，name
+    # 重写后匹配）；中文/英文/GB2312/.ttf 变体行指向同 indexR=文件下标 14/15。
+    # 样式：仅 Regular 文件，R/I/B/BI 全部用 regular（加粗由引擎模拟，同黑体）。
+    # 文档侧常见 eastAsia 声明：仿宋、仿宋_GB2312、FangSong；楷体、楷体_GB2312、
+    # KaiTi（Word 中文环境默认）。「未匹配时引擎 name 相似度匹配」在此补充分
+    # 显式别名行（官方 NamePenalty=0 别名集仅覆盖宋体/黑体，仿宋/楷体不在内）。
+    ["FandolFang", 14, 0, 14, 0, 14, 0, 14, 0],
+    ["仿宋", 14, 0, 14, 0, 14, 0, 14, 0],
+    ["FangSong", 14, 0, 14, 0, 14, 0, 14, 0],
+    ["仿宋_GB2312", 14, 0, 14, 0, 14, 0, 14, 0],
+    ["fangsong.ttf", 14, 0, 14, 0, 14, 0, 14, 0],
+    ["FandolKai", 15, 0, 15, 0, 15, 0, 15, 0],
+    ["楷体", 15, 0, 15, 0, 15, 0, 15, 0],
+    ["KaiTi", 15, 0, 15, 0, 15, 0, 15, 0],
+    ["楷体_GB2312", 15, 0, 15, 0, 15, 0, 15, 0],
+    ["kaiti.ttf", 15, 0, 15, 0, 15, 0, 15, 0],
 ]
 
 # —— 字符范围回退表（引擎 libfont/character.js CFontByCharacter.init 消费的第三张
@@ -243,7 +280,9 @@ def make_cjk_subset(src, out, family=None):
     except subprocess.CalledProcessError as e:
         raise SystemExit('pyftsubset 失败（%s）: %s' % (src, e.stderr.decode(errors='replace')[:500]))
     size = os.path.getsize(out)
-    if not (100_000 < size < 6_000_000):
+    if not (100_000 < size < 8_000_000):
+        # 上限 8MB（原 6MB）：2026-09-07 楷体（FandolKai）实测 6.75MB——
+        # 楷书笔画弧线多，字形数据天然大于宋体（5.5MB），放宽仍为 san 上限。
         raise SystemExit('CJK subset 尺寸越界: %d bytes' % size)
     # 关键字形断言：cmap 必须含 中(4E2D) 与 A(41) —— 防空壳子集静默进入 rawfile
     from fontTools.ttLib import TTFont

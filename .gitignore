@@ -46,6 +46,11 @@ entry/.cxx/
 .temp/
 # CJK 子集化中间产物（build_editors_ohos.make_cjk_subset 幂等再生；源字体保留入库）
 scripts/onlyoffice/templates_src/fonts/HarmonyOS_Sans_SC.subset.ttf
+# Fandol 仿宋/楷体全量（7.6/8.8MB，otf2ttf CFF→glyf 产物；CTAN fandol.zip 复现
+# 命令见 build_editors_ohos.py FONT_SUBSETS 注释；subset 版本入库——全新克隆由
+# make_cjk_subset 幂等复用，同 NotoSerifCJK 策略）
+scripts/onlyoffice/templates_src/fonts/FandolFang.ttf
+scripts/onlyoffice/templates_src/fonts/FandolKai.ttf
 # —— 例外：NotoSerifCJK-SC.subset.ttf 刻意入库（2026-09-05 宋体修复）——
 #   全量源 31.5MB（otf2ttf CFF→glyf）不入库；subset 5.5MB 是全新克隆重建字体的
 #   唯一字体资产（make_cjk_subset 幂等分支「src 缺失 → 复用产物」依赖它），
