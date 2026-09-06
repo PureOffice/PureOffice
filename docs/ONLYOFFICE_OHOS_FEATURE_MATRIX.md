@@ -106,6 +106,7 @@
   - 窗口链：Chatbot 点击 → chatWindowShow →（有模型时）PluginWindow.show → sdkjs ShowWindow → asc_onPluginWindowShow → **PluginDlg 弹窗 iframe src=plugins/ai/chat.html?lang&theme-type ✅**
   - **无模型降级（官方语义）**：AI.Request.create 无模型 → 自动弹 settings 窗口（engine.js:466-470）——不是 bug；验收态预注入双键（storage_key+actions_key，Ollama 本地模型）后 chat 直接开
   - 生产形态：插件链全程验收态触发；生产 URL 无 m7auto 不加载探针；模型配置由用户 settings 窗口自理
+- **构建可复现演练**（2026-09-06，#71 收尾）：`rm -rf entry/src/main/resources/rawfile/onlyoffice/*`（11 项构建产物清零）→ `deploy_ohos.sh` 从零全链重生成+构建+安装+启动 RC=0；设备干净重装（uninstall+install）后 m7 全链——打开（rc=0）/保存（zipok×2）/插件链（srvPlugins=arr1/AI tab/chat 窗口）全部正常，重装清 localStorage 后 AI 窗口走官方无模型降级 settings（预期语义）——**一键可复现验证通过**
 
 ## 6. 后续升级路线（建议次序）
 
