@@ -152,6 +152,13 @@
                 //   → LeftMenu.js:309 'close' → Main.js:1025 closeEditor → onRequestClose
                 //   → Gateway.requestClose()（ascshim 已覆写回欢迎页）
                 canRequestClose: true,
+                // 隐藏「打开文件所在位置」菜单项与头部返回按钮（2026-09-07 用户：
+                // 无文件管理器语义，点击只会被导航回欢迎页，暂去掉）。官方语义
+                // Main.js:493-506：editorConfig.canBackToFolder!==false 才允许返回
+                // → 置 false 后 canBack=false → FileMenu.js:463 miBack hide +
+                // Header.setCanBack(false)（头部返回按钮同隐）；「文件→关闭」退出链
+                // 由 canRequestClose/close 控制，不受影响。要恢复时删除此行即可。
+                canBackToFolder: false,
                 customization: {
                   // about 与反馈入口：左菜单「支持」(tipSupport 'Feedback & Support') 渲染
                   // 条件 = feedback.url 非空（LeftMenu.js:117）——离线单机无 helpdesk 语义，
