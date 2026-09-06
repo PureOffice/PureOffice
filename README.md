@@ -39,7 +39,7 @@ cmake --build build/core3d/build -j$(nproc)
 OHOS_DEV=<ip:port> bash scripts/onlyoffice/deploy_ohos.sh
 
 # 3) 自动验收（可选）：启动带 m7accept 参数 → 自动打开样本并验证打开/保存链
-hdc -t <ip:port> shell aa start -a EntryAbility -b app.hackeris.winehua --ps m7accept 1
+hdc -t <ip:port> shell aa start -a EntryAbility -b app.fuqidian.pureoffice --ps m7accept 1
 # 日志：hdc -t <ip:port> shell cat .../files/web_console.txt（页面与壳侧统一落盘）
 ```
 
@@ -74,7 +74,7 @@ docs/                             # 设计/关键点/功能矩阵/合规方案�
 # 真机（多设备必须 -t <ip:port>）
 hdc list targets
 hdc -t <ip:port> install -r entry/build/default/outputs/default/entry-default-signed.hap
-hdc -t <ip:port> shell "aa force-stop app.hackeris.winehua; aa start -a EntryAbility -b app.hackeris.winehua"
+hdc -t <ip:port> shell "aa force-stop app.fuqidian.pureoffice; aa start -a EntryAbility -b app.fuqidian.pureoffice"
 hdc -t <ip:port> shell snapshot_display -f /data/local/tmp/s.jpeg && hdc -t <ip:port> file recv /data/local/tmp/s.jpeg /tmp/s.jpeg   # 截图（必须 .jpeg 后缀）
 ```
 

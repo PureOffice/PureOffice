@@ -16,7 +16,7 @@ import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } fr
 const ARK_DEBUG: boolean = false;
 /**
  * 自动验收 = ability 启动参数控制（2026-09-05 用户建议：不写死代码，避免重新编译切换）：
- *   hdc XXX shell aa start -a EntryAbility -b app.hackeris.winehua \
+ *   hdc XXX shell aa start -a EntryAbility -b app.fuqidian.pureoffice \
  *     -p m7accept 1 -p m7file sample.xlsx
  *   m7accept=1  → 验收开启（缺省 m7file=sample.docx；文件名须在 rawfile/onlyoffice/ 下，
  *                 且被 copySandboxSamples 复制到沙箱）。

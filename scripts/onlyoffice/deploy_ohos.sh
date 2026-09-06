@@ -21,7 +21,7 @@ if [ -z "$DEV" ]; then
   echo "错误：未指定目标设备。用法：OHOS_DEV=<ip:port> bash $0" >&2
   exit 1
 fi
-BUNDLE=app.hackeris.winehua
+BUNDLE=app.fuqidian.pureoffice
 
 cd "$ROOT"
 # —— 增量资源装配（= grunt-build.sh --no-upstream 的 4/5/6 步，2026-09-06 合并）——

@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "./.ohos/default_WineHua_RVwdLEoMMxAEucWW3N5BFF3ZUbxXV0JDDsGj3yoRFUs=.cer",
+          "certpath": "/data/share/hap/.ohos/config/default_PureOffice_5289PJwGwGFH7UxFmVgs5-9t3tilQh9gdScLczH-hAQ=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "00000019925D80B9B00A4F7EB96E01710867F5FAEF16EDAA43BCCEFE886442CCD39AD01DBCF2095E0B",
-          "profile": "./.ohos/default_WineHua_RVwdLEoMMxAEucWW3N5BFF3ZUbxXV0JDDsGj3yoRFUs=.p7b",
+          "keyPassword": "0000001B8CFB568C5AB6E9DEDCFAE8156A10B1419684BD26162099435184BF157CA72A749A2089B9688FB7",
+          "profile": "/data/share/hap/.ohos/config/default_PureOffice_5289PJwGwGFH7UxFmVgs5-9t3tilQh9gdScLczH-hAQ=.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "./.ohos/default_WineHua_RVwdLEoMMxAEucWW3N5BFF3ZUbxXV0JDDsGj3yoRFUs=.p12",
-          "storePassword": "0000001962D48F70338CB8A384B52432F6C11FF794D49CCDBB0A014C8B2132EFA84BDEB452F578F4D7"
+          "storeFile": "/data/share/hap/.ohos/config/default_PureOffice_5289PJwGwGFH7UxFmVgs5-9t3tilQh9gdScLczH-hAQ=.p12",
+          "storePassword": "0000001B527A634D775458FD63F18F70709DF6DCAC0F351B869582811A78FBDD69D83511A09DC282463BC9"
         }
       }
     ],
