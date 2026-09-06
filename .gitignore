@@ -22,6 +22,8 @@ entry/src/main/resources/rawfile/onlyoffice/webapps/
 entry/src/main/resources/rawfile/onlyoffice/themes.json
 # smoke 诊断脚本（源 scripts/onlyoffice/smoke/，构建脚本安装）
 entry/src/main/resources/rawfile/onlyoffice/smoke/
+# 空模板（make_empty_templates.py 由 templates_src/ 生成；构建期内容确定，勿跟踪——曾反复 dirty）
+entry/src/main/resources/rawfile/onlyoffice/templates/
 # 插件资产（AI 插件 + v1 框架；源 scripts/onlyoffice/plugins/ 入库，构建脚本解包安装）
 entry/src/main/resources/rawfile/onlyoffice/plugins/
 entry/src/main/resources/rawfile/onlyoffice/plugins.json
