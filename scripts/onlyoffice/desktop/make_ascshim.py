@@ -70,7 +70,7 @@ METHOD_JS = '\n'.join(method_lines)
 SHIM_INDENTED = '\n'.join('    ' + ln for ln in SHIM.split('\n'))
 
 SRC_DIR = os.path.join(HERE, 'src')
-PARTS = ['09_fonts.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js']
+PARTS = ['09_fonts.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js', '55_lic.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 

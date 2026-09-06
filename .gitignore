@@ -27,6 +27,8 @@ entry/src/main/resources/rawfile/onlyoffice/templates/
 # 插件资产（AI 插件 + v1 框架；源 scripts/onlyoffice/plugins/ 入库，构建脚本解包安装）
 entry/src/main/resources/rawfile/onlyoffice/plugins/
 entry/src/main/resources/rawfile/onlyoffice/plugins.json
+# 随包许可证文本（install_licenses 由 third_party/core/LICENSE 拷贝生成；About「许可信息」弹层引用）
+entry/src/main/resources/rawfile/onlyoffice/licenses/
 # 版本号（构建期内容哈希生成——阶段3，替代手改 VERSION_BUMP）
 entry/src/main/resources/rawfile/onlyoffice/version.json
 # ascshim.js（make_ascshim.py 由 src/*.js 拼接生成）与 index.html（欢迎页，来自

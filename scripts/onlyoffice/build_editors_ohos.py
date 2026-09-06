@@ -507,6 +507,180 @@ def install_smoke():
     print('  smoke 脚本 → %s (%d files)' % (SMOKE_DST, n))
 
 
+def install_licenses():
+    """随包许可证文本 → rawfile/onlyoffice/licenses/LICENSE.txt。
+
+    内容 = third_party/core/LICENSE（AGPL v3 全文 + 官方附加条款——四个 submodule
+    LICENSE 内容相同，md5 均为 7de9925b…（2026-09-07 校验））。
+    About 面板「许可信息」链接 http://localhost/onlyoffice/licenses/LICENSE.txt →
+    EditorPage 本地 serve（rawfile 根）。
+    合规依据：官方附加条款 3(iii) 用户界面须能访问适用许可信息——AGPL 全文随包+
+    可访问链;若某天打开的不是本地 URL 而是外部域名，许可证文本作为本地资源不依赖外网。
+    """
+    src = os.path.join(ROOT, 'third_party', 'core', 'LICENSE')
+    if not os.path.isfile(src):
+        raise SystemExit('随包许可证源缺失：%s' % src)
+    dst_dir = os.path.join(DST, 'licenses')
+    os.makedirs(dst_dir, exist_ok=True)
+    shutil.copy2(src, os.path.join(dst_dir, 'LICENSE.txt'))
+    print('  许可证文本 → %s/LICENSE.txt (%d bytes)'
+          % (dst_dir, os.path.getsize(os.path.join(dst_dir, 'LICENSE.txt'))))
+
+
+def patch_about_brand():
+    """关于面板双品牌（2026-09-07 用户决策：**Pure Office 为主，ONLYOFFICE 为辅**）。
+
+    用户具体指示（真机截图后）：官方大 logo（.asc-about-office :before 的
+    logo_s.svg——图示內含超大「ONLYOFFICE」字样）**移除**——「上面放大的那行字才
+    应该使用 Pure Office；大张旗鼓用 ONLYOFFICE 也不好」——顶部主视觉 = appName
+    行「Pure Office」；「基于 ONLYOFFICE DesktopEditors（AGPL-3.0）为辅行文字
+    保留（归属声明低调存在）。
+
+    合规说明（写在此处供后续核对）：官方未商业授权时严格按 7(b) 保留 logo 可以，
+    但用户明确选主品牌 = Pure Office、ONLYOFFICE 仅作 AGPL 归属声明——AGPL §11
+    （trademark）不禁止改名/自品牌，前提是不得暗示 ONLYOFFICE 认可本产品；归属行
+    + 保留的公司信息（名/地址/邮箱/官网）+ 官方 AGPL 条款文本满足源码许可声明的
+    要求。Logo 替换/删除附带品牌商标使用判断，与本产品的开源许可义务分开。
+
+    品牌化（patch 对象 = grunt 产物，可再生成；upstream 重建后本脚本自动
+    重新生效——与 inject_ascshim 同模式）：
+      1) 五个编辑器 LeftMenu.js About 构造 appName「文档编辑器」→「Pure Office」；
+      2) About.js licensor 模板版本行下加兼容/归属行「基于 ONLYOFFICE
+         DesktopEditors（AGPL-3.0）」（用户定稿；修改版日期经用户决策不展示——
+         官方附加条款 2 的日期声明由随包 LICENSE 中的说明文本承接）+ 许可链接行
+         （.asc-about-lic 12px 灰字；满足官方附加条款 3(i/ii/iii)）；
+      3) 五编辑器 app.css `.asc-about-office:before{content:url(logo_s.svg)}`
+         → `content:''`（亮/暗主题两变体）——官方 logo 图示清除；
+      4) licensor 公司信息表（公司名/地址/邮箱/电话/网址）→ class hidden
+         （用户决策 2026-09-07「暂时先不放公司信息」）。
+    附：模板 appName.toUpperCase() 去上转（否则显示「PURE OFFICE」——用户期望保形）。
+    幂等：已替换（目标串不再存在）即跳过；应替换却没替换（0 命中）→ 非零退出
+    （grunt 产物结构变化立即暴露，防静默空 patch）。
+    """
+    # 归属确认行：满足官方附加条款 2（修改版显式声明+日期）与 3(i)(ii)（识别 ONLYOFFICE
+    # 为原始开发者 + 本版为修改版）；「原始开发者 Ascensio System SIA」由同一行
+    # 「基于 ONLYOFFICE DesktopEditors（AGPL-3.0）」完成识别——官方附加条款原文另行
+    # 随包（install_licenses）
+    CREDIT = '基于 ONLYOFFICE DesktopEditors（AGPL-3.0）'
+    LIC_URL = 'http://localhost/onlyoffice/licenses/LICENSE.txt'
+    APP_BRAND = "appName: 'Pure Office'"
+    patched = 0
+
+    # （1）appName → Pure Office（de/ss/pe/pdf/visio 五份 LeftMenu.js 均有 About 构造）
+    for app in ('documenteditor', 'spreadsheeteditor', 'presentationeditor',
+                'pdfeditor', 'visioeditor'):
+        p = os.path.join(W3D, 'apps', app, 'main', 'app', 'view', 'LeftMenu.js')
+        if not os.path.isfile(p):
+            continue  # 官方可单独 grunt 某 app；缺失即该编辑器不在发行内，属正常
+        with open(p, 'r', encoding='utf-8') as f:
+            s = f.read()
+        if APP_BRAND in s:
+            continue  # 幂等重跑
+        old = 'appName: this.txtEditor'
+        if old not in s:
+            raise SystemExit('About 品牌 patch 失败：%s 未找到 %r（grunt 产物结构变化？）' % (p, old))
+        s = s.replace(old, APP_BRAND)
+        with open(p, 'w', encoding='utf-8') as f:
+            f.write(s)
+        patched += 1
+        print('  about品牌: %s appName → Pure Office' % app)
+
+    # （2）About.js 模板（licensor 版本行 + 辅行；appName 去上转）
+    about_p = os.path.join(W3D, 'apps', 'common', 'main', 'lib', 'view', 'About.js')
+    with open(about_p, 'r', encoding='utf-8') as f:
+        s = f.read()
+    n_upper = s.count('options.appName.toUpperCase()')
+    if n_upper:
+        if n_upper != 2:
+            raise SystemExit('About 模板 toUpperCase 命中 %d != 2（licensor+licensee），结构变化?' % n_upper)
+        s = s.replace('options.appName.toUpperCase()', 'options.appName')
+        print('  about品牌: appName 去上转 ×%d' % n_upper)
+    # appName 行 class → asc-about-brand（主视觉大字；样式规则由 (3) 统一 append）。
+    # licensor（单空格）/licensee（双空格）行串不同，分别替换并计数。
+    n_brand = 0
+    for row in ("+ options.appName + '</label></td>',",
+                "+ options.appName  + '</label></td>',"):
+        old_row = ("'<td align=\"center\"><label class=\"asc-about-version\">' " + row)
+        cnt = s.count(old_row)
+        if cnt:
+            s = s.replace(old_row,
+                          "'<td align=\"center\"><label class=\"asc-about-brand\">' " + row)
+            n_brand += cnt
+    if n_brand:
+        print('  about品牌: appName 行 → asc-about-brand ×%d' % n_brand)
+    tag = 'id-about-licensor-version-name'
+    new_line = ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
+                + CREDIT + '</label></td></tr>\',')
+    lic_line = ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
+                '<a href="' + LIC_URL + '" target="_blank">许可信息：GNU AGPL v3.0'
+                '（点击查看全文）</a></label></td></tr>\',')
+    if new_line not in s:
+        old_line = ('\'<td align="center"><label class="asc-about-version" id="' + tag + '">\''
+                    ' + this.txtVersion + this.txtVersionNum + \'</label></td>\',')
+        n = s.count(old_line)
+        if n != 1:
+            raise SystemExit('About 模板 licensor 版本行命中 %d != 1，结构变化?' % n)
+        s = s.replace(old_line, old_line + '\n                ' + new_line + '\n                ' + lic_line)
+        print('  about品牌: licensor 模板 + 辅行（%s） + 许可链接' % CREDIT)
+    # （b2）licensor 公司信息表整体隐藏（用户决策 2026-09-07「暂时先不放公司信息」——
+    #     官方公司名/地址/邮箱/电话/网址不再展示，仅保留主品牌/版本/归属/许可；
+    #     官方附加条款未要求 UI 展示公司联系方式，版权声明保留在源码头与随包 LICENSE）。
+    #     class 加 hidden（licensee 表同款，common css 内置 .hidden）
+    info_old = ('\'<table id="id-about-licensor-info" cols="3" style="width: 100%;"'
+                ' class="margin-bottom">\',')
+    info_new = ('\'<table id="id-about-licensor-info" cols="3" style="width: 100%;"'
+                ' class="hidden margin-bottom">\',')
+    if info_old in s:
+        s = s.replace(info_old, info_new)
+        print('  about品牌: licensor 公司信息表 → hidden')
+    elif info_new not in s:
+        raise SystemExit('About 模板 licensor 信息表未找到（结构变化？）')
+    with open(about_p, 'w', encoding='utf-8') as f:
+        f.write(s)
+
+    # （3）五编辑器 app.css：官方 logo 图示（.asc-about-office:before content:url）
+    #     清除——Logo 图示内含超大「ONLYOFFICE」字样（用户：「大张旗鼓用
+    #     ONLYOFFICE 也不好；上面放大的那行字才应该显示 Pure Office」）；
+    #     content:none 使伪元素不生成。亮/暗主题两变体各一张。
+    #     同文件 append `.asc-about-brand`（(2) 指派的 appName 主视觉大字规则——
+    #     官方产品 logo 撤下后它就是面板顶部唯一主视觉）。
+    OLD_LOGO = "content:url('../../../../common/main/resources/img/about/logo_s.svg')"
+    OLD_LOGO_D = "content:url('../../../../common/main/resources/img/about/logo-white_s.svg')"
+    # 排版（2026-09-07 用户「排列太紧，之前 ONLYOFFICE 的多美观」）：主名顶部留白
+    # margin 40px + 与版本行间距 10px；辅行/许可行 note 类块级行距——零 logo 后重排
+    # 面板重心下移、行间通透（官方原版行间疏朗感来自 logo(45px)+20px 表距，已无 logo）
+    BRAND_CSS = ('.asc-about-brand{font:bold 24px Tahoma;letter-spacing:.02em;'
+                 'color:#444;color:var(--text-normal);user-select:text;'
+                 'margin:40px 0 10px}'
+                 '.asc-about-note{display:block;padding:4px 0;line-height:1.7}')
+    logos = 0
+    for app in ('documenteditor', 'spreadsheeteditor', 'presentationeditor',
+                'pdfeditor', 'visioeditor'):
+        p = os.path.join(W3D, 'apps', app, 'main', 'resources', 'css', 'app.css')
+        if not os.path.isfile(p):
+            continue
+        with open(p, 'r', encoding='utf-8') as f:
+            s = f.read()
+        n1 = s.count(OLD_LOGO)
+        n2 = s.count(OLD_LOGO_D)
+        if n1 == 0 and n2 == 0 and '.asc-about-brand{' in s:
+            continue  # 幂等重跑：logo 与规则均已处理
+        if n1 or n2:
+            s = s.replace(OLD_LOGO, 'content:none').replace(OLD_LOGO_D, 'content:none')
+        if '.asc-about-brand{' not in s:
+            s = s.rstrip('\n') + '\n' + BRAND_CSS + '\n'
+        with open(p, 'w', encoding='utf-8') as f:
+            f.write(s)
+        logos += n1 + n2
+        print('  about品牌: %s css logo 图示清除 ×%d + asc-about-brand 规则%s'
+              % (app, n1 + n2, '追加' if n1 or n2 else '已存在'))
+
+    if patched == 0 and n_upper == 0 and n_brand == 0 and logos == 0 and new_line in s:
+        print('  about品牌: 已全部生效（幂等重跑，跳过）')
+    elif patched == 0 and n_upper == 0 and n_brand == 0 and logos == 0 and new_line not in s:
+        raise SystemExit('About 品牌 patch 无任何命中——请检查 grunt 产物完整性')
+
+
 def gen_version_json():
     """生成 rawfile/onlyoffice/version.json —— 资源内容哈希（构建期 cache-bust 版本号）。
 
@@ -674,6 +848,13 @@ def main():
 
     # 7.5 官方 AI 插件（web 语义 plugins.json server 链；资产入库 scripts/onlyoffice/plugins/）
     install_ai_plugin()
+
+    # 7.55 随包许可证（AGPL 全文+官方附款 → licenses/；About「许可信息」链接指向）
+    install_licenses()
+
+    # 7.6 关于面板双品牌（Pure Office 主 + ONLYOFFICE 辅行 + 公司信息隐藏 + 许可入口；
+    #     须在 gen_version_json 前——patch 内容算进资源哈希，编排内无自愈版本号漂移）
+    patch_about_brand()
 
     # 8. 版本号 version.json（资源内容哈希 → 编辑页 ?v=）
     v = gen_version_json()
