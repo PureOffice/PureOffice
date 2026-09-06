@@ -91,7 +91,12 @@ export function writeFileBuf(path: string, data: ArrayBuffer | Uint8Array): bool
   let f: fs.File | null = null;
   try {
     f = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
-    fs.writeSync(f.fd, data);
+    // writeSync 只收 ArrayBuffer | string（POC-2 实测拒 Uint8Array——直传会写出 0 字节，
+    // 2026-09-06 app_version.json 0Byte 实证）；Uint8Array 先落成 ArrayBuffer 再传
+    const buf = data instanceof Uint8Array
+      ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+      : data;
+    fs.writeSync(f.fd, buf);
     return true;
   } catch (e) {
     return false;

@@ -57,6 +57,8 @@ struct EditorPage {
 
   /** M7 诊断直达配额：onPageEnd 时打开样本（welcome 完成后才触发，避开加载竞争） */
   private m7DirectQueued: boolean = false;
+  /** 资源版本自愈 flush 一次守卫（onControllerAttached 周期内）——见 onControllerAttached 注释 */
+  private cacheFlushed: boolean = false;
   /**
    * 保存目标（单一事实源）——页面 asc_Save 经 save:type 同步询问本值：
    *   'none'    —— 新建（无文件身份）：用户保存=弹另存为；autosave=跳过
@@ -681,6 +683,39 @@ struct EditorPage {
           // 注：2026-09-05「启动清 webview 缓存（CACHE_CLEARED）」已撤回——History 假帧
           // 真因=引擎内置空文档范文（getEmpty，word/document/editor.js:41）被 web 语义
           // loadDocument 装载，与 webview 缓存无关（当时归因错误，卸载重装仍复现即证）。
+          // 升级自愈（2026-09-06）：install -r 整包替换 rawfile（新资源随包可取），但
+          // WebView 磁盘缓存（data/storage/el2/base/cache/web/Cache，install -r 不清空）
+          // 中同 URL 旧响应可能被命中——主页面/编辑页 URL 已带 ?v=<资源哈希>（cache-bust，
+          // 见 build() 注释）自愈，但插件 iframe 等子资源引用无版本参数（如
+          // plugins/v1/plugins.js）——兜底：资源版本变化后首次启动 flush 一次
+          // （once per version；记录于 files/app_version.json）。
+          // 前车之鉴：不得用缓存清理解释页面行为 bug（行为问题走事件打点诊断），
+          // 本逻辑仅服务「升级后新旧资源共存」这一件事。
+          if (!this.cacheFlushed) {
+            this.cacheFlushed = true;
+            try {
+              const vRaw = this.resourceManager?.getRawFileContentSync('onlyoffice/version.json') as Uint8Array | undefined;
+              const cur = vRaw ? String((JSON.parse(u8ToStr(vRaw)) as Record<string, string>).v || '') : '';
+              const metaP = this.hostFilesDir + '/app_version.json';
+              // meta 文件为纯文本版本号（非 JSON——写端 Uint8Array 直写，见下）
+              let old = '';
+              const oldB = readFileBuf(metaP);
+              if (oldB) {
+                old = u8ToStr(new Uint8Array(oldB)).trim();
+              }
+              if (old !== cur) {
+                this.controller.removeCache(true);
+                const curBytes = new Uint8Array(cur.length);
+                for (let bi = 0; bi < cur.length; bi++) {
+                  curBytes[bi] = cur.charCodeAt(bi);
+                }
+                writeFileBuf(metaP, curBytes);
+                this.arkLog('VERSION_CACHE_FLUSH v=' + cur + ' (was ' + (old || 'none') + ')');
+              }
+            } catch (ce) {
+              this.arkLog('VERSION_CACHE_ERR ' + String(ce));
+            }
+          }
           // ascNative 字段保持强引用（registerJavaScriptProxy 代理对象避免被回收）。
           const nativeDispatch = new AscNativeDispatch(this.hostFilesDir, ((m: string) => this.arkLog(m)));
           // LoadFontBase64 桥（引擎桌面路径取字体字节）：rawfile/onlyoffice/fonts/<id>
