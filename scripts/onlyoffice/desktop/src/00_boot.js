@@ -31,3 +31,31 @@
     return btoa(_bin);
   };
 
+  // ---- 插件链早期 fetch 取证（2026-09-06 AI 插件接入；仅验收态生效——编辑器页 URL
+  //      带 m7auto=1（EditorPage m7Target），产品 URL 无此行为）：官方 loadPlugins 的
+  //      loadConfig('../../../../plugins.json') 在文档 ready（app:ready → setApi）时发出，
+  //      早于 prof-snap（10s 注入）——必须先装 hook 才能抓到官方 fetch 的真实 URL/status/
+  //      body（10s 快照 srvPlugins=false 之谜：loadConfig 回 'error' 或 getPlugins catch） ----
+  try {
+    if (/[?&]m7auto=1/.test(location.search) || /[?&]m7accept=1/.test(location.search)) {
+      var ___of = window.fetch;
+      window.fetch = function(_furl, _fopt) {
+        var _fu = String(_furl);
+        var _isP = _fu.indexOf('plugins.json') >= 0 || _fu.indexOf('plugins/') >= 0 || _fu.indexOf('config.json') >= 0;
+        if (_isP) console.error('PLUG_FETCH_GO ' + _fu);
+        return ___of.apply(this, arguments).then(function(_fr) {
+          if (_isP) {
+            _fr.clone().text().then(function(_ft) {
+              console.error('PLUG_FETCH_RET ' + _fu + ' st=' + _fr.status + ' len=' + (_ft || '').length
+                + ' head=' + String(_ft || '').slice(0, 60).replace(/\s+/g, ' '));
+            }).catch(function() {});
+          }
+          return _fr;
+        }).catch(function(_fe) {
+          if (_isP) console.error('PLUG_FETCH_ERR ' + _fu + ' ' + String(_fe && _fe.message));
+          throw _fe;
+        });
+      };
+    }
+  } catch (_fe2) {}
+

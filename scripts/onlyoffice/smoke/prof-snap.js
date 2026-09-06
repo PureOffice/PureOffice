@@ -1,12 +1,66 @@
 // ===========================================================================
-// 自动验收 smoke：编辑页状态快照（2026-09-05）
-// 由 EditorPage → Smoke.js() 读 rawfile/onlyoffice/smoke/prof-snap.js 注入执行。
+// 自动验收 smoke：编辑页状态快照 + 插件链验收动作（2026-09-05 建；9-06 扩）
+// 由 EditorPage → Smoke.js() 读 rawfile/onlyoffice/smoke/prof-snap.js 注入执行
+// （Smoke.enabled 门控 = ability 启动参数 m7accept=1；产品态不加载）。
 // 判据：按页面路径选 app 控制器命名空间（DE/SSE/PE）+ 公共 SSE.Views.Toolbar
-//（view/Toolbar.js:133 复数 Views）。仅记录（测量用途），不控制流程——
+//（view/Toolbar.js:133 复数 Views）。初始快照仅记录；插件链段（2026-09-06）为
+// 验收自动化：点击插件 tab/后台开关/AI Chatbot + 预注入 AI 模型配置——只在
+// 验收态（本文件加载本身受 Smoke.enabled 控）执行，且各项均 console.error 打点
+//（EditorPage onConsole → web_console.txt），不阻塞也不改写官方链路状态。
 // 文档就绪判据以官方 asc_onDocumentContentReady 为准（见 ascshim 同门标准）。
-// 只做记录，不等待/不轮询任何状态。
 // ===========================================================================
 (function() {
+  // AI 插件 iframe 的 contentDocument（同源；background 分支隐藏 iframe 名
+  // iframe_<guid>，sdkjs show():1145 创建）——JSON.parse 化后由探针使用
+  function _ifcDoc() {
+    var _fi = document.getElementById('iframe_asc.{9DC93CDB-B576-4F0C-B55E-FCC9C48DD007}');
+    return _fi && _fi.contentDocument;
+  }
+  // —— AI 模型预配置（2026-09-06 实验性注入；官方键 = AI.Storage localStorageKey
+  //    "onlyoffice_ai_plugin_storage_key"，local_storage.js:42；version=4；
+  //    结构 {version, providers, models, customProviders}）。
+  //    用途：AI 插件 run 前把 Ollama(localhost:11434) 模型入库——无模型时
+  //    Chatbot 点击走官方降级链 onOpenSettingsModal（无模型 → 自动弹设置窗口，
+  //    engine.js:466-470 实证）——注入后 Chatbot 直接开 chat.html 窗口，可验
+  //    AI 对话 UI 面。设备无 Ollama 时对话请求报错（引擎错误提示可见），属
+  //    设备级外部依赖，不影响窗口/UI 链路验收。仅验收态（本文件）运行。 ——
+  try {
+    var _AIK = 'onlyoffice_ai_plugin_storage_key';
+    if (!localStorage.getItem(_AIK)) {
+      var _aitcfg = {
+        version: 4,
+        providers: {
+          'Ollama': {
+            name: 'Ollama',
+            url: 'http://localhost:11434',
+            key: '',
+            models: [{ id: 'llama3.2:latest', object: 'model', created: 1739120925, owned_by: 'library', name: 'llama3.2:latest', endpoints: [], options: {} }]
+          }
+        },
+        models: [{ capabilities: 255, provider: 'Ollama', name: 'Ollama [llama3.2:latest]', id: 'llama3.2:latest' }],
+        customProviders: {}
+      };
+      localStorage.setItem(_AIK, JSON.stringify(_aitcfg));
+      console.error('PROF_AI_CFG_SEEDOK');
+    } else {
+      console.error('PROF_AI_CFG_EXISTS len=' + String(localStorage.getItem(_AIK)).length);
+    }
+    // 动作→模型映射（行动能选择模型；键 actions_key=register.js:1063；Chat 动作
+    // 默认 model=""（ActionUI modelId 缺省）→ 无映射则 getModelById("") 空 →
+    // chatWindowShow 里 Request.create 降级 settings——第二键必配）
+    var _AIK2 = 'onlyoffice_ai_actions_key';
+    if (!localStorage.getItem(_AIK2)) {
+      localStorage.setItem(_AIK2, JSON.stringify({
+        'Chat': { 'name': 'Chatbot', 'icon': 'ask-ai', 'model': 'llama3.2:latest', 'capabilities': 1 },
+        'Summarization': { 'name': 'Summarization', 'icon': 'summarization', 'model': 'llama3.2:latest', 'capabilities': 1 },
+        'Translation': { 'name': 'Translation', 'icon': 'translation', 'model': 'llama3.2:latest', 'capabilities': 1 },
+        'TextAnalyze': { 'name': 'Text analysis', 'icon': 'text-analysis-ai', 'model': 'llama3.2:latest', 'capabilities': 1 }
+      }));
+      console.error('PROF_AI_ACTIONS_SEEDOK');
+    } else {
+      console.error('PROF_AI_ACTIONS_EXISTS len=' + String(localStorage.getItem(_AIK2)).length);
+    }
+  } catch (es) { console.error('PROF_AI_CFG_ERR ' + String(es)); }
   try {
     var p = String(window.location.pathname || '');
     var ns = p.indexOf('/spreadsheeteditor/') >= 0 ? 'SSE'
@@ -190,4 +244,458 @@
     var wCJKSerif = ctx2.measureText('中文测试').width;
     console.error('PROF_CJK_CANVAS sans=' + wCJK + ' serif=' + wCJKSerif);
   } catch (e) { console.error('PROF_CJK_ERR ' + String(e)); }
+
+  // —— AI 插件装配链现场（2026-09-06 接入：web 语义 plugins.json server 链）。
+  //    判定矩阵（全部仅记录，不控制流程）——
+  //    PLUG_CFG       = Plugins 控制器 setApi 是否执行过（loadPlugins 门）
+  //    PLUG_SRV       = serverPlugins.plugins 状态（undefined=仍在载/false=error）
+  //    PLUG_TB        = 顶部工具栏是否出现「插件」tab（DOM 判据）
+  //    PLUG_STORE     = 插件集合数量（hasVisible 判定）
+  //    PLUG_REG       = asc_pluginsRegister 是否已注册回调（sdkjs 侧收到了几个插件）
+  //    PLUG_PLUG      = 菜单/面板 DOM 是否有 AI 插件按钮（background→工具栏 tab）
+  //    PLUG_FETCH     = 浏览器侧 fetch 探针：手动拉 plugins.json/config.json 看 200/404
+  //                    （rawfileLoader 路径语义；fetch 同源无 CORS 问题）
+  //    PLUG_ISACTIVE  = Desktop.isActive/isOffline（决定走 server 链还是 desktop 链）
+  //    PLUG_UI        = view 侧 plugin 状态（Common.Views.PluginDialog 能否建帧）
+  // ——
+  (function proplugin() {
+    try {
+      var _C = window.Common && window.Common.Controllers && window.Common.Controllers.Plugins;
+      var _c = _C ? null : null;
+      // Plugins 控制器 = window.DE.controllers 或 application.getController
+      var _M = window[ns] && window[ns].controllers && window[ns].controllers.Main;
+      var _app2 = _M && _M.getApplication ? _M.getApplication() : null;
+      var _pc = null;
+      try { if (_app2) _pc = _app2.getController('Common.Controllers.Plugins'); } catch (eg) {}
+      var _cfg = _pc && _pc.configPlugins, _srv = _pc && _pc.serverPlugins;
+      var _store = null;
+      try {
+        if (_app2) { var _cl = _app2.getCollection('Common.Collections.Plugins'); _store = _cl; }
+      } catch (ec) {}
+      var _tb = document.querySelector('ul[role="tablist"]') || document.getElementById('toolbar');
+      var _tabNames = [];
+      try {
+        var _links = document.querySelectorAll('#toolbar-tabs a, #tabs a, .tabs a');
+        for (var _ti = 0; _ti < _links.length; _ti++) _tabNames.push(String(_links[_ti].textContent || '').trim());
+      } catch (et) {}
+      console.error('PROF_PLUG ns=' + ns
+        + ' pc=' + !!_pc
+        + ' cfgCfg=' + !!( _cfg && _cfg.config)
+        + ' cfgPlugins=' + ( _cfg ? (_cfg.plugins === undefined ? 'undef' : Array.isArray(_cfg.plugins) ? 'arr' + _cfg.plugins.length : String(_cfg.plugins)) : '-')
+        + ' srvPlugins=' + (_srv ? (_srv.plugins === undefined ? 'undef' : Array.isArray(_srv.plugins) ? 'arr' + _srv.plugins.length : String(_srv.plugins)) : '-')
+        + ' store=' + (_store && _store.length)
+        + ' sdkDrv=' + (!!( window.Asc && window.Asc.editor && window.Asc.editor.asc_pluginsRegister))
+        + ' tabs=' + _tabNames.join('|'));
+      // Desktop.isActive/isOffline（server 链门）
+      try {
+        var _D = window.Common && window.Common.Controllers && window.Common.Controllers.Desktop;
+        console.error('PROF_DESKTOP isActive=' + (_D && _D.isActive ? _D.isActive() : -1)
+          + ' isOffline=' + (_D && _D.isOffline ? _D.isOffline() : -1));
+      } catch (ed) { console.error('PROF_DESKTOP_ERR ' + String(ed)); }
+      // fetch 探针（同源 rawfileLoader）：plugins.json + ai/config.json + v1/plugins.js
+      // 2026-09-06 增强：body 校验（text + JSON.parse——官方 loadConfig 在 response.ok 后
+      // 才 response.json()，rawfileLoader 的 MIME/body 若是 404 文本则 json() 抛错 → 'error'）
+      ['plugins.json', 'plugins/ai/config.json', 'plugins/v1/plugins.js'].forEach(function(_f) {
+        fetch('http://localhost/onlyoffice/' + _f)
+          .then(function(r) {
+            return r.text().then(function(_t) {
+              var _j = '?';
+              try { JSON.parse(_t); _j = 'json-ok'; } catch (je) { _j = 'json-bad'; }
+              console.error('PROF_FETCH ' + _f + ' st=' + r.status + ' mime=' + (r.headers.get ? r.headers.get('content-type') : '?')
+                + ' len=' + _t.length + ' ' + _j + ' head=' + _t.slice(0, 80).replace(/\s+/g, ' '));
+            });
+          })
+          .catch(function(e) { console.error('PROF_FETCH_ERR ' + _f + ' ' + String(e && e.message)); });
+      });
+      // 官方 loadConfig 用的相对 URL：../../../../plugins.json 从 main/index.html 上跳四层
+      // 应解析为 http://localhost/onlyoffice/plugins.json —— 若不一致即官方 fetch 失败的
+      // 直接根因（2026-09-06 加；baseURI 受 <base>/history 影响）
+      try {
+        var _rel = new URL('../../../../plugins.json', document.baseURI).href;
+        var _relCfg = new URL('../../../../plugins/ai/config.json', document.baseURI).href;
+        console.error('PROF_BASEURI base=' + document.baseURI + ' href=' + window.location.href
+          + ' rel=' + _rel + ' relCfg=' + _relCfg);
+      } catch (eb) { console.error('PROF_BASEURI_ERR ' + String(eb)); }
+      // 关键面：window.desktop / AscDesktopEditor 存在性 + 插件 store 内容
+      try {
+        console.error('PROF_DE_NATIVE desktop=' + typeof window.desktop
+          + ' ascDE=' + typeof window.AscDesktopEditor
+          + ' deKeys=' + (window.AscDesktopEditor ? (Object.keys(window.AscDesktopEditor).length) : -1));
+        // store 内容（visible 判定链：parsePlugins:925 visible=(isEdit||viewer)&&EditorsSupport
+        // &&!isSystem；AI 插件 isViewer:false→visible=isEdit。hasVisible()=false→
+        // refreshPluginsList 不触发 tab:visible→Mixtbar display:none 保持）
+        if (_store) {
+          var _items = [];
+          _store.each(function(it) {
+            try {
+              _items.push(String(it.get('guid') || '?')
+                + '/' + (it.get('visible') === true ? 'vis' : it.get('visible') === false ? 'hid' : String(it.get('visible'))));
+            } catch (ei) { _items.push('?'); }
+          });
+          console.error('PROF_STORE len=' + _store.length + ' items=' + _items.slice(0, 5).join(',')
+            + ' hasVisible=' + (_store.hasVisible && _store.hasVisible())
+            + ' isEdit=' + (_pc && _pc.appOptions && _pc.appOptions.isEdit === true ? 'true' : (_pc && _pc.appOptions ? String(_pc.appOptions.isEdit) : '-'))
+            + ' canPlugins=' + (_pc && _pc.appOptions ? String(_pc.appOptions.canPlugins) : '-')
+            + ' autostart=' + (_pc && Array.isArray(_pc.autostart) ? String(_pc.autostart.length) : '-')
+            + ' apiVer=' + (_pc && _pc.api && _pc.api.GetVersion ? String(_pc.api.GetVersion()) : '-'));
+          // 插件 tab 的 DOM 可见性（addTab 模板 display:none；tab:visible→setVisible 改 display）
+          try {
+            var _pt = document.querySelector('a[data-tab=plugins]');
+            var _pli = _pt ? _pt.parentElement : null;
+            console.error('PROF_PLUG_TAB exists=' + !!_pt
+              + ' liDisplay=' + (_pli ? getComputedStyle(_pli).display : '-')
+              + ' style=' + (_pli ? String(_pli.getAttribute('style') || '').replace(/\s+/g, ' ') : '-'));
+          } catch (ep) { console.error('PROF_PLUG_TAB_ERR ' + String(ep)); }
+        }
+      } catch (en) { console.error('PROF_DE_ERR ' + String(en)); }
+      // 观察后续：插件装配事件打点（asc_pluginsRegister 回调、tab:visible、app:ready）
+      try {
+        if (window.Common && window.Common.NotificationCenter && window.Common.NotificationCenter.on) {
+          var _nc = window.Common.NotificationCenter;
+          var _o1 = _nc.on.bind(_nc);
+          console.error('PROF_NC_HOOK_PENDING');
+        }
+      } catch (eo) {}
+      // —— 插件链验收：点击插件 tab → 后台插件按钮（2026-09-06 AI 接入验收；按钮
+      //     位置随布局/语言不确定，程序化点击比坐标稳——坐标依赖截图人工估距）。
+      //     PLUG_TAB_CLICKED 后本地联动 snapshot；后台按钮 id=id-toolbar-btn-background-plugin
+      //     是 addBackgroundPluginsButton（Plugins.js:281）建的唯一实例。
+      try {
+        var _tbc = document.querySelector('#toolbar-tabs a[data-tab=plugins]')
+          || document.querySelector('a[data-tab=plugins]');
+        if (_tbc) {
+          _tbc.click();
+          console.error('PLUG_TAB_CLICKED');
+          setTimeout(function() {
+            try {
+              // id 在 Common.UI.Button 的 div.btn-group 上，Bootstrap dropdown 委托
+              // 只接受内部 button[data-toggle=dropdown] 的点击（2026-09-06 实测点击
+              // div 不展开菜单）——点内层按钮
+              var _bgWrap = document.getElementById('id-toolbar-btn-background-plugin');
+              var _bgc = _bgWrap && (_bgWrap.querySelector('[data-toggle=dropdown]') || _bgWrap);
+              if (_bgc) {
+                _bgc.click();
+                console.error('PLUG_BG_CLICKED');
+                setTimeout(function() {
+                  try {
+                    // 菜单状态取证：Common.UI.Button.menu dropdown 开启判定
+                    var _dd = null;
+                    var _dl = document.querySelectorAll('ul.dropdown-menu, .dropdown-menu');
+                    for (var _i = 0; _i < _dl.length; _i++) {
+                      if (/background-plugins/.test(String(_dl[_i].className))) {
+                        _dd = _dl[_i];
+                        var _disp = getComputedStyle(_dd).display;
+                        console.error('PLUG_MENU found=bg items=' + _dd.children.length + ' display=' + _disp);
+                      }
+                    }
+                    if (!_dd) { console.error('PLUG_MENU_NF'); }
+                    if (_dd) {
+                      var _txt = [];
+                      for (var _j = 0; _j < _dd.children.length; _j++) { _txt.push(String(_dd.children[_j].textContent || '').replace(/\s+/g, ' ').slice(0, 40)); }
+                      console.error('PLUG_MENU_FULL ' + _txt.join('|'));
+                      // 菜单内 AI 行的开关（.plugin-toggle：Switcher——点击即 asc_pluginRun）
+                      var _tg = _dd.querySelector('.plugin-toggle');
+                      if (_tg) { _tg.click(); console.error('PLUG_AI_TOGGLE_CLICKED'); }
+                      else console.error('PLUG_AI_TOGGLE_NF');
+                      // run 后现场（sdkjs 侧）：pluginsMap/runnedPluginsMap/iframe/run 门判定
+                      setTimeout(function() {
+                        try {
+                          var _gm = window.g_asc_plugins;
+                          var _pm = _gm && _gm.pluginsMap ? Object.keys(_gm.pluginsMap) : null;
+                          var _rm = _gm && _gm.runnedPluginsMap ? Object.keys(_gm.runnedPluginsMap) : null;
+                          var _ifr = document.querySelectorAll('iframe[id^=iframe_]').length;
+                          var _v = _gm && _gm.plugins && _gm.plugins.length;
+                          console.error('PLUG_RUN_STATE gm=' + !!_gm
+                            + ' pm=' + (_pm ? _pm.join(',') : '-')
+                            + ' rm=' + (_rm ? _rm.join(',') : '-')
+                            + ' iframe=' + _ifr
+                            + ' plugins=' + (_v === undefined ? '-' : _v)
+                            + ' supportMany=' + !!(_gm && _gm.isSupportManyPlugins));
+                          // 隐藏 iframe 的 src（show() 若非 Visual 分支建）
+                          var _if2 = document.querySelector('iframe[id^=iframe_asc]');
+                          console.error('PLUG_IF_FRAME exists=' + !!_if2
+                            + ' src=' + (_if2 ? String(_if2.src).slice(0, 120) : '-'));
+                          // 顶级「AI」入口 DOM 身份（AddToolbarMenuItem/plugin button）。
+                          // 2026-09-06 修正：tabs 容器是 li.ribtab（Mixtbar addTab 模板），
+                          // 容器 id 不是 #toolbar-tabs（真实 id 由探针报出）；枚举全部
+                          // ribtab 的 text/data-tab/display，AI 是否 tab 以枚举为准。
+                          var _ribs = [];
+                          try {
+                            var _lr = document.querySelectorAll('li.ribtab a');
+                            for (var _kr = 0; _kr < _lr.length; _kr++) {
+                              var _a9 = _lr[_kr];
+                              var _li9 = _a9.parentElement;
+                              var _d9 = _li9 ? getComputedStyle(_li9).display : '-';
+                              _ribs.push(String(_a9.textContent || '').trim()
+                                + '/' + (_a9.getAttribute('data-tab') || '-')
+                                + '/' + _d9);
+                            }
+                          } catch (er9) { _ribs.push('ERR:' + String(er9)); }
+                          // tab 身份判定用 caption（data-tab=AI 不存在——tab.id 是随机
+                          // UUID，2026-09-06 已证；此字段保留供人读）
+                          var _aiByCaption = false;
+                          try {
+                            var _lc2 = document.querySelectorAll('li.ribtab a');
+                            for (var _kc2 = 0; _kc2 < _lc2.length; _kc2++) {
+                              if (String(_lc2[_kc2].textContent || '').trim() === 'AI') { _aiByCaption = true; break; }
+                            }
+                          } catch (kc2) {}
+                          var _abtn = document.querySelectorAll('.btn-plugin, .btn-toolbar');
+                          console.error('PLUG_AI_DOM aiTab=' + _aiByCaption
+                            + ' ribtabs=' + _ribs.join('|')
+                            + ' ctrlBtns=' + _abtn.length);
+                        } catch (er) { console.error('PLUG_RUN_STATE_ERR ' + String(er)); }
+                      }, 3000);
+                      // 点顶级「AI」入口（若为 tab）→ AI 面板 Chatbot 按钮 → chat 窗口
+                      // （2026-09-06：addCustomControls 建 tab（LayoutManager:334 → Mixtbar
+                      // addCustomControls:778 → createTab），面板 id=tab.action；按钮
+                      // Common.UI.ButtonCustom .btn-toolbar）
+                      setTimeout(function() {
+                        try {
+                          // AI tab 的 data-tab 是随机插件 UUID（v1/plugins.js Button 基类
+                          // this.id=d===v?y():d——id 缺省生成随机 UUID；真机两轮实测
+                          // f4a534fb…→13eb0420…→1940bdb2…探针不得按 data-tab=AI 或写死
+                          // UUID；lib 实际为 textContent===AI 的 a。caption=AI 正常显示）
+                          var _ai2 = null;
+                          try {
+                            var _la2 = document.querySelectorAll('.tabs a, #tabs a, li.ribtab a');
+                            for (var _kt = 0; _kt < _la2.length; _kt++) {
+                              if (String(_la2[_kt].textContent || '').trim() === 'AI') { _ai2 = _la2[_kt]; break; }
+                            }
+                          } catch (ekt) {}
+                          if (_ai2) { _ai2.click(); console.error('PLUG_AI_TAB_CLICKED'); }
+                          else console.error('PLUG_AI_TAB_NF');
+                          // iframe 内部取证（同源可访问 contentDocument）：AI 页是否
+                          // 初始化（Asc.plugin 对象 / PluginWindow/executeMethod 框架面 /
+                          // 工具栏按钮注册数——框架面齐不齐即 Chatbot 可点的前置）
+                          try {
+                            var _doc = _ifcDoc();
+                            if (_doc) {
+                              var _vw = _doc.defaultView;
+                              var _pgw = _vw && _vw.Asc && _vw.Asc.plugin;
+                              var _pw = _vw && _vw.Asc ? typeof _vw.Asc.PluginWindow : 'noAsc';
+                              var _em = _pgw ? typeof _pgw.executeMethod : 'noPlg';
+                              var _bt = 0, _mt = 'noAI', _ct = 'noAI', _ser = '?';
+                              try {
+                                _bt = (_vw.Asc.Buttons && _vw.Asc.Buttons.ButtonsToolbar
+                                  && _vw.Asc.Buttons.ButtonsToolbar.length) || 0;
+                                // 引擎运行状态：AI.Models 长度 / Actions.Chat.model /
+                                // serverSettings 有无（判断 ActionsLoad/Storage.load 是否读到注入）
+                                if (_vw.AI) {
+                                  _mt = (_vw.AI.Models && _vw.AI.Models.length) || '-';
+                                  _ct = (_vw.AI.Actions && _vw.AI.Actions.Chat
+                                    && _vw.AI.Actions.Chat.model) || '';
+                                  _ser = _vw.AI.serverSettings === undefined ? 'undef' : (!!_vw.AI.serverSettings);
+                                }
+                              } catch (ebt) {}
+                              console.error('PLUG_AI_IFC len=' + (_doc.body ? _doc.body.innerHTML.length : -1)
+                                + ' asc=' + !!_pgw
+                                + ' PluginWindow=' + _pw
+                                + ' executeMethod=' + _em
+                                + ' toolbarBtns=' + _bt
+                                + ' models=' + _mt
+                                + ' chatModel=' + _ct
+                                + ' serverSettings=' + _ser
+                                + ' ls=' + String(_vw && _vw.localStorage && _vw.localStorage.getItem('onlyoffice_ai_actions_key') || '').slice(0, 80)
+                                + ' ls2=' + String(_vw && _vw.localStorage && _vw.localStorage.getItem('onlyoffice_ai_plugin_storage_key') || '').slice(0, 80)
+                                + ' txt=' + String(_doc.body && _doc.body.textContent || '').replace(/\s+/g, ' ').slice(0, 120));
+                            } else {
+                              console.error('PLUG_AI_IFC_NF');
+                            }
+                          } catch (ei) { console.error('PLUG_AI_IFC_ERR ' + String(ei)); }
+                          // 点 AI 面板的 Chatbot 按钮（点击 → chatWindowShow → 插件窗口；
+                          // 页面按钮 text=Chatbot，类型 btn-toolbar；panel 的 data-tab 为
+                          // 插件 UUID（tab.id），非字面 AI——2026-09-06 实测）
+                          setTimeout(function() {
+                            try {
+                              // tab.id 是 UUID 且可能每次 run 变化——动态取 AI 项的 data-tab
+                              // （稳妥：.tabs / #tabs 里 textContent==AI 的 a；再退 tab 面板
+                              // [data-tab] 枚举文本匹配）
+                              var _aiKey = '';
+                              try {
+                                var _lk = document.querySelectorAll('.tabs a, #tabs a, li.ribtab a');
+                                for (var _kk = 0; _kk < _lk.length; _kk++) {
+                                  if (String(_lk[_kk].textContent || '').trim() === 'AI') {
+                                    _aiKey = _lk[_kk].getAttribute('data-tab') || '';
+                                    break;
+                                  }
+                                }
+                              } catch (ekk) {}
+                              // 引号必须加：UUID 以数字开头裸写是非法选择器（真机踩过
+                              // SyntaxError not a valid selector）。还必须限定 section——
+                              // a[data-tab]（tab 项）与 section[data-tab]（面板）同 id
+                              // 再次匹配（2026-09-06 事实：querySelector 先命中 a → btns=0
+                              // 误判为面版无按钮）
+                              var _panel = _aiKey ? document.querySelector('section[data-tab="' + _aiKey + '"]') : null;
+                              console.error('PLUG_AI_PANEL key=' + _aiKey + ' panel=' + !!_panel);
+                              // 按钮不在 panel 内（真机 2026-09-06：panel=true 但 btns=0）——
+                              // 打印 panel outerHTML 前 400 + 全文档 Chatbot 文案的元素路径
+                              var _chatBtn = null;
+                              try {
+                                var _pcb = document.querySelectorAll('[class*="btn-toolbar"], [class*="plg"], button');
+                                for (var _kb = 0; _kb < _pcb.length; _kb++) {
+                                  var _t9 = String(_pcb[_kb].textContent || '').trim();
+                                  if (_t9 === 'Chatbot' || _t9.indexOf('Chatbot') >= 0) { _chatBtn = _pcb[_kb]; break; }
+                                }
+                              } catch (ekb) {}
+                              console.error('PLUG_AI_DOM2 panelHtml=' + String(_panel && _panel.outerHTML || '').replace(/\s+/g, ' ').slice(0, 300)
+                                + ' chatByText=' + (_chatBtn ? (_chatBtn.tagName + '.' + String(_chatBtn.className).slice(0, 40)
+                                  + ' parent=' + String(_chatBtn.parentElement && _chatBtn.parentElement.className).slice(0, 40)) : 'nf'));
+                              if (!_chatBtn) {
+                                // 兜底：AI panel 内下挂按钮（btn-slot 结构）。真机实测
+                                // （2026-09-06）：首个按钮是 Settings（register.js 在
+                                // AI.serverSettings 空时先建 buttonSettings）——Chatbot 的
+                                // 图标资源含 ask-ai（getToolBarButtonIcons("ask-ai")）：
+                                // strings 由 URL/class 无法区分时按 img src 含 ask-ai 匹配，
+                                // 其次才取第一个（保底；log 输出实际选项供判）
+                                try {
+                                  var _pb2 = _panel ? _panel.querySelectorAll('.btn-slot button, .btn-slot .btn, .btn-slot [data-toggle], .btn-slot') : [];
+                                  // 每个 slot 的 DOM 特征（icon 是 sprite：class/背景含图标名，
+                                  // 无 <img.src> 可嗅探——打印各 slot 内部 class/hint/title 供区分）
+                                  var _slotList = [];
+                                  try {
+                                    var _sl2 = _panel ? _panel.querySelectorAll('.btn-slot') : [];
+                                    for (var _kn = 0; _kn < _sl2.length; _kn++) {
+                                      var _sIn = _sl2[_kn].innerHTML || '';
+                                      _slotList.push(_kn + ':cls=' + String(_sIn.match(/class="[^"]*"/) && _sIn.match(/class="[^"]*"/)[0]).slice(0, 90)
+                                        + '|hint=' + String(_sIn.match(/data-hint=\"([^\"]*)\"/) && _sIn.match(/data-hint=\"([^\"]*)\"/)[1]).slice(0, 40)
+                                        + '|ttl=' + String(_sIn.match(/data-title=\"([^\"]*)\"/) && _sIn.match(/data-title=\"([^\"]*)\"/)[1]).slice(0, 40)
+                                        + '|ai=' + _sIn.indexOf('ask-ai'));
+                                    }
+                                  } catch (ek8) {}
+                                  console.error('PLUG_AI_BTN_PANELSLOT count=' + _pb2.length
+                                    + ' imgAI=' + (_panel ? String(_panel.innerHTML || '').indexOf('ask-ai') : -1)
+                                    + ' || ' + _slotList.join(' || '));
+                                  if (_pb2.length > 0 && !_chatBtn) {
+                                    // 用 .btn-slot 唯一序列（querySelectorAll 多选择器会重复匹配
+                                    // 同一 slot 内的多个条件——9-30 实测 _pb2[1] 命中第一 slot
+                                    // 的 btn div 而非第二 slot 按钮——按 .btn-slot 索引+图标类
+                                    // 匹配 ask-ai（slot[1]，实测 ai=339））
+                                    var _sl3 = _panel.querySelectorAll('.btn-slot');
+                                    var _b3 = null;
+                                    for (var _kp = 0; _kp < _sl3.length; _kp++) {
+                                      var _slot = _sl3[_kp];
+                                      var _in9 = _slot.innerHTML || '';
+                                      if (_in9.indexOf('ask-ai') >= 0) {
+                                        _b3 = _slot.querySelector('button') || _slot; break;
+                                      }
+                                    }
+                                    // 保底：第二个 slot（Settings[0], Chatbot[1]——9-30 实测序）
+                                    if (!_b3 && _sl3.length > 1) {
+                                      var _s3 = _sl3[1];
+                                      _b3 = _s3.querySelector('button') || _s3;
+                                    }
+                                    console.error('PLUG_AI_CHAT_TARGET ' + (_b3 ? ('slot=' + String(_b3.className || _b3.tagName).slice(0, 40)) : 'nf'));
+                                    if (_b3) _chatBtn = _b3;
+                                  }
+                                } catch (eb2) {}
+                              }
+                              if (_chatBtn) {
+                                _chatBtn.click();
+                                console.error('PLUG_AI_CHAT_CLICKED');
+                              } else {
+                                console.error('PLUG_AI_CHAT_BTN_NF panel=' + !!_panel);
+                              }
+                              // 4s 后查插件窗口 DOM（sdkjs ShowWindow → asc_onPluginWindowShow →
+                              // Plugins.js onPluginWindowShow(1178) → Common.Views.PluginDlg：
+                              // 弹窗内有 #id-plugin-container，内嵌 iframe url=variation.url
+                              // （chat.html）；帧 id=frameId 名 iframe_<desc>）
+                              setTimeout(function() {
+                                try {
+                                  var _ws = document.querySelectorAll('#id-plugin-container');
+                                  // 弹窗里 iframe 全枚举（src/name/id）；plugin iframe 是
+                                  // <iframe id="<frameId>" name="<frameId>">（PluginDlg url
+                                  // 传入；若 src 未含 chat.html——打印实际 src 供判）
+                                  var _wsIfr = [];
+                                  try {
+                                    var _mi = document.querySelectorAll('.modal iframe, #id-plugin-container iframe');
+                                    for (var _k5 = 0; _k5 < _mi.length; _k5++) {
+                                      _wsIfr.push(String(_mi[_k5].getAttribute('src') || '').slice(0, 140)
+                                        + '/' + (_mi[_k5].id || '-'));
+                                    }
+                                  } catch (ek5) {}
+                                  var _ci = null;
+                                  var _ifr3 = document.querySelectorAll('iframe');
+                                  for (var _k3 = 0; _k3 < _ifr3.length; _k3++) {
+                                    if (String(_ifr3[_k3].src).indexOf('chat.html') >= 0) { _ci = _ifr3[_k3]; break; }
+                                  }
+                                  console.error('PLUG_AI_CHAT wins=' + _ws.length
+                                    + ' chatIframe=' + (_ci ? String(_ci.src).slice(0, 140) : '-')
+                                    + ' frameId=' + (_ci ? _ci.id : '-')
+                                    + ' dlgn=' + (_ws.length ? document.querySelectorAll('.modal').length : 0)
+                                    + ' modalIfr=' + _wsIfr.join('|')
+                                    + ' dlgHtml=' + String((_ws.length ? (_ws[0].innerHTML || '') : '')).replace(/\s+/g, ' ').slice(0, 200));
+                                } catch (ew) { console.error('PLUG_AI_CHAT_ERR ' + String(ew)); }
+                              }, 4000);
+                            } catch (ec) { console.error('PLUG_AI_CHAT_CLICK_ERR ' + String(ec)); }
+                          }, 1500);
+                        } catch (ea) { console.error('PLUG_AI_TAB_ERR ' + String(ea)); }
+                      }, 4500);
+                    }
+                  } catch (em) { console.error('PLUG_MENU_ERR ' + String(em)); }
+                }, 1200);
+              }
+              else console.error('PLUG_BG_BTN_NOT_FOUND');
+            } catch (eb) { console.error('PLUG_BG_CLICK_ERR ' + String(eb)); }
+          }, 2500);
+        } else {
+          console.error('PLUG_TAB_NOT_FOUND');
+        }
+      } catch (etb) { console.error('PLUG_TAB_CLICK_ERR ' + String(etb)); }
+
+      // —— 插件装配异常重演（2026-09-06：官方 fetch 全 200，srvPlugins=false 说明
+      //     getPlugins().then(loaded → serverPlugins.plugins=loaded → mergePlugins()) 中抛错
+      //     → .catch → false。可疑点 refreshPluginsList（parsePlugins 尾调）——
+      //     asc_pluginsRegister/trigger('tab:visible')/Gateway.pluginsReady 三连。
+      //     本段幂等重演 refreshPluginsList 抓真实异常；异步 1s 后再查 tab display。
+      //     仅验收态（prof-snap 本身）运行；重复调用三方无副作用（register 幂等/setVisible 反复）
+      try {
+        var _pr = _pc && _pc.refreshPluginsList && _pc.refreshPluginsList.bind(_pc);
+        var _ascC = !!(window.Asc && window.Asc.CPlugin);
+        var _gw = !!(window.Common && window.Common.Gateway && window.Common.Gateway.pluginsReady);
+        console.error('PROF_RPL pred=' + !!_pr + ' ascCPlugin=' + _ascC + ' gwPluginsReady=' + _gw
+          + ' apiHas=' + (!!(_pc && _pc.api) && Object.prototype.hasOwnProperty.call(_pc.api, 'asc_pluginsRegister')));
+        if (_pr) {
+          try {
+            _pr();
+            console.error('PROF_RPL_OK');
+          } catch (rp) {
+            console.error('PROF_RPL_ERR ' + String(rp && rp.stack || rp));
+          }
+        }
+        setTimeout(function() {
+          try {
+            var _pt2 = document.querySelector('a[data-tab=plugins]');
+            var _pl2 = _pt2 ? _pt2.parentElement : null;
+            console.error('PROF_PLUG_TAB2 exists=' + !!_pt2
+              + ' liDisplay=' + (_pl2 ? getComputedStyle(_pl2).display : '-')
+              + ' style=' + (_pl2 ? String(_pl2.getAttribute('style') || '').replace(/\s+/g, ' ') : '-'));
+          } catch (ep2) { console.error('PROF_PLUG_TAB2_ERR ' + String(ep2)); }
+        }, 1000);
+      } catch (erp) { console.error('PROF_RPL_ARM_ERR ' + String(erp)); }
+      // hook fetch：记录插件相关请求（相对 plugins.json server 链 URL）
+      try {
+        var _of = window.fetch;
+        if (!window.__pluginFetchHook) {
+          window.__pluginFetchHook = true;
+          window.fetch = function(url, opt) {
+            var _u = String(url);
+            if (_u.indexOf('plugins.json') >= 0 || _u.indexOf('onlyoffice/plugins/') >= 0) {
+              console.error('PROF_FETCHHOOK ' + _u + ' opt=' + (opt ? JSON.stringify({m: opt.method || 'GET', h: opt.headers ? Object.keys(opt.headers) : []}) : 'none'));
+            }
+            return _of.apply(this, arguments).then(function(r2) {
+              if (_u.indexOf('plugins.json') >= 0 || _u.indexOf('onlyoffice/plugins/') >= 0)
+                console.error('PROF_FETCHHOOK_R ' + _u + ' st=' + r2.status);
+              return r2;
+            }).catch(function(e2) {
+              if (_u.indexOf('plugins.json') >= 0 || _u.indexOf('onlyoffice/plugins/') >= 0)
+                console.error('PROF_FETCHHOOK_E ' + _u + ' ' + String(e2 && e2.message));
+              throw e2;
+            });
+          };
+          console.error('PROF_FETCH_HOOKED');
+        }
+      } catch (ef) { console.error('PROF_FETCHHOOK_ERR ' + String(ef)); }
+    } catch (e) { console.error('PROF_PLUG_ERR ' + String(e)); }
+  })();
 })();

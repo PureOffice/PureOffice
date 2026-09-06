@@ -336,6 +336,120 @@
           } catch (ix) {
             console.error('LSO_INIT_ERR ' + String(ix) + (ix && ix.stack ? ' | ' + ix.stack.slice(0, 1200) : ''));
           }
+          // ---- 3.6 AI 插件 backgroundBtn 缺失修复（2026-09-06 真机根因修复） ----
+          // 现象：插件 tab 不显示（addTab 模板 display:none 保持）。真机取证（诊断
+          // wrap mergePlugins/parsePlugins 抓 PLUG_WRAP_ERR 后即撤，仅留证据）：
+          // PLUG_WRAP_ERR parsePlugins TypeError: Cannot read properties of
+          // undefined (reading 'show')——官方装配链 mergePlugins → parsePlugins →
+          // pluginStore.reset() 同步触发 onResetPlugins（Plugins.js:418）：
+          // AI 插件 variation type=background → isBackgroundPlugin=true → :445-447
+          // 直接 push backgroundPlugins 并 return（**不走 :470 rank===0/2 分支**）；
+          // 而 :485 循环后 `if (me.backgroundPlugins.length > 0)
+          // me.viewPlugins.backgroundBtn.show()`——backgroundBtn 只在
+          // addBackgroundPluginsButton（:285，调用点 :470/:447 rank 分支）创建；
+          // store 仅此一个插件（unpack 只带 AI，server 环境常驻常规插件才有 rank
+          // 分支兜底创建）→ 从未创建 → undefined.show() TypeError → 异常向上冒泡
+          // mergePlugins → getPlugins().then 的 .catch 吞掉
+          // （serverPlugins.plugins=false）→ 链断点靠前，refreshPluginsList 的
+          // asc_pluginsRegister/trigger('tab:visible')/Gateway.pluginsReady 全未走到
+          // → 插件 tab 保持 addTab 模板 display:none（10s 快照 PROF_PLUG_TAB
+          // liDisplay=none 实证）。
+          // 修复：catch 中断后按官方 :484-501 语义补齐——补建 backgroundSlot 按钮
+          // （addBackgroundPluginsButton 幂等：重复创建时 viewPlugins.backgroundBtn
+          // 由后续 rank 分支覆盖，多余空 group 无 UI 副作用）+ show:before/click
+          // 绑定 + isTabActive 面板复位 + lockControls（docProtection 为只读态）。
+          // 非白名单：不看 GUID/target，按「backgroundPlugins 非空且按钮缺失即补建」
+          // 的正规化恢复逻辑实现。
+          // wrap 对象必须是 parsePlugins（原型调用链 wc7 已证）：onResetPlugins 经
+          // initialize 时 addListeners 的 bind 保存引用（Plugins.js:110-111），事后
+          // 替换原型/实例属性都截不到绑定过的快照；parsePlugins 是运行时
+          // this.parsePlugins 查原型——wrap 有效（2026-09-06 真机实证：上版 wrap
+          // onResetPlugins 后 PLUG_BG_FIXED 从未触发，parsePlugins wrap 版
+          // 一步抓到 PLUG_WRAP_ERR）。
+          (function ensureBgBtn() {
+            try {
+              var _P = window.Common && window.Common.Controllers && window.Common.Controllers.Plugins;
+              if (!_P || !_P.prototype || !_P.prototype.parsePlugins) {
+                (ensureBgBtn.__n = (ensureBgBtn.__n || 0) + 1) < 400 && setTimeout(ensureBgBtn, 100);
+                return;
+              }
+              if (ensureBgBtn.__w) return;
+              ensureBgBtn.__w = true;
+              var _oP = _P.prototype.parsePlugins;
+              if (_oP && !_oP.__wrapped) {
+                _P.prototype.parsePlugins = function() {
+                  var me = this;
+                  try {
+                    return _oP.apply(me, arguments);
+                  } catch (e) {
+                    // 异常来自 onResetPlugins:486 backgroundBtn.show()（中断时按钮
+                    // 渲染循环已完成、_group 已 append，只差背景按钮与尾部绑定）。
+                    // 官方语义下 store 含常规插件时 rank 分支必然建钮、本异常不会
+                    // 发生；AI-only 环境（安装集只有 background 插件）触发官方未
+                    // 覆盖分支。catch 时 parsePlugins 已执行到 pluginStore.reset(arr)
+                    // （Backbone 先更新 models 再 fire reset——store 数据已就绪），
+                    // 抛错截断了 reset 之后的尾部：
+                    //   onResetPlugins 的 :486-498（按钮/尾部绑定）
+                    //   parsePlugins 的 enablePlugins + refreshPluginsList（tab:visible
+                    //   门！）+ startOnPostLoad/runAutoStartPlugins。
+                    // 修复：补建 backgroundBtn → 重跑 onResetPlugins（此时按钮已存在
+                    // 不再抛，面板完整）+ 按官方语义补 executePlugins 尾部。仍抛则
+                    // 保留真实异常（说明补建后仍不健康，不掩盖）。
+                    if (!me._plgBgRetried) {
+                      me._plgBgRetried = true;
+                      // ① 只补按钮对象（不挂 DOM）：onResetPlugins 开头
+                      //    $toolbarPanelPlugins.empty() 会清掉预挂的 DOM（上版实测
+                      //    PLUG_BG_BTN_NOT_FOUND——对象在、DOM 被 empty 清走）；
+                      //    对象在即可让 :486 show() 不再抛。
+                      if (me.viewPlugins && !me.viewPlugins.backgroundBtn) {
+                        me.viewPlugins.backgroundBtn =
+                          me.viewPlugins.createBackgroundPluginsButton();
+                      }
+                      try {
+                        me.onResetPlugins(
+                          me.getApplication().getCollection('Common.Collections.Plugins'));
+                      } catch (err2) {
+                        console.error('PLUG_BG_REPLAY_ERR ' + String(err2).slice(0, 120));
+                        throw e;
+                      }
+                      // ② 重放完成后按钮 DOM 已被 empty 清走——按官方 slot 结构重挂
+                      //    （slot id 同 addBackgroundPluginsButton/Plugins.js:286）
+                      if (me.backgroundPlugins && me.backgroundPlugins.length > 0
+                        && me.$toolbarPanelPlugins && me.viewPlugins.backgroundBtn) {
+                        try {
+                          // 官方可视结构 = div.group（界隔）+ span#slot-background-plugin；
+                          // 直挂 panel 也显示（首轮真机已验证），但按官方结构包 group
+                          // 保证与其他控件组一致（group 间分隔线/折叠行为同官方）
+                          var _grp = $('<div class="group"></div>').appendTo(me.$toolbarPanelPlugins);
+                          var _slot = $('<span class="btn-slot text x-huge" id="slot-background-plugin"></span>')
+                            .appendTo(_grp);
+                          me.viewPlugins.backgroundBtn.render(_slot);
+                          me.viewPlugins.backgroundBtn.show();
+                        } catch (es) { console.error('PLUG_BG_SLOT_ERR ' + String(es).slice(0, 120)); }
+                      }
+                      try {
+                        me.getApplication().getController('LeftMenu') && me.getApplication()
+                          .getController('LeftMenu').enablePlugins();
+                        if (me.appOptions.canPlugins) {
+                          me.refreshPluginsList();
+                          me.startOnPostLoad = !Common.Controllers.LaunchController.isScriptLoaded();
+                          !me.startOnPostLoad && me.runAutoStartPlugins();
+                        }
+                        console.error('PLUG_BG_FIXED ' + String(e).slice(0, 100)
+                          + ' btn=' + !!(me.viewPlugins && me.viewPlugins.backgroundBtn));
+                        return;
+                      } catch (err3) {
+                        console.error('PLUG_BG_TAIL_ERR ' + String(err3).slice(0, 120));
+                        throw e;
+                      }
+                    }
+                    throw e;
+                  }
+                };
+                _P.prototype.parsePlugins.__wrapped = true;
+              }
+            } catch (wp) {}
+          })();
           // 字族下拉数据源补发（2026-09-05 用户报修「字体列表无法下拉」）：
           // UI 层 Common.Controllers.Fonts.setApi 注册 asc_onInitEditorFonts →
           // onApiLoadFonts → cachedStore.add → trigger('fonts:load') →

@@ -176,7 +176,6 @@ export class AscNativeDispatch {
 
         // ===== 支持标志（false → 官方 UI 自动隐藏对应入口）=====
         case 'isSupportMacroses':
-        case 'isSupportPlugins':
         case 'isSupportNetworkFunctionality':
         case 'IsSupportNativePrint':
         case 'IsFilePrinting':
@@ -184,6 +183,12 @@ export class AscNativeDispatch {
         case 'IsSignaturesSupport':
         case 'IsProtectionSupport':
           return 'false';
+        // 插件提真（2026-09-06 AI 插件接入）：sdkjs common/plugins.js:977-980 run()
+        // 第一道门 isSupportPlugins()===false → 直接 return——9-04/9-05「AI 选项卡
+        // 出现但点按钮无反应」硬根因。web 语义插件装配走 plugins.json server 链
+        // （web-apps Plugins.js:165），不依赖 GetInstallPlugins（保持下方空态）。
+        case 'isSupportPlugins':
+          return 'true';
         case 'isBlockchainSupport':
           return 'false';
         case 'GetExternalClouds':

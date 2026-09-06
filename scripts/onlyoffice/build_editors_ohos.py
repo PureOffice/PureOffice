@@ -28,18 +28,24 @@
   10. smoke 验收样本（样本 docx/xlsx/pptx、demo-cn.*）集中 at rawfile/onlyoffice/smoke/
      （2026-09-06 用户：smoke 相关文件单独目录存放；EditorPage.ets 读取路径同步
      onlyoffice/smoke/ 前缀；样本源为手工维护文件，随包资源直接放在该目录）
+  11. 【2026-09-06】官方 AI 插件 → rawfile/onlyoffice/plugins/ + plugins.json
+     （web 语义插件装配清单；资产源 scripts/onlyoffice/plugins/，详见 install_ai_plugin）
 
-== 注 ==
-  AI 插件功能已按期撤回（2026-09-05 用户决策：专注基础功能）——plugins.json 接线、
-  ai-mock、AI provider 预配置、AI 探针均撤除；基础构建不含任何插件资产。
-  后续若要启用 AI：本次改动的 git 历史 + AI 插件来源说明（ONLYOFFICE/onlyoffice.github.io
-  → sdkjs-plugins/content/ai，版本 3.2.2 AGPL；插件框架 sdkjs-plugins/v1/）可恢复。
+== AI 插件（2026-09-06 正式接入） ==
+  2026-09-05 曾撤回（用户决策：专注基础功能）；本版按官方 web 语义重新接入：
+  plugins.json（web-apps Plugins.js:165 server 链）→ plugins/ai（官方 ai.plugin
+  3.2.2 发布包，AGPL）+ plugins/v1（官方 web 插件框架）→ isSupportPlugins 已提真
+  （ascBridge.ets；sdkjs common/plugins.js:977 run() 第一道门——9-04/9-05「按钮
+  无反应」硬根因）。不做任何定时器/装配包装（官方链 onDocumentContentReady→
+  app:ready→setApi→loadPlugins 自足）。后端由用户在 AI 插件设置页自配
+  （Ollama/DeepSeek 等；插件请求直接 fetch，无代理依赖）。
 """
 import os
 import hashlib
 import json
 import shutil
 import argparse
+import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC = os.path.join(ROOT, 'third_party', 'web-apps', 'deploy', 'web-apps')
@@ -47,6 +53,8 @@ SDK_SRC = os.path.join(ROOT, 'third_party', 'sdkjs', 'deploy', 'sdkjs')
 DST = os.path.join(ROOT, 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice')
 W3D = os.path.join(DST, 'webapps')
 SDK_DST = os.path.join(DST, 'sdkjs')
+PLUGIN_SRC = os.path.join(ROOT, 'scripts', 'onlyoffice', 'plugins')
+PLUGIN_DST = os.path.join(DST, 'plugins')          # 本地插件目录（web 语义 server_plugins 链消费）
 LOGIN = os.path.join(ROOT, 'third_party', 'desktop-apps', 'common', 'loginpage', 'deploy', 'index.html')
 FONT_DST = os.path.join(DST, 'fonts')          # GlobalLoaders.fontFilesPath - ../fonts/
 # 系统字体路径（Environment 可覆盖：OHOS_LIBERATION_FONTS；跨机不统一时保持一致性
@@ -444,6 +452,47 @@ SMOKE_SRC = os.path.join(ROOT, 'scripts', 'onlyoffice', 'smoke')
 SMOKE_DST = os.path.join(DST, 'smoke')
 
 
+def install_ai_plugin():
+    """安装官方 AI 插件 → rawfile/onlyoffice/plugins/（web 语义 plugins.json server 链）。
+
+    资产源（scripts/onlyoffice/plugins/，均为官方发布件，入库跟踪）：
+      ai/ai.plugin   —— ONLYOFFICE/onlyoffice.github.io sdkjs-plugins/content/ai/deploy/
+                        官方构建包（3.2.2，AGPL；702 文件 zip，含 vendor/ 与相对引用
+                        ./../v1/plugins.js——本地化形态，无需改 HTML）。
+                        zip 根即插件目录（config.json/index.html/...）。
+      v1/            —— onlyoffice.github.io/sdkjs-plugins/v1/*.js/.css 官方 web 语义
+                        插件框架（插件页 SDK：parent.postMessage 协议 ⇄ sdkjs
+                        common/plugins.js 运行时）。
+                        ★ 9-04/9-05 旧坑（勿回退）：不可用 desktop-apps/common/plugins/v1
+                        （桌面壳版，无 iframe 窗口协议/获取路径不同）——曾致「AI 选项卡
+                        出现但点按钮无反应」。
+    rawfile/plugins.json：web 语义装配清单 {"pluginsData": [config.json 绝对 URL]}，
+    由 web-apps Plugins.js:165 '../../../../plugins.json' 相对 editor main/index.html
+    四层上跳读取（webapps/apps/<editor>/main/ → rawfile/onlyoffice/plugins.json）。
+    幂等：plugins/ 先清空再装（内容驱动）。
+    """
+    ZIP = os.path.join(PLUGIN_SRC, 'ai', 'ai.plugin')
+    V1 = os.path.join(PLUGIN_SRC, 'v1')
+    if not os.path.isfile(ZIP):
+        raise SystemExit('AI 插件发布包缺失：%s（官方 onlyoffice.github.io sdkjs-plugins/content/ai/deploy）' % ZIP)
+    if not os.path.isdir(V1):
+        raise SystemExit('v1 插件框架缺失：%s' % V1)
+    if os.path.isdir(PLUGIN_DST):
+        shutil.rmtree(PLUGIN_DST)
+    os.makedirs(os.path.join(PLUGIN_DST, 'ai'), exist_ok=True)
+    with zipfile.ZipFile(ZIP) as z:
+        z.extractall(os.path.join(PLUGIN_DST, 'ai'))
+    copy_tree(V1, os.path.join(PLUGIN_DST, 'v1'))
+    # 插件清单（web 语义 server 链；绝对 URL 最稳——fetch 同源 localhost 无 CORS）
+    manifest = {'pluginsData': ['http://localhost/onlyoffice/plugins/ai/config.json']}
+    with open(os.path.join(DST, 'plugins.json'), 'w', encoding='utf-8') as f:
+        json.dump(manifest, f, indent=2)
+    n_ai = sum(len(fs) for _, _, fs in os.walk(os.path.join(PLUGIN_DST, 'ai')))
+    v1 = os.path.join(PLUGIN_DST, 'v1')
+    print('  AI 插件 → %s/ai (%d files) + v1 (%d files) + plugins.json'
+          % (PLUGIN_DST, n_ai, sum(len(fs) for _, _, fs in os.walk(v1))))
+
+
 def install_smoke():
     """拷贝 scripts/onlyoffice/smoke/ → rawfile/onlyoffice/smoke/（整目录替换）：
     *.js 页面诊断脚本（EditorPage smoke 注入）+ samples/ 验收样本（sample.*、
@@ -622,6 +671,9 @@ def main():
 
     # 7. smoke 诊断脚本（scripts/onlyoffice/smoke → rawfile/onlyoffice/smoke/）
     install_smoke()
+
+    # 7.5 官方 AI 插件（web 语义 plugins.json server 链；资产入库 scripts/onlyoffice/plugins/）
+    install_ai_plugin()
 
     # 8. 版本号 version.json（资源内容哈希 → 编辑页 ?v=）
     v = gen_version_json()

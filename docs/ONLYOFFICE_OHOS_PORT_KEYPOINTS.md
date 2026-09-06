@@ -346,3 +346,65 @@ release 升级会冻结）；构建切官方 --desktop 语义；B 架构补 nati
 实现：40_save.js §3.10 MutationObserver（panels.js $(document).ready 渲染后隐藏、
 防 re-render 弹回；`.closest('.menu-item')` 精确到项，不动其余入口——官方无配置
 开关，模板静态渲染，故适配层处理）。欢迎页当前 nav：主页 / 打开本地文件。
+
+## 17. 插件链最终定论（2026-09-06 AI 插件接入，真机✓）
+
+**一句话**：web-apps（Plugins.js）⇄ sdkjs（plugins.js runtime）⇄ 插件 iframe（v1 框架）
+三方协议的官方语义链；我们只验明「官方装配时点 + 补一个 background-only 部署的
+官方未覆盖分支」，其余零改动。
+
+### 17.1 官方装配链（loadPlugins 时点、路径、结果流向）
+app:ready → Plugins.js setApi(Main.js:1463) → loadPlugins() → loadConfig('../../../../plugins.json')（**
+editor main/index.html 四层上跳 = rawfile/onlyoffice/plugins.json；相对 URL 经 baseURI 解析**）
+→ getPlugins() → mergePlugins() → parsePlugins() → pluginStore.reset（Backbone reset 同步
+触发 onResetPlugins）→ refreshPluginsList() → `if (storePlugins.hasVisible()) trigger('tab:visible','plugins')`
+→ Mixtbar.setVisible('plugins')（**addTab 模板 li display:none，靠 tab:visible 点亮**）。
+
+### 17.2 根因：background-only 部署 srvPlugins=false（2026-09-06 真机）
+- 症状：fetch 全 200，serverPlugins.plugins=false，插件 tab liDisplay=none。
+- 真相：**官方 Plugins.js:418-505 onResetPlugins**：
+  - `isBackgroundPlugin`（variation type=background）在 **:445-447 push 后 `return`**，不走
+    rank===0/2 的常规分支；
+  - 常规分支才 `createBackgroundPluginsButton`（:285，调点 :470）；
+  - **:485 `if (me.backgroundPlugins.length > 0) me.viewPlugins.backgroundBtn.show()`**——
+    仅 AI 一个后台插件（无常规插件兜底建钮）时 `backgroundBtn === undefined` → TypeError
+    `reading 'show'` → mergePlugins 抛 → getPlugins 的 .catch 把 serverPlugins.plugins=false
+    （**官方 server 环境 store 常驻常规插件→建钮兜底，AI-only 部署是官方未测路径**）。
+- 修复（30_open.js §3.6）：wrap `parsePlugins`（**运行时方法，wrap 有效——onResetPlugins
+  在 initialize 时 bind 快照，事后替换原型/实例都截不到**）——catch 里「建钮 + 重放
+  onResetPlugins + 尾部补玩（refreshPluginsList/runAutoStartPlugins）」；重放后按 slot 结构
+  re-render 按钮（**onResetPlugins 首行 empty() 会清掉预挂 DOM——上版踩坑 PLUG_BG_BTN_NOT_FOUND**）。
+  只重建后不抛（重放/尾部失败才 throw），令装配链走完（refreshPluginsList 是 tab:visible 门）。
+
+### 17.3 run 与窗口链（sdkjs）
+- toggle 点击 → `asc_pluginRun` → pluginsManager.run()（**首门 isSupportPlugins——
+  已被 00_boot m7 门控前删 + ascBridge 提真**）→ show()：
+  - background（get_Visual=false）→ **隐藏 iframe** `iframe_<guid>`（offscreen）+`asc_onPluginShow`（无 frameId）
+  - visual（resize!=true）→ `asc_onPluginShow` → web-apps Plugins.js onApiPluginWindowShow →
+    **PluginDlg modal**（`#id-plugin-container` 内嵌 iframe src=variation.url?lang&theme-type）
+- **插件 iframe 的框架面**：v1/plugins.js（只有 postMessage 基础+Buttons）**本身无
+  PluginWindow/executeMethod**——真机实测 `Asc.PluginWindow=function`、`executeMethod=function`、
+  `Asc.Buttons.ButtonsToolbar=7`——**由 sdk-all 的 plugin_base 编译件注入 iframe**（
+  plugin_base.js:507 `window.Asc.PluginWindow = CPluginWindow`）——**无需换框架**。
+- AI 插件自身库：`Asc.Editor/Asc.Library/Asc.Prompts` 由插件
+  `(function(exports){...})(window)` 自带（engine/library.js）。
+
+### 17.4 AI 插件 3.2.2 功能面（真机✓）
+- 装配→run→AddToolbarMenuItem→**顶部「AI」tab**（data-tab=**随机 UUID**：v1 Button 基类
+  `this.id=d===v?y():d` 缺省生成——探针/测试不得按 `a[data-tab=AI]` 或写死 UUID 找，按
+  caption 动态取 key）
+- 面板 7 按钮：Settings/Chatbot(ask-ai 图标)/Summarization/Translation(split)/Grammar…
+- Chatbot 点击 → `chatWindowShow` → `AI.Request.create(Chat)`：
+  - **无模型 → 官方降级 `onOpenSettingsModal()`（engine.js:466-470）弹设置窗**（"怎么点
+    chat 开的是 settings" 的真相；不是 bug，是配置引导）
+  - 有模型 → PluginWindow.show → PluginDlg → **iframe src=plugins/ai/chat.html ✅**
+- 预配置双键（用户 settings/验收注入）：
+  `onlyoffice_ai_plugin_storage_key`（{version:4, providers, models, customProviders}）+
+  `onlyoffice_ai_actions_key`（{Chat:{model:'llama3.2:latest'}}——Chat 动作默认 model="" 必映射）
+- 对话请求目标 Ollama localhost:11434（默认）——设备服务由用户部署；无服务时引擎报错可见（非链问题）。
+
+### 17.5 部署与入口
+- 构建链 `install_ai_plugin()`（build_editors_ohos.py:455）：plugins.json（pluginsData 绝对
+  URL）+ plugins/ai（官方 ai.plugin 3.2.2 发布包 702 文件）+ plugins/v1（官方 GitHub Pages
+  web 版框架）——**不可用 desktop-apps/common/plugins/v1（旧坑：桌面壳无 iframe 窗口协议）**。
+- `isSupportPlugins` 提真在 ascBridge（#73，web 语义——AscDesktopEditor.isSupportPlugins 已删短路）。
