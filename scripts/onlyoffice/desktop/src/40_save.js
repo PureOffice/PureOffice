@@ -236,6 +236,20 @@
     } catch (hx) { console.error('LSO_HDR_HIDE_ERR ' + String(hx)); }
   })();
 
+  // ---- 3.10.1 欢迎横幅取消（2026-09-06 用户决策）：官方「欢迎使用 ONLYOFFICE
+  //      桌面编辑软件！+ 云连接描述 + 帮助中心」横幅（panelrecent.js:69
+  //      welcomeBannerTemplate；官方语义仅首次显示——ViewRecent.render() 后置
+  //      localStorage 'welcome'，首次安装/重装后必显示一次）。本产品为纯本地
+  //      编辑器（云描述与产品不符），用户决定不再显示——按官方自身键语义提前
+  //      置位（面板构造读 getItem→'0'→模板不渲染，非 CSS 隐藏；与 3.10 同为
+  //      欢迎页适配层，官方产物不动）。
+  try {
+    var _wp0 = (window.location || {}).pathname || '';
+    if (_wp0.indexOf('/onlyoffice/index.html') >= 0) {
+      localStorage.setItem('welcome', '0');
+    }
+  } catch (ew) {}
+
   // ---- 3.10 欢迎页导航精简（2026-09-05 用户：去掉左侧"云服务"与左下角"设置"）----
   // loginpage（/onlyoffice/index.html）左侧导航由 panels.js 静态模板渲染：
   //   "云服务" = #idx-sidebar-portals（panelconnect.js 灌入 providers/添加云；其后
