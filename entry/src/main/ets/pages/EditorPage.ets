@@ -629,7 +629,6 @@ struct EditorPage {
     this.hostFilesDir = ctx.filesDir;
     this.webLogPath = ctx.filesDir + '/web_console.txt';
     // 自动验收开关（ability 启动参数 → Smoke；见 smoke.ets / EntryAbility）：无参数 = 产品态
-    this.arkLog('SMOKE_PARAMS ' + JSON.stringify(getLaunchOptions().parameters));
     Smoke.fromParams(getLaunchOptions());
     this.m7Target = Smoke.target;
     // 页面版本号（构建期生成 version.json）：资源变更 → URL ?v= 变化 → 系统缓存失效
