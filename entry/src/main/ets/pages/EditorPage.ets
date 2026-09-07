@@ -130,7 +130,7 @@ struct EditorPage {
       + '&fileType=' + type + '&isDesktop=false&docType=' + type + '&lang=zh-CN&title=' + encodeURIComponent(title)
       // sid=每次打开唯一化（2026-09-05 修复「关闭文档后再新建显示旧内容」：相同 URL 的
       // 二次导航 ArkWeb 复用引擎实例——页面事件照常（LSO_OPEN_DOCUMENT_OK 收到新模板
-      // 字节 len=1086）但旧文档模型残留（真机实锤：新建 Unnamed 显示 demo-cn 7 页
+      // 字节 len=1086）但旧文档模型残留（真机实锤：新建「未命名的文档」显示 demo-cn 7 页
       // 内容）；sid 强制全新导航。禁止回退为固定 URL（v= 仅防 HTTP 缓存，不防复用）。
       + '&sid=' + Date.now();
     // M7 验收态：自动打开后追加 m7auto=1（ascshim：模型就绪→序列化→save:bin→x2t 落盘）
@@ -212,6 +212,49 @@ struct EditorPage {
     return 'true';
   }
 
+  /** 官方语言包词条缓存（懒加载，一次；三 app 键值） */
+  private defaultNames: Record<string, string> | null = null;
+
+  /**
+   * 新建文档默认名 —— 从官方语言包读取（rawfile webapps/apps/<app>/main/locale/
+   * zh.json，键 [DE|SSE|PE].Controllers.LeftMenu.newDocumentTitle = 官方桌面「新建」
+   * 默认名：未命名的文档/未命名的电子表格/未命名的演示）。语言文件与 UI lang 对齐
+   * （editorUrl lang=zh-CN → locale/zh.json；未来多语言换 lang 即换文件）。
+   * 兜底仅在语言包读失败/键缺失时给直写中文（正常路径零硬编码文本）。
+   */
+  private defaultDocName(ext: string): string {
+    try {
+      if (this.defaultNames === null) {
+        this.defaultNames = {};
+        const lang = 'zh'; // 与 editorUrl lang=zh-CN 对齐
+        const apps: [string, string, string][] = [
+          ['docx', 'documenteditor', 'DE'],
+          ['xlsx', 'spreadsheeteditor', 'SSE'],
+          ['pptx', 'presentationeditor', 'PE']
+        ];
+        for (let i = 0; i < apps.length; i++) {
+          const e: string = apps[i][0];
+          const app: string = apps[i][1];
+          const pfx: string = apps[i][2];
+          const raw = this.resourceManager!.getRawFileContentSync(
+            'onlyoffice/webapps/apps/' + app + '/main/locale/' + lang + '.json') as Uint8Array;
+          const dict = JSON.parse(u8ToStr(raw)) as Record<string, string>;
+          this.defaultNames[e] = dict[pfx + '.Controllers.LeftMenu.newDocumentTitle'] ?? '';
+        }
+      }
+    } catch (e) {
+      this.arkLog('DEFAULT_NAME_LOCALE_ERR ' + String(e));
+    }
+    const fromLoc = this.defaultNames && this.defaultNames[ext];
+    if (fromLoc !== null && fromLoc !== undefined && fromLoc.length > 0) {
+      return fromLoc + '.' + ext;
+    }
+    // 兜底（语言包读取失败/键缺失时保底；正常路径走上面官方词条）
+    const base = ext === 'xlsx' ? '未命名的电子表格'
+      : ext === 'pptx' ? '未命名的演示' : '未命名的文档';
+    return base + '.' + ext;
+  }
+
   /** create:new（word）：空文档模板 → 与打开同管线注入（官方 C++ 对新建同样发 DocumentEndLoad） */
   private openNewFile(ext: string): string {
     try {
@@ -222,9 +265,9 @@ struct EditorPage {
       this.arkLog('CREATE_NEW empty.' + ext + ' len=' + ab.byteLength);
       // 新建（未保存）不进「最近使用」——官方桌面语义：recents=打开过的文件；
       // 未保存的新建无独立文件身份，点开即编辑 — 2026-09-05 修复（原 convertAndOpen
-      // 无条件 appendRecent，创建一轮就把 Unnamed.* 堆进 recents，用户实测质疑）
+      // 无条件 appendRecent，创建一轮就把未命名文档堆进 recents，用户实测质疑）
       // 2026-09-05 根因修正：newDoc=true（零状态空文档，无模板文件/无写入源）
-      return this.convertAndOpen(ab, ext, 'Unnamed.' + ext, false, true);
+      return this.convertAndOpen(ab, ext, this.defaultDocName(ext), false, true);
     } catch (e) {
       this.arkLog('CREATE_NEW_ERR ' + String(e));
       return 'false';

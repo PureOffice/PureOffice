@@ -130,8 +130,9 @@
             // 否则 onEndLoadFile 的 editorId 校验会拒绝（"打开文件错误"）。
             var _ftq = (window.location.search || '').match(/[?&]fileType=([^&]+)/);
             var _ft = _ftq ? decodeURIComponent(_ftq[1]) : 'docx';
-            // 标题取自 URL（EditorPage.editorUrl 带 title=Unnamed.xxx）；缺省 'sample'
-            // 兜底（POC 遗留默认值，未传 title 时保持旧行为）
+            // 标题取自 URL（EditorPage.editorUrl 带 title=<语言包词条>.ext，新建时
+            //   = 官方「未命名的文档/电子表格/演示」+扩展名）；缺省 'sample' 兜底
+            //   （POC 遗留默认值，未传 title 时保持旧行为）
             var _tq = (window.location.search || '').match(/[?&]title=([^&]+)/);
             var _title = _tq ? decodeURIComponent(_tq[1]) : 'sample';
             var _dt = _ft === 'xlsx' ? 'cell' : _ft === 'pptx' ? 'slide' : 'word';
@@ -323,7 +324,16 @@
                       var _perm = new window.AscCommon.asc_CAscEditorPermissions();
                       _perm.setLicenseType(window.Asc.c_oLicenseResult.Success);
                       _perm.setRights(window.Asc.c_oRights.Edit);
-                      _perm.setIsLight(false);
+                      // isLight=true = 官方「light 无协同单机」语义（2026-09-08 定案）——
+                      // 原 setIsLight(false) 是 M3 许可降级链产物，导致 asc_getIsLight()
+                      // =false → Main.js:1707 canCoAuthoring=!isLight=true → 页面按「在线
+                      // 协同」走 loadCoAuthSettings：fastCoauth=true「快速」预选+协作段
+                      // 显示、尾段 autosave 公式短路到 canCoAuthoring→1 → 设置面板「自动
+                      // 保存」误勾选（customization.autosave=false / 00_boot 预写'0' 均
+                      // 被公式架空）。true 后：canCoAuthoring=false → loadCoAuthSettings
+                      // 单机分支（fastCoauth=false, autosave=0）；Main.js:1787 light 分支
+                      // 禁 History/Review/Chat——本地单机本无这些（无服务器），正合。
+                      _perm.setIsLight(true);
                       _perm.setBuildVersion(_pageVer);
                       // （2026-09-05 稳定化：原 PERM_ENTER 探针 wrap 移除——诊断打点，
                       //  定位工作已完成；权限分发异常现在由页面 console 直接可见）
