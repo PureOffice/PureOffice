@@ -149,22 +149,36 @@ function pathToRawFile(rawUrl: string): string {
 }
 
 /**
- * 拦截请求。三类 URL：
+ * 拦截请求。本地化三类 URL：
  *   http://localhost/onlyoffice/xxx → rawfile（前端资源，本地化）
  *   http://localhost/onlyoffice/systemfonts/<name> → /system/fonts/<name>（系统字体桥 v2，native 读）
  *   http://localhost/userfile/<name> → 沙箱 filesDir/<name>（用户文档，迭代 1 真文件打开链）
+ * **非本地 URL 返回 null = 放行**（onInterceptRequest 语义：null 不拦截，继续默认网络栈）：
+ *   AI 插件远程 API（https://api.openai.com/... 等自定义 provider）= 页面 fetch 直连
+ *   （2026-09-07 方案 A，用户决策；ArkTS/native 不做代调——官方两条代调通道
+ *   AscSimpleRequest / ai_onExternalFetch 在本部署均不存在，详见 engine.js 注释）。
  * filesDir 为 context.filesDir；目标不存在时返回 404 文本，不抛。
  * log：可选的 ArkTS 日志注入（EditorPage.arkLog → web_console.txt；缺省 console.error）。
+ * 返回 null 时 _log 留痕供诊断。
  */
 export function loadRaw(
   request: WebResourceRequest,
   resMgr: resourceManager.ResourceManager,
   filesDir: string,
   log?: (m: string) => void
-): WebResourceResponse {
+): WebResourceResponse | null {
   const _log: (m: string) => void = log ?? ((m: string) => console.error(m));
   const url = request.getRequestUrl();
+  // 放行判据：host ≠ localhost/127.0.0.1 且协议非 onlyoffice:（localhost 前缀含
+  // 端口与路径；无端口裸 localhost 也放行——如 AI provider 指 http://localhost:11434，
+  // 该请求同样走默认网络栈，与编辑器本地资源互不纠缠）。
   const p = urlPathOnly(url);
+  if (!/^https?:\/\/localhost(\/|$|\?|#)/.test(url) &&
+      !/^https?:\/\/127\.0\.0\.1(\/|$|\?|#)/.test(url) &&
+      !url.startsWith('onlyoffice://')) {
+    _log('outer pass-through: ' + url + ' method=' + request.getRequestMethod());
+    return null;
+  }
   if (p.startsWith(SYSTEM_FONT_PREFIX)) {
     const ab = loadSystemFont(p.substring(SYSTEM_FONT_PREFIX.length), _log);
     if (ab === null) {

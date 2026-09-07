@@ -135,7 +135,10 @@ struct EditorPage {
       + '&sid=' + Date.now();
     // M7 验收态：自动打开后追加 m7auto=1（ascshim：模型就绪→序列化→save:bin→x2t 落盘）
     if (this.m7Target.length > 0) {
-      url = url + '&m7auto=1';
+      url = url + '&m7auto=1'
+        // AI 联网验证 key 走页面 URL 传递（2026-09-08：启动参数链路在 1.4 上不可达
+        // ——见 smoke.ets m7args 头注；URL 是 Web 侧已知可靠通道）
+        + (Smoke.key.length > 0 ? '&m7key=' + encodeURIComponent(Smoke.key) : '');
     }
     return url;
   }
@@ -609,6 +612,14 @@ struct EditorPage {
       } else {
         setTimeout(() => this.pageJS(snap), 10000);
       }
+      // AI 联网验证（2026-09-07 方案 A 放行）：与 AI 插件同形态的 fetch 直连
+      // DeepSeek /v1（key 经启动参数 m7key 注入，不进 git/不落盘；见 ai_fetch_test.js）。
+      const aiTest = Smoke.readScript(this.resourceManager, 'ai_fetch_test.js');
+      if (aiTest === null) {
+        this.arkLog('SMOKE_AITEST_MISSING');
+      } else {
+        setTimeout(() => this.pageJS(aiTest.replace('__AI_KEY__', Smoke.key)), 15000);
+      }
     }
   }
 
@@ -618,6 +629,7 @@ struct EditorPage {
     this.hostFilesDir = ctx.filesDir;
     this.webLogPath = ctx.filesDir + '/web_console.txt';
     // 自动验收开关（ability 启动参数 → Smoke；见 smoke.ets / EntryAbility）：无参数 = 产品态
+    this.arkLog('SMOKE_PARAMS ' + JSON.stringify(getLaunchOptions().parameters));
     Smoke.fromParams(getLaunchOptions());
     this.m7Target = Smoke.target;
     // 页面版本号（构建期生成 version.json）：资源变更 → URL ?v= 变化 → 系统缓存失效
@@ -674,7 +686,11 @@ struct EditorPage {
         .javaScriptAccess(true)
         .domStorageAccess(true)
         .fileAccess(true)
-        .onInterceptRequest((event) => loadRaw(event.request, this.resourceManager!, this.hostFilesDir, ((m: string) => this.arkLog(m))))
+        // loadRaw 对非 localhost/onlyoffice URL 返回 null（= 放行，ArkWeb 默认网络栈
+        // 直连——AI 插件远程 API 正路，2026-09-07 方案 A）。null 是 onInterceptRequest
+        // 官方语义，但 SDK 回调类型为 WebResourceResponse，故 as 适配。
+        .onInterceptRequest((event) =>
+          loadRaw(event.request, this.resourceManager!, this.hostFilesDir, ((m: string) => this.arkLog(m))) as WebResourceResponse)
         .onControllerAttached(() => {
           // 桌面链桥——window.AscNative（ascshim.js 里 await 它出现再装 window.AscDesktopEditor）。
           // registerJavaScriptProxy 的对象要到页面 (re)load 才出现在 window，故在

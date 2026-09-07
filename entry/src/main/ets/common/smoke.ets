@@ -20,17 +20,36 @@ import { u8ToStr } from './bytes';
 export class Smoke {
   /** 验收样本名；空 = 产品态（无任何 smoke 行为） */
   static target: string = '';
+  /** AI 联网验证密钥（m7key 启动参数；仅注入态使用，不落盘不进 git） */
+  static key: string = '';
 
   protected static readonly DEFAULT_SAMPLE = 'sample.docx';
   /** 白名单后缀（m7file 只允许三类样本；dev-only 参数，防路径越界） */
   protected static readonly EXT_WHITELIST = ['docx', 'xlsx', 'pptx'];
 
-  /** 从 ability 启动参数解析（EntryAbility.getLaunchOptions）；无参数/非法值 = 产品态 */
+  /** 从 ability 启动参数解析（EntryAbility.getLaunchOptions）；无参数/非法值 = 产品态
+   * 参数载体：aa start 的 --ps 只能可靠携带**一个**参数对（实测多 --ps 只有第一个
+   * 生效——2026-09-07，1.4 版 aa start 用法串），多参数用单值 `m7args` 传：
+   *   --ps m7args "m7accept=1;m7file=sample.docx;m7key=sk-xxx"
+   * （= 分隔键值；值禁空格；m7key 不进 git 不落盘）。旧单参 --ps m7accept 1 仍兼容。 */
   static fromParams(params: Record<string, string>): void {
     Smoke.target = '';
+    Smoke.key = '';
+    if (params['m7args'] !== undefined) {
+      // 复合载体（; 与 = 拆解；值无空格——aa start 参数值空格会断键）
+      const merged: Record<string, string> = {};
+      for (const seg of String(params['m7args']).split(';')) {
+        const eq = seg.indexOf('=');
+        if (eq > 0) {
+          merged[seg.substring(0, eq)] = seg.substring(eq + 1);
+        }
+      }
+      params = merged;
+    }
     if (params['m7accept'] !== '1') {
       return;
     }
+    Smoke.key = String(params['m7key'] ?? '');
     const f = String(params['m7file'] ?? Smoke.DEFAULT_SAMPLE);
     // 仅接受 "名.白名单后缀" 文件名（rawfile 路径 <onlyoffice>/<f> 与沙箱 <filesDir>/<f> 拼接处）
     const dot = f.lastIndexOf('.');

@@ -576,12 +576,21 @@ def install_smoke():
     """拷贝 scripts/onlyoffice/smoke/ → rawfile/onlyoffice/smoke/（整目录替换）：
     *.js 页面诊断脚本（EditorPage smoke 注入）+ samples/ 验收样本（sample.*、
     m7-open-test.docx、demo-cn.*——2026-09-06 用户：smoke 文件单独目录；源就是
-    scripts/onlyoffice/smoke/，勿在 rawfile 内手工放置 smoke 文件——会被 rmtree 覆盖）。"""
+    scripts/onlyoffice/smoke/，勿在 rawfile 内手工放置 smoke 文件——会被 rmtree 覆盖）。
+    仅拷 *.js 与 samples/（2026-09-07：*.py 验证桩/日志是本机工具件，不进包）。"""
     if not os.path.isdir(SMOKE_SRC):
         raise SystemExit('scripts/onlyoffice/smoke 不存在（smoke 诊断脚本源）')
     if os.path.isdir(SMOKE_DST):
         shutil.rmtree(SMOKE_DST)
-    copy_tree(SMOKE_SRC, SMOKE_DST)
+    for entry in os.listdir(SMOKE_SRC):
+        src = os.path.join(SMOKE_SRC, entry)
+        dst = os.path.join(SMOKE_DST, entry)
+        if entry == 'samples':
+            copy_tree(src, dst)
+        elif entry.endswith('.js'):
+            os.makedirs(SMOKE_DST, exist_ok=True)
+            shutil.copy2(src, dst)
+        # 其它类型（*.py/*.log 等本机工具件）不进包
     n = sum(len(fs) for _, _, fs in os.walk(SMOKE_DST))
     print('  smoke 脚本 → %s (%d files)' % (SMOKE_DST, n))
 

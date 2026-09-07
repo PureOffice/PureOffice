@@ -24,7 +24,7 @@
 | 字体（本地 12 个 Liberation 家族） | 部分 | `__fonts_files/__fonts_infos` 注册表 + web 字形引擎；文档字体名差异 → 默认字体替换（可见字形） |
 | 中文/俄文等语言 | ✅ | 引擎语言包 + lang=zh-CN 参数；UI 中文完整 |
 | 插件系统（web 语义） | ✅ | `isSupportPlugins` 提真（#73）；官方装配链 plugins.json server 链 → 后台插件 run → AddToolbarMenuItem/AddContextMenuItem 全通（2026-09-06 真机） |
-| AI 插件（官方 3.2.2 AGPL） | ✅ | 构建链安装（build_editors_ohos install_ai_plugin：plugins.json + plugins/ai + plugins/v1）；顶部「AI」tab/7 按钮/Settings/Chatbot 窗口全部真机验证；**对话需模型配置**（Ollama localhost 或 OpenAI 等，配置入口=无模型时 Chatbot 点击自动弹设置窗口，官方降级语义） |
+| AI 插件（官方 3.2.2 AGPL） | ✅ | 构建链安装（build_editors_ohos install_ai_plugin：plugins.json + plugins/ai + plugins/v1）；顶部「AI」tab/7 按钮/Settings/Chatbot 窗口全部真机验证；**对话需模型配置**（Ollama localhost 或 OpenAI 等，配置入口=无模型时 Chatbot 点击自动弹设置窗口，官方降级语义）；**联网=页面 fetch 直连（方案 A：loadRaw 对非 localhost URL 返回 null 放行走 ArkWeb 默认网络栈，2026-09-08 真机 1.4 DeepSeek models+多轮 chat 全通 ✅）** |
 
 ## 2. 降级（官方已实现、本机按契约降级）
 
