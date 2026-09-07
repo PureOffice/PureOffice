@@ -1,9 +1,41 @@
 import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
+import { readSystemFontSync } from './x2t';
 
 const BASE_DIR = 'onlyoffice/';
 // 用户文件沙箱入口：http://localhost/userfile/<name> → filesDir/<name>
 const USERFILE_PREFIX = 'userfile/';
+// 系统字体桥 v2（2026-09-07）：http://localhost/onlyoffice/systemfonts/<name>
+// → NAPI native 读 /system/fonts/<name>（ArkTS fileIo 对系统根路径一律 ENOENT，
+// native 层与 wine 同权可读；见 x2t.ets readSystemFontSync 头注）。
+// 返回前 XOR 前 32B（guidOdttf 循环，同构建机 pre_xor_font 加密态）→ 页面
+// 09_fonts.js xorDecode 统一还原装填（装填链零分支）。
+const SYSTEM_FONT_PREFIX = 'onlyoffice/systemfonts/';
+const FONT_GUID: number[] = [0xA0, 0x66, 0xD6, 0x20, 0x14, 0x96, 0x47, 0xFA,
+  0x95, 0x69, 0xB8, 0x50, 0xB0, 0x41, 0x49, 0x48];
+
+/**
+ * 系统字体：native 读 /system/fonts/<name> → ArrayBuffer（加密态）。
+ * 文件名仅纯名（native 侧同样防穿越检验）。
+ */
+function loadSystemFont(rel: string, log: (m: string) => void): ArrayBuffer | null {
+  if (rel.indexOf('/') >= 0 || rel.indexOf('\\') >= 0 || rel.indexOf('..') >= 0) {
+    log('systemfont bad path: ' + rel);
+    return null;
+  }
+  const ab = readSystemFontSync(rel);
+  if (ab === undefined || ab.byteLength === 0) {
+    log('systemfont miss: /system/fonts/' + rel + ' (native)');
+    return null;
+  }
+  // 与构建机 pre_xor_font 相同的加密态：前 32B XOR FONT_GUID（16 字节循环）
+  const u8 = new Uint8Array(ab);
+  const n = Math.min(32, u8.length);
+  for (let i = 0; i < n; i++) {
+    u8[i] ^= FONT_GUID[i % 16];
+  }
+  return ab;
+}
 
 function mimeTypeFor(path: string): string {
   if (path.endsWith('.html')) return 'text/html';
@@ -117,10 +149,11 @@ function pathToRawFile(rawUrl: string): string {
 }
 
 /**
- * 拦截请求。两类 URL：
+ * 拦截请求。三类 URL：
  *   http://localhost/onlyoffice/xxx → rawfile（前端资源，本地化）
+ *   http://localhost/onlyoffice/systemfonts/<name> → /system/fonts/<name>（系统字体桥 v2，native 读）
  *   http://localhost/userfile/<name> → 沙箱 filesDir/<name>（用户文档，迭代 1 真文件打开链）
- * filesDir 为 context.filesDir；沙箱文件不存在时返回 404 文本，不抛。
+ * filesDir 为 context.filesDir；目标不存在时返回 404 文本，不抛。
  * log：可选的 ArkTS 日志注入（EditorPage.arkLog → web_console.txt；缺省 console.error）。
  */
 export function loadRaw(
@@ -132,6 +165,18 @@ export function loadRaw(
   const _log: (m: string) => void = log ?? ((m: string) => console.error(m));
   const url = request.getRequestUrl();
   const p = urlPathOnly(url);
+  if (p.startsWith(SYSTEM_FONT_PREFIX)) {
+    const ab = loadSystemFont(p.substring(SYSTEM_FONT_PREFIX.length), _log);
+    if (ab === null) {
+      return notFoundResp(url);
+    }
+    _log('systemfont hit: ' + p + ' bytes=' + ab.byteLength);
+    const resp = new WebResourceResponse();
+    resp.setResponseMimeType('font/ttf');
+    resp.setResponseEncoding('utf-8');
+    resp.setResponseData(ab);
+    return readyResp(resp);
+  }
   if (p.startsWith(USERFILE_PREFIX)) {
     const ab = loadUserFile(filesDir, p.substring(USERFILE_PREFIX.length), _log);
     if (ab === null) {

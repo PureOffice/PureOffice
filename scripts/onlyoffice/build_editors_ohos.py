@@ -112,6 +112,32 @@ FONT_SRC_BY_FILE['NotoSerifCJK-SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoff
 FONT_SRC_BY_FILE['FandolFang.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
 FONT_SRC_BY_FILE['FandolKai.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
 
+# —— 系统字体（2026-09-07 v2 终版：多机交集方针，设备直读 /system/fonts）——
+# 用户方针：**1.4 与 1.8 都可用**（各自/交集）——实测两机清单：1.4=260 款（含
+# 方正 FZ 全系/HarmonyOS 全系——仅 1.4 有），1.8=203 款（Noto 语系+HarmonyOS
+# 部分）；交集=1.8 全集合（203 款）→ 系统注册表**只放交集文件**（任何一机装上
+# 同一 HAP 都能渲染——列表不鬼影）。交集里中文 glyf 静态款仅 HYQiHeiL3（汉仪
+# 旗黑）+ 语系静态 Regular 系（Noto*UI-Regular 等）；HarmonyOS Sans SC 原版是
+# 可变字体（gvar——引擎崩，2026-09-05 VF 坑；包内已用静态化版）、Noto CJK 是
+# CFF TTC（FT_Open_Face 失败）——交集机制下均不可用。仿宋/楷体（FZ 系仅 1.4
+# 有，非交集）由包内 Fandol 承担——跨机一致。
+# face 内部 family name 实测（构建机 fontTools 解析设备源文件，2026-09-07）：
+#   HYQiHeiL3.ttf→'HYQiHei L3'；NotoSansBengaliUI-Regular.ttf→'Noto Sans Bengali UI'；
+#   NotoSansDevanagariUI-Regular.ttf→'Noto Sans Devanagari UI'（全部 glyf 静态无 VF）。
+# 机制：页面 09_fonts.js XHR onlyoffice/systemfonts/<name> → rawfileLoader 拦截 →
+#   convertershell readSystemFontSync（native ifstream；ArkTS fileIo 系统根路径
+#   一律 ENOENT——2026-09-07 实测是「目标机清单差异」而非权限——wine 普通应用
+#   进程可读（wineohos freetype.c ReadFontDir 佐证）→ native 返回前 XOR
+#   FONT_GUID_ODTTF 前 32B（= pre_xor_font 加密态）→ 页面 xorDecode 还原装填。
+# 下标 = len(FONT_FILES) 起（16 起；Fandol 保留 14/15——仿宋/楷体不在交集，
+#   系统桥不提供与它们同名能力，Fandol 为跨机一致来源）。新增交集字体时追加
+#   SYSTEM_FONT_FILES + INFOS 行（face 名行）+ 本注释更新 face 名。
+SYSTEM_FONT_FILES = ['HYQiHeiL3.ttf',
+                     'NotoSansBengaliUI-Regular.ttf',
+                     'NotoSansDevanagariUI-Regular.ttf']
+# 注入 __fonts_files / 精灵行序列引用：rawfile + system（make_ascshim 同源导入）
+FONT_FILES_ALL = FONT_FILES + SYSTEM_FONT_FILES
+
 # 子集映射：final 名（FONT_FILES/rawfile fonts/ 里的名字）→ (全量源文件, 子集产物,
 # 注册面名——渲染槽 name 匹配用；CJK 族注册行名须一致。宋体=SimSun（引擎把
 # '宋体' 归一为 'SimSun'），黑体=None（内部名已=注册行名 'HarmonyOS Sans SC'）。
@@ -204,6 +230,14 @@ FONT_INFOS = [
     ["KaiTi", 15, 0, 15, 0, 15, 0, 15, 0],
     ["楷体_GB2312", 15, 0, 15, 0, 15, 0, 15, 0],
     ["kaiti.ttf", 15, 0, 15, 0, 15, 0, 15, 0],
+    # 系统字体行（2026-09-07 v2 终版：多机交集）。下标 = len(FONT_FILES) 起（16 起）。
+    # 约定：**face 名真身行**（= face 内部 name，见 SYSTEM_FONT_FILES 注释实测值）
+    # + 中文别名行（单一族、无重名——dict 后写覆盖坑已避）。『仿宋/楷体』中文名
+    # 已注册到 Fandol（14/15，跨机一致）——系统行严禁再注册同名。
+    ["HYQiHei L3", 16, 0, 16, 0, 16, 0, 16, 0],
+    ["汉仪旗黑", 16, 0, 16, 0, 16, 0, 16, 0],
+    ["Noto Sans Bengali UI", 17, 0, 17, 0, 17, 0, 17, 0],
+    ["Noto Sans Devanagari UI", 18, 0, 18, 0, 18, 0, 18, 0],
 ]
 
 # —— 字符范围回退表（引擎 libfont/character.js CFontByCharacter.init 消费的第三张
@@ -368,7 +402,13 @@ def make_fonts_sprites(count):
             fsize = int(20 * ratio)
             for i in range(count):
                 row = FONT_INFOS[i]
-                ff = FONT_FILES[row[1]]          # CFontInfo indexR → 字体文件
+                # CFontInfo indexR → 字体文件。**系统字体**（SYSTEM_FONT_FILES，
+                # indexR >= len(FONT_FILES)）构建机无源文件（设备 /system/fonts
+                # 运行时直读）→ 缩略图用包内黑体 subset 近似渲染（列表名仍正确，
+                # 字形样本近似——不影响引擎真实渲染，2026-09-07 系统字体桥）。
+                # 真正的渲染预览问题在 v1 实验暴露过（用户指正），系统字体的
+                # 缩略图真字形待字体源进构建机后升级（P3）。
+                ff = FONT_FILES[row[1]] if row[1] < len(FONT_FILES) else 'HarmonyOS_Sans_SC.ttf'
                 fname = ff
                 # 子集字体（FONT_SUBSETS）优先用子集产物渲染——与引擎实际拿到的
                 # 字形完全一致（宋体全量不入库，subset 一定存在）

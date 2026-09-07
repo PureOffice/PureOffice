@@ -12,6 +12,7 @@ import * as convertershell_so from 'libconvertershell.so';
 
 interface X2TCore {
   convertSync(xml: string): number;
+  readSystemFontSync(name: string): ArrayBuffer | undefined;
 }
 
 const core: X2TCore = convertershell_so as X2TCore;
@@ -19,4 +20,13 @@ const core: X2TCore = convertershell_so as X2TCore;
 /** 同步文档转换（NAPI 同步调用；0=成功，错误码见头注释） */
 export function x2tConvertSync(xml: string): number {
   return core.convertSync(xml);
+}
+
+/**
+ * 读取系统字体 /system/fonts/<name>（NAPI 同步；native 层 ifstream——ArkTS
+ * fileIo 对系统根路径一律 ENOENT（域白名单），native 同 wine 可读）。
+ * 失败返回 undefined（native 侧 OH_LOG 留痕）。2026-09-07 系统字体桥 v2。
+ */
+export function readSystemFontSync(name: string): ArrayBuffer | undefined {
+  return core.readSystemFontSync(name);
 }

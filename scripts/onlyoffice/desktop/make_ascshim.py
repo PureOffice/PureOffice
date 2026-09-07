@@ -33,7 +33,11 @@ sys.path.insert(0, os.path.join(HERE, '..'))
 # 字体表唯一来源在 build_editors_ohos.py（FONT_INFOS/FONT_FILES/FONT_RANGES；
 # R,I,B,BI 顺序契约同注那里——两处独立定义会漂移导致字体注册表错位，
 # 2026-09-05 审查收敛；FONT_RANGES = 引擎 CFontByCharacter 注册表第三张注入表）
-from build_editors_ohos import FONT_INFOS, FONT_FILES, FONT_RANGES  # noqa: E402
+from build_editors_ohos import FONT_INFOS, FONT_FILES, FONT_FILES_ALL, FONT_RANGES  # noqa: E402
+# __fonts_files（20_bridge.js @@FONT_FILES_JSON@@）= rawfile + 系统字体
+# （FONT_FILES_ALL）：引擎 checkAllFonts 建 g_font_files 需含系统字体条目
+# （Id=文件名，页面 09_fonts.js 装填按 Id 匹配）；下标与 FONT_INFOS indexR
+# 对齐（>= len(FONT_FILES) 者为系统字体，2026-09-07）。
 METHODS = [l.strip() for l in open(os.path.join(HERE, 'asc_methods.txt')) if l.strip()]
 SHIM = open(os.path.join(HERE, 'ascdesktop_shim_raw.js'), encoding='utf-8').read()
 
@@ -79,7 +83,7 @@ def build() -> str:
     js += ''.join(open(os.path.join(SRC_DIR, p), encoding='utf-8').read() for p in PARTS)
     return (js.replace('@@METHOD_JS@@', METHOD_JS)
                .replace('@@SHIM@@', SHIM_INDENTED)
-               .replace('@@FONT_FILES_JSON@@', json.dumps(FONT_FILES))
+               .replace('@@FONT_FILES_JSON@@', json.dumps(FONT_FILES_ALL))
                .replace('@@FONT_INFOS_JSON@@', json.dumps(FONT_INFOS))
                .replace('@@FONT_RANGES_JSON@@', json.dumps(FONT_RANGES)))
 

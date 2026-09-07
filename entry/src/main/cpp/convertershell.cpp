@@ -17,7 +17,11 @@
 #include "hilog/log.h"
 
 #include <string>
+#include <fstream>
+#include <cstring>
 #include <wchar.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 // 与 libx2t.a 中符号一致（见 X2tConverter/src/ASCConverters.h:337）
 namespace NExtractTools
@@ -172,12 +176,95 @@ static napi_value VersionJn(napi_env env, napi_callback_info info)
     return res;
 }
 
+// —— 系统字体读取（2026-09-07 系统字体桥 v2）——
+// ArkTS fileIo 对 /system/fonts 只报 ENOENT（API 域白名单，非真实不存在）；
+// wine（wineohos dlls/win32u/freetype.c ReadFontDir）native 层读同路径成功
+// —— 故读数落 native（本 NAPI 与 wine 同属 app 进程 native 层）。
+// 返回：ArrayBuffer（字体字节流）| undefined（打开失败，OH_LOG 留痕）。
+// 文件名仅允许纯名（禁 / 与 ..）。
+static napi_value ReadSystemFontJn(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    napi_value undefined;
+    napi_get_undefined(env, &undefined);
+    if (argc < 1)
+        return undefined;
+
+    napi_valuetype type = napi_undefined;
+    napi_typeof(env, args[0], &type);
+    if (type != napi_string)
+        return undefined;
+
+    size_t nLen = 0;
+    napi_get_value_string_utf8(env, args[0], nullptr, 0, &nLen);
+    std::string name(nLen + 1, '\0');
+    size_t copied = 0;
+    napi_get_value_string_utf8(env, args[0], name.data(), nLen + 1, &copied);
+    name.resize(copied);
+    if (name.empty() || name.find('/') != std::string::npos ||
+        name.find("..") != std::string::npos)
+    {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0, CS_LOG_TAG, "readSystemFont bad name: %{public}s",
+                     name.c_str());
+        return undefined;
+    }
+
+    std::string path = "/system/fonts/" + name;
+    // wine（同设备普通应用进程）opendir("/system/fonts") 成功 = 沙箱并未禁
+    // 系统目录；本次取 errno 精确定性（ENOENT=不存在/域屏蔽；EACCES=权限）。
+    struct stat st0;
+    if (::stat("/system/fonts", &st0) != 0)
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0, CS_LOG_TAG,
+                     "readSystemFont stat /system/fonts fail errno=%{public}d %{public}s",
+                     errno, strerror(errno));
+    else
+        OH_LOG_Print(LOG_APP, LOG_INFO, 0, CS_LOG_TAG,
+                     "readSystemFont /system/fonts stat ok mode=0%{public}o",
+                     static_cast<unsigned>(st0.st_mode));
+    struct stat st;
+    if (::stat(path.c_str(), &st) != 0)
+    {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0, CS_LOG_TAG,
+                     "readSystemFont stat %{public}s fail errno=%{public}d %{public}s",
+                     path.c_str(), errno, strerror(errno));
+        return undefined;
+    }
+    if (::access(path.c_str(), R_OK) != 0)
+    {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0, CS_LOG_TAG,
+                     "readSystemFont access %{public}s fail errno=%{public}d %{public}s",
+                     path.c_str(), errno, strerror(errno));
+        return undefined;
+    }
+    std::ifstream f(path, std::ios::binary);
+    if (!f)
+    {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, 0, CS_LOG_TAG,
+                     "readSystemFont open fail: %{public}s", path.c_str());
+        return undefined;
+    }
+    std::string data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    OH_LOG_Print(LOG_APP, LOG_INFO, 0, CS_LOG_TAG,
+                 "readSystemFont ok: %{public}s (%{public}u bytes)", path.c_str(),
+                 static_cast<unsigned int>(data.size()));
+
+    void* buf = nullptr;
+    napi_value ab = nullptr;
+    napi_create_arraybuffer(env, data.size(), &buf, &ab);
+    std::memcpy(buf, data.data(), data.size());
+    return ab;
+}
+
 static napi_value Init(napi_env env, napi_value exports)
 {
     napi_property_descriptor desc[] = {
         {"convert", nullptr, ConvertAsyncJn, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"convertSync", nullptr, ConvertSyncJn, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"version", nullptr, VersionJn, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"readSystemFontSync", nullptr, ReadSystemFontJn, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

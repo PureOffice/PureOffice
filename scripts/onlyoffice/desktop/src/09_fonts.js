@@ -13,7 +13,17 @@
   var GUID = [0xA0, 0x66, 0xD6, 0x20, 0x14, 0x96, 0x47, 0xFA, 0x95, 0x69, 0xB8, 0x50, 0xB0, 0x41, 0x49, 0x48];
   // 装填清单 = 全部 CJK 字体（2026-09-05 宋体修复：单字体→清单；ID 与构建链
   // FONT_FILES final 名一致：黑体=HarmonyOS_Sans_SC.ttf，真宋体=NotoSerifCJK-SC.ttf）
-  var IDS = ['HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf'];
+  // + 系统字体（2026-09-07 v2：ID=设备 /system/fonts 文件名，isSys=true → 请求
+  //   systemfonts/ 前缀由 rawfileLoader→NAPI native 读（ArkTS fileIo 系统路径
+  //   ENOENT，native 与 wine 同权）；native 返回前已 XOR 加密态（同 pre_xor_font
+  //   前 32B），本处 xorDecode 统一还原——装填链零分支。
+  var IDS = ['HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf',
+             'HYQiHeiL3.ttf',
+             'NotoSansBengaliUI-Regular.ttf',
+             'NotoSansDevanagariUI-Regular.ttf'];
+  var IS_SYS = {'HYQiHeiL3.ttf': 1,
+                'NotoSansBengaliUI-Regular.ttf': 1,
+                'NotoSansDevanagariUI-Regular.ttf': 1};
   function xorDecode(u8) {
     var n = Math.min(32, u8.length);
     for (var i = 0; i < n; ++i) u8[i] ^= GUID[i % 16];
@@ -27,8 +37,8 @@
     // rawfile 字体在构建时被 pre_xor_font 加密（前 32B XOR guidOdttf）——装填时还原。
     (function prefetch() {
       var urls = [
-        'http://localhost/onlyoffice/fonts/' + ID,  // 绝对同源（页面 origin=http://localhost）
-        '../../../../fonts/' + ID                    // 相对兜底（编辑页→onlyoffice/fonts/）
+        (IS_SYS[ID] ? 'http://localhost/onlyoffice/systemfonts/' : 'http://localhost/onlyoffice/fonts/') + ID,
+        '../../../../fonts/' + ID                    // 相对兜底（仅 rawfile；系统字体 miss）
       ];
       (function tryNext(i) {
         if (i >= urls.length) { console.error('FONT_WARM_PF_GIVEUP ' + ID); return; }
