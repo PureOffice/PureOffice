@@ -74,7 +74,9 @@ METHOD_JS = '\n'.join(method_lines)
 SHIM_INDENTED = '\n'.join('    ' + ln for ln in SHIM.split('\n'))
 
 SRC_DIR = os.path.join(HERE, 'src')
-PARTS = ['09_fonts.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js', '55_lic.js']
+# 00_theme 必须在首位：RendererProcessVariable.theme 必须早于官方 desktopinit 内联段
+# （index.html 同步一次性消费——误放 AscNative 等待之后= 注入执行≠生效，2026-09-08 教训）
+PARTS = ['00_theme.js', '09_fonts.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js', '55_lic.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 

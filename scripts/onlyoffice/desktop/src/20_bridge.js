@@ -39,16 +39,9 @@
     var obj = {};
     for (var k in window.__ascDesktopEditorMethods) { obj[k] = window.__ascDesktopEditorMethods[k]; }
 
-    // CEF（desktopinit.js 假设 RendererProcessVariable 已由 C++ 注入）——默认本地主题：
-    // ArkWeb 场景无 C++ 注入面，给予默认定值（B 架构 native 主题注入就绪后可移除本节）
-    if (!window.RendererProcessVariable) {
-      window.RendererProcessVariable = {
-        theme: { id: 'default-light', type: 'light', system: 'light' },
-        localthemes: [],   // panelsettings.js 用 for..of 迭代 → 必须数组
-        rtl: false
-      };
-    }
-
+    // 主题注入不在本段（2026-09-08 教训：INSTALL 在 AscNative 就绪后才执行——官方
+    // desktopinit 内联段同步一次性消费 RPV，那时官方兜底 theme-system 已走完且无人
+    // 重放→注入执行≠生效）。已移到 ascshim 同步头部 00_theme.js——见该文件头注释。
     // ---- 2. window.AscDesktopEditor 就绪（引用已由 0.2 占位固化；此处维持原引用） ----
     window.AscDesktopEditor = obj;
     window.desktop = obj;
