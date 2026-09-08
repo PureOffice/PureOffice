@@ -319,6 +319,42 @@
     } catch (hx) { console.error('LSO_HDR_HIDE_ERR ' + String(hx)); }
   })();
 
+  // ---- 3.9.1 文件菜单「用模板创建」隐藏（2026-09-08 用户追问重复两条后查明）：桌面档
+  //      Desktop.js:579 _extend_menu_file 注入 miNewFromTemplate（#fm-btn-create-fromtpl）
+  //      ——点击走模板桥（LocalFileTemplates 离线恒空，无内容）；且该函数每次
+  //      Desktop.init（Main.js:536，DI 链接触发）都会 new 注入一次、官方无防重 →
+  //      **同 id 菜单项叠两条**（1.8 真机截图「用模板创建」×2 的直接根因）。
+  //      与欢迎页「模板」入口隐藏（3.10）同一用户决策：空入口不显示。DOM 层
+      //   隐藏（querySelectorAll 清所有重复项），MutationObserver 兜 re-inject。 ----
+  (function _hideTplItem() {
+    try {
+      if ((window.location || {}).pathname.indexOf('/main/index.html') < 0) { return; }
+      var _hidTpl = function() {
+        try {
+          var _els = document.querySelectorAll('#fm-btn-create-fromtpl');
+          for (var i = 0; i < _els.length; i++) {
+            // remove 而非 display:none：display:none 保留 li 间距（1.0.41 真机截图
+            // 「新建」「保存」之间留空）——删除节点才真正无痕
+            try {
+              var _p = _els[i].parentNode;
+              if (_p) { _p.removeChild(_els[i]); }
+            } catch (se) {}
+          }
+        } catch (mh) {}
+      };
+      var _obsTpl = new MutationObserver(_hidTpl);
+      if (document.body) {
+        _obsTpl.observe(document.body, {childList: true, subtree: true});
+      } else {
+        document.addEventListener('DOMContentLoaded', function() {
+          _obsTpl.observe(document.body, {childList: true, subtree: true});
+        });
+      }
+      _hidTpl();
+      console.error('LSO_TPLITEM_HIDDEN');
+    } catch (te) { console.error('LSO_TPLITEM_ERR ' + String(te)); }
+  })();
+
   // ---- 3.10.1 欢迎横幅取消（2026-09-06 用户决策）：官方「欢迎使用 ONLYOFFICE
   //      桌面编辑软件！+ 云连接描述 + 帮助中心」横幅（panelrecent.js:69
   //      welcomeBannerTemplate；官方语义仅首次显示——ViewRecent.render() 后置
