@@ -175,6 +175,39 @@ struct EditorPage {
       // userFlag=1 用户主动保存（补录 recents）/ 0 autosave（不补录——2026-09-05）
       return this.saveBinRaw(param, userFlag > 0);
     }
+    if (cmd === 'save:as') {
+      // 官方另存为（asc_Save isSaveAs=true → 同格式）：40_save 发来的是**序列化流 DOCY**
+      // （不是文件字节！）→ 先 x2t doct_bin2docx（保存链同款，saveBinRaw 'none' 分支的
+      // doSaveAs 入参即此产物）→ 系统保存框（doSaveAs 既有链：uri 落盘+saveTarget/
+      // savePath 身份演进+recents 补录）。直接写 DOCY=伪 docx（外部打开损坏——
+      // 2026-09-08 真机发现 SAVE_AS_WRITE 落盘的是 doct bin 流，必修）。不同格式导出
+      // 走「下载为」（暂未支持，菜单已隐藏——2026-09-08 用户决策）。
+      const abS = b64ToBuf(param);
+      if (abS === null || abS.byteLength === 0) {
+        this.arkLog('SAVE_AS_B64_BAD len=' + param.length);
+        return 'false';
+      }
+      const extA = this.currentOpenExt.length > 0 ? this.currentOpenExt : 'docx';
+      const inA = this.hostFilesDir + '/saveas-in.bin';
+      const outA = this.hostFilesDir + '/saveas-out.' + extA;
+      if (!writeFileBuf(inA, abS)) {
+        this.arkLog('SAVE_AS_WRITE_ERR ' + inA);
+        return 'false';
+      }
+      const rcA = x2tConvertSync(x2tXml(inA, outA));
+      this.arkLog('SAVE_AS_X2T rc=0x' + (rcA >>> 0).toString(16));
+      if (rcA !== 0) {
+        this.arkLog('SAVE_AS_X2T_FAIL');
+        return 'false';
+      }
+      const docxBuf = readFileBuf(outA);
+      if (docxBuf === null) {
+        this.arkLog('SAVE_AS_SUBMISS ' + outA);
+        return 'false';
+      }
+      this.doSaveAs(docxBuf);
+      return 'true';
+    }
     if (cmd === 'go:folder') {
       // 官方桌面"返回"（FileMenu 返回到文档列表）→ Desktop.process('goback')
       this.arkLog('GOBACK -> welcome');
@@ -373,7 +406,9 @@ struct EditorPage {
       const ctx = getContext(this) as common.UIAbilityContext;
       const dvp = new picker.DocumentViewPicker(ctx);
       const opts = new picker.DocumentSaveOptions();
-      const defName = this.currentOpenName.length > 0 ? this.currentOpenName : 'Unnamed.' + this.currentOpenExt;
+      // 默认名：已保存文档=当前名；新建=语言包中文未命名（defaultDocName——
+      // 2026-09-08 补：doSaveAs 兜底名原写死 Unnamed.，与 openNewFile 语言包驱动对齐）
+      const defName = this.currentOpenName.length > 0 ? this.currentOpenName : this.defaultDocName(this.currentOpenExt);
       opts.newFileNames = [defName];
       const uris = await dvp.save(opts);
       if (!uris || uris.length === 0) {

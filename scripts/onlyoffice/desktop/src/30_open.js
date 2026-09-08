@@ -186,11 +186,35 @@
                   // 官方语义：ReviewChanges.js:897 customization.autosave===false →
                   // settings-autosave 初始 0（仅 localStorage 无缓存时）。
                   autosave: false
-                }
+                },
+                // B 架构 UI 档位 = 官方「桌面离线」档（Main.js:445）：isDesktopApp=true
+                // 后文件菜单「另存为」显示（FileMenu.js:430 公式），「下载为」「另存为
+                // 副本」恒隐藏（FileMenu.js:427/:429 的 !isDesktopApp 为假）——「下载为」
+                // 不再靠 permissions.download 隐藏（档位公式天然实现）。
+                // 注意：仅 UI 档位——引擎桌面分支依赖 window.AscDesktopEditor/Common
+                // Controllers.Desktop.isActive()（20_bridge 3.7 已 delete），均未触发，
+                // 引擎仍 web 语义；canCloseEditor（:504 !isDesktopApp 分支）随之置 false，
+                // 无碍（关闭链由 canRequestClose/goback 承担）。
+                targetApp: 'desktop'
               },
               document: {
                 key: 'k' + Date.now(), url: '_offline_', title: _title, fileType: _ft,
-                permissions: {edit: true, download: true}
+                // download=false：官方 canDownload=permissions.download!==false（Main.js:1764）
+                // → 「下载为/下载原文件」菜单项隐藏（LeftMenu.js:879 显隐条件）——B 架构
+                // 无 C++/CEF 下载落地面，且转换链 PDF/HTML/图片依赖 doctrenderer JS 引擎
+                // （OHOS 无 V8）不可用（2026-09-08 用户决策：下载为暂不要；**必须显式
+                // false**，undefined 也判 true）。不影响保存链（asc_Save 独立）与另存为。
+                // 权限位（2026-09-08 定案）：
+                //  download:true —— 官方面板显隐不靠它：B 架构切「桌面离线」档
+                //   （targetApp:'desktop' + asc_isOffline→true）后「下载为/另存为副本」
+                //    恒隐藏（FileMenu.js:427/:429 的 !isDesktopApp 为假），「另存为」
+                //    恒显示（:430 公式）——download 位留 true（canSaveToFile 等
+                //    连带依赖；c6a6324 曾靠 download:false 隐藏下载为，今被档位替代）。
+                //  print:false —— canPrint=permissions.print!==false（Main.js:1735）→
+                //    false：文件菜单「打印/打印预览」两项全隐（FileMenu.js:433/:434），
+                //    B 架构无打印（引擎 asc_Print 需 C++ 落地/doctrenderer V8 缺失，
+                //    2026-09-08 用户决策）。
+                permissions: {edit: true, download: true, print: false}
               }
             };
             var _k = ('' + _cfg.document.key + Math.random().toString(16).substring(2)).replace(/[^0-9a-f]/g, '');

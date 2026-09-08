@@ -32,13 +32,96 @@
         if ((window.__lsoSaveWaitN = (window.__lsoSaveWaitN || 0) + 1) < 300) setTimeout(_hookSave, 200);
         return;
       }
+      // ---- 离线单机语义覆写（2026-09-08）：baseEditorsApi.asc_isOffline（apiBase.js:3217）
+      //      默认 = protocol=='file' → B 架构 http://localhost 恒 false。官方文件菜单
+      //      档位判定（Main.js:1709 isOffline 读取 → FileMenu.js:427-430 公式）需要
+      //      true 才能切「桌面离线」档（「另存为」显示/「下载为」恒隐藏）；离线单机
+      //      语义本身正确（chat/forcesave/签名等按离线降位）。FileMenu 每次打开菜单
+      //      重算（函数体 :425-440），覆写时机在首次打开菜单前即生效。 ----
+      try {
+        var _p1 = _proto;
+        if (typeof _p1.asc_isOffline === 'function' && !_p1.__lsoOffline) {
+          _p1.__lsoOffline = true;
+          _p1.asc_isOffline = function() { return true; };
+          console.error('LSO_ISOFFLINE_HOOKED');
+        }
+      } catch (skx) { console.error('LSO_ISOFFLINE_ERR ' + String(skx)); }
+      // ---- asc_DownloadAs → asc_Save(false, true) 重定向（2026-09-08 另存为）：桌面
+      //      官方 Local/api.js:313-318 同款。「另存为」菜单点击的官方链 =
+      //      asc_DownloadOrigin（word/api.js:2881）→ asc_DownloadAs(options, fileType=
+      //      当前格式)——web 原版 asc_DownloadAs 走 _downloadAsUsingServer（服务器 URL
+      //      链）→ B 架构无服务器死路（真机实证：点击另存为无任何 save:as 痕迹）。
+      //      重定向到 asc_Save(false, true) → 本 shim 的 isSaveAs 分支 → execCommand
+      //      ('save:as') → ArkTS 系统保存框（同格式另存为语义）。isNaturalDownload
+      //      保留直通原版（官方语义位；未使用）。cell/slide 的 asc_DownloadAs 同样在
+      //      各自 api 原型（同挂点模式）。 ----
+      try {
+        var _p2 = _proto;
+        if (typeof _p2.asc_DownloadAs === 'function' && !_p2.__lsoDlAs) {
+          _p2.__lsoDlAs = true;
+          if (typeof _p2.asc_DownloadAsNatural !== 'function') {
+            _p2.asc_DownloadAsNatural = _p2.asc_DownloadAs;
+          }
+          _p2.asc_DownloadAs = function(options) {
+            if (options && options.isNaturalDownload) {
+              return (this.asc_DownloadAsNatural || function() {}).apply(this, arguments);
+            }
+            console.error('LSO_DLAS_REDIRECT');
+            this.asc_Save(false, true, undefined, options);
+          };
+          console.error('LSO_DLAS_HOOKED');
+        }
+      } catch (dcx) { console.error('LSO_DLAS_ERR ' + String(dcx)); }
+      // ---- 文件菜单档位诊断（2026-09-08 另存为）：官方 FileMenu.js:425-435 显隐公式
+      //      输入端 = appOptions 三态（isDesktopApp/isOffline/canDownload/canPrint）。
+      //      公式钉死：miSaveAs=(canDownload||canDownloadOrigin)&&isDesktopApp&&isOffline；
+      //      miDownload/miSaveCopyAs=...&&(!isDesktopApp||!isOffline)。一次性打点取真机
+      //      三态（m7open 自动打开文档时也会产出，无需人点菜单——验收可取证）。 ----
+      if (!window.__lsoMenuProbe) {
+        window.__lsoMenuProbe = true;
+        setTimeout(function() {
+          try {
+            var _mm = null;
+            try { _mm = ((window.DE && window.DE.controllers && window.DE.controllers.Main) || {}).appOptions; } catch (pe) {}
+            if (!_mm) { try { _mm = ((window.SSE && window.SSE.controllers && window.SSE.controllers.Main) || {}).appOptions; } catch (pe2) {}
+              if (!_mm) { try { _mm = ((window.PE && window.PE.controllers && window.PE.controllers.Main) || {}).appOptions; } catch (pe3) {} } }
+            if (!_mm) { console.error('LSO_MENUMODE NOMAIN'); return; }
+            console.error('LSO_MENUMODE ' + JSON.stringify({
+              isDesktopApp: !!_mm.isDesktopApp, isOffline: !!_mm.isOffline,
+              canDownload: !!_mm.canDownload, canDownloadOrigin: !!_mm.canDownloadOrigin,
+              canPrint: !!_mm.canPrint, canPreviewPrint: !!_mm.canPreviewPrint,
+              saveAsVisible: !!((_mm.canDownload || _mm.canDownloadOrigin) && _mm.isDesktopApp && _mm.isOffline),
+              downloadVisible: !!((_mm.canDownload || _mm.canDownloadOrigin) && (!_mm.isDesktopApp || !_mm.isOffline))
+            }));
+          } catch (mx) { console.error('LSO_MENUMODE_ERR ' + String(mx)); }
+        }, 6000);
+      }
       if (_proto.__lsoSaveWrap) return; _proto.__lsoSaveWrap = true;
       var _s0 = _proto.asc_Save;
       _proto.asc_Save = function(isNoUserSave, isSaveAs, isResaveAttack, options) {
         var _t = this;
         try {
-          // 官方 Local/api.js:158 守卫（省略 History 依赖项）
-          if (isResaveAttack === true || isSaveAs === true) { console.error('LSO_SAVE_GUARD resave/saveas'); return; }
+          // 官方 Local/api.js:158 守卫（省略 History 依赖项）——isSaveAs 分支本段接管
+          //（另存为语义=不动源文件，不能走保存回写链）
+          if (isResaveAttack === true) { console.error('LSO_SAVE_GUARD resave'); return; }
+          // ---- 另存为（官方 Save As 菜单/Ctrl+Shift+S → asc_Save(false, true)）----
+          // 与桌面官方语义同构：与保存平行的一条链——序列化当前模型（DOCY，同保存链）
+          // → execCommand('save:as') → ArkTS 系统保存框（DocumentViewPicker.save：用户选
+          // 位置/文件名）→ 字节落盘 → saveTarget/savePath 身份演进（'none'/'sandbox'→'uri'）
+          // + recents 补录。不写回源文件、不弹官方「保存中」UI（异步系统框，引擎状态
+          // 不参入）；B 架构另存为=同格式（格式转换「下载为」未支持，菜单已隐藏）。 ----
+          if (true === isSaveAs) {
+            try {
+              var _sbin = window.__lsoNativeSaveEnd(function() { return _t.asc_nativeGetFileData(); });
+              if (!_sbin || !_sbin.byteLength) { console.error('LSO_SAVEAS_EMPTY'); return; }
+              var _rr = String(window.AscNative && window.AscNative._call('execCommand', ['save:as', window.__lsoB64(_sbin)]) || '');
+              console.error('LSO_SAVEAS_CALL len=' + _sbin.byteLength + ' ret=' + _rr);
+              return;
+            } catch (sax) {
+              console.error('LSO_SAVEAS_ERR ' + String(sax));
+              return;
+            }
+          }
           // 新建文档无保存目标（2026-09-05 用户语义确认）：autosave 直接短路——
           // 既不序列化（5MB 空转）也不回写（无 target）；用户保存（!isNoUserSave）
           // 走正常链（无身份 → ArkTS 弹另存为）。目标判定 = save:type 同步询问
