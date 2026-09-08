@@ -1,8 +1,15 @@
 import { webview } from '@kit.ArkWeb';
 import { BuilderNode, NodeController, UIContext } from '@kit.ArkUI';
-import { BusinessError } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { loadRaw } from '../common/rawfileLoader';
 import { resourceManager } from '@kit.LocalizationKit';
+
+/**
+ * PC（2in1/pc）tab 条高度=37（用户 2026-09-09 拍板：与 setWindowDecorHeight
+ * 合法最小 37 / 悬浮标题栏固定 37vp 对齐；Pad 保持 32）
+ */
+const IS_PC: boolean = deviceInfo.deviceType === '2in1' || deviceInfo.deviceType === 'pc';
+const TAB_BAR_H: number = IS_PC ? 37 : 32;
 
 /**
  * 多文档 Tab 容器（P1a：容器骨架——单文档 tab + 常驻主页）。
@@ -133,6 +140,54 @@ export class DocTabPair {
   }
 }
 
+/**
+ * 文档类型 accent 兜底（页面 00_theme 0.10 上报前/失败时：docx 蓝 / xlsx 绿 /
+ * pptx 紫近似——与官方 colors-table 各 app 主色呼应）。
+ */
+function accentColor(state: DocTabState): string {
+  const e = state.ext;
+  if (e === 'xlsx') {
+    return '#3E8D5F';
+  }
+  if (e === 'pptx') {
+    return '#8E5EB8';
+  }
+  return '#4B71A5';
+}
+
+/**
+ * hex 混色（#RRGGBB，#RRGGBB，w=第二个色占比 0..1）——非激活 chip 观感
+ * （用户决策 2026-09-09：hex 混色回朝，且混浅=w 0.8 更接近白，比初版 0.4 更低调；
+ * 白底版方案已撤回）。转换失败原样返回。
+ */
+function hexBlend(a: string, b: string, w: number): string {
+  try {
+    const pa = a.length === 7 ? a.substring(1) : a;
+    const pb = b.length === 7 ? b.substring(1) : b;
+    if (pa.length !== 6 || pb.length !== 6) {
+      return a;
+    }
+    const r = Math.round(parseInt(pa.substring(0, 2), 16) * (1 - w) + parseInt(pb.substring(0, 2), 16) * w);
+    const g = Math.round(parseInt(pa.substring(2, 4), 16) * (1 - w) + parseInt(pb.substring(4, 6), 16) * w);
+    const bl = Math.round(parseInt(pa.substring(4, 6), 16) * (1 - w) + parseInt(pb.substring(4, 6), 16) * w);
+    const h = (n: number): string => {
+      const s = n.toString(16).toUpperCase();
+      return s.length === 1 ? '0' + s : s;
+    };
+    return '#' + h(r) + h(g) + h(bl);
+  } catch (e) {
+    return a;
+  }
+}
+
+/** 该 tab 的主题色（页面上报值优先；空=静态 accent 兜底） */
+function accentOf(accent: string, state: DocTabState): string {
+  if (accent !== undefined && accent.length > 0 && accent !== '') {
+    return accent;
+  }
+  return accentColor(state);
+}
+
 /** Web 内容构建（文件级 @Builder——BuilderNode/wrapBuilder 要求） */
 @Builder
 function buildDocWeb(ctx: DocTabCtx) {
@@ -180,6 +235,8 @@ export struct DocTabHost {
   @Link focus: number;
   /** tab 标题平行数组（@State 元素级可观察——另存为改名即时刷新 chip 标题） */
   @Link titles: string[];
+  /** tab 主题色平行数组（页面 00_theme 0.10 上报当前主题 CSS 变量值；''=回退静态 accent） */
+  @Link accents: string[];
   private tabsCtr: TabsController = new TabsController();
   onCloseDoc: (id: number) => void = () => {
   };
@@ -188,47 +245,96 @@ export struct DocTabHost {
 
   build() {
     Column() {
-      // —— 自绘 tab 条（紧凑 32vp；产品中性浅色系——word/cell/slide 三编辑器主题
-      //   各不同色（蓝/绿/紫），固定深蓝灰与当前编辑器不协调（2026-09-08 用户指出）；
-      //   浅底+官方品牌蓝胶囊与三格式/任意主题都和谐）——
-      Row({ space: 6 }) {
+      // —— 自绘 tab 条（官方桌面形态，2026-09-08 参考 .temp/desktop-example.png）：
+      //   条底恒定浅色 #F7F7F7（官方 --background-normal，与欢迎页侧栏同色）；
+      //   激活 chip = 该文档页当前主题色原色白字（00_theme 0.10 上报告 CSS 变量
+      //   --toolbar-header-<app>，主题切换自动跟随）；非激活 = 同色混白 0.8；
+      //   主页 chip = 与条底同色黑字（与侧栏贯通，无视觉分界）。
+      // 用户决策 2026-09-09：tab item 之间无左右边距（官方桌面 chip 贴排观感）；
+      // 不滚动/不 overflow——chip 以 flexShrink 收缩（见 chip 链），总宽恒≤可用
+      // 宽→右 padding（150 避让三键区）常驻生效（Scroll/fit-content/固定宽溢出
+      // 三种方案均被 ArkUI 溢出绘制击败，2026-09-09 用户实证）
+      Row() {
         ForEach(this.tabs, (item: DocTabPair, index: number) => {
           Row({ space: 2 }) {
-            // 切换绑定在标题文本（× 为独立兄弟节点——点击互不干扰/无冒泡）
+            // 标题 flexShrink 在固定宽 chip 内近似居中（官方语义：标题居中、× 定右）
             Text(this.titles[index])
               .fontSize(12)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .fontColor(this.focus === index ? Color.White : '#5A6572')
-              .constraintSize({ maxWidth: 200 })
-              .onClick(() => {
-                this.tabsCtr.changeIndex(index);
-                this.focus = index;
-                this.onSwitch(index);
-              })
+              .fontColor(item.ctx.kind === 'home' || this.focus !== index ? '#2B3B4D' : Color.White)
+              .flexShrink(1)
             if (item.ctx.kind === 'doc') {
-              // 关闭钮：独立节点 + 大触区（≥44px 物理）；激活态时与标题同色
-              Text('×')
-                .fontSize(13)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(this.focus === index ? Color.White : '#9AA3AD')
-                .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+              // 关闭钮：官方图标（HarmonyOS symbol——wineohos 同款惯例 SymbolGlyph），
+              // 独立节点 + 大触区（≥44px 物理）；hitTestBehavior Block 拦截命中
+              // 传播——点 × 不触发 chip 切换 onClick（ArkUI ClickEvent 无
+              // stopPropagation；Block 是官方阻断方案，用户 2026-09-09 验证点）
+              SymbolGlyph($r('sys.symbol.xmark'))
+                .fontSize(14)
+                .fontColor([this.focus === index ? Color.White : '#5A6572'])
+                // 用户决策 2026-09-09：× 不再自留 right 内衬——chip 自身已有
+                // right:6，叠加（6+10=16vp）使关闭钮贴右空隙过大；保留 left:10
+                // 作它与标题的间距
+                .padding({ left: 10, right: 0, top: 8, bottom: 8 })
+                // 鼠标 hover 反馈：ArkUI 组件默认能力，用户 2026-09-09 拍板
+                // Scale（悬停轻微放大——反馈强度优于 Auto 蒙层）
+                .hoverEffect(HoverEffect.Scale)
+                .hitTestBehavior(HitTestMode.Block)
                 .onClick(() => {
                   this.onCloseDoc(item.ctx.id);
                 })
             }
           }
+          // 用户决策 2026-09-09：切换点击挂整个 chip（此前只挂标题 Text——chip
+          // 空白/内衬区点击无响应；× 子节点已 stopPropagation 互斥）
+          .onClick(() => {
+            this.tabsCtr.changeIndex(index);
+            this.focus = index;
+            this.onSwitch(index);
+          })
           .justifyContent(FlexAlign.Center)
-          .padding({ left: 12, right: 6, top: 4, bottom: 4 })
-          .borderRadius(16)
-          .backgroundColor(this.focus === index ? '#4B71A5' : '#E8EAEE')
-          .constraintSize({ maxWidth: 320 })
+          // 官方形态：chip = 固定宽块（doc≈160vp / home≈100vp；仅横向小内衬；
+          // 通栏高、方角——参考图 .temp/desktop-example.png。禁止 layoutWeight/
+          // stretch（曾导致 chip 撑满整行等宽——用户 2026-09-09 指正）。
+          // 2026-09-09 二修正：**可收缩**（flexShrink 1 + minWidth 下限）——
+          // tab 多时 chip 收窄而非溢出（先前固定 160 溢出覆盖到系统按钮区/
+          // Scroll/fit-content 均被 ArkUI 溢出绘制打败——元素级 flex 收缩是
+          // 官方语义，浏览器 tab 条同款）
+          .width(item.ctx.kind === 'home' ? 100 : 160)
+          .flexShrink(1)
+          .padding({ left: 12, right: 6 })
+          .borderRadius(0)
+          .height(TAB_BAR_H)
+          // chip 底色（用户决策 2026-09-09：**只有选中项才是文档主题色，条底恒定**）：
+          // home=白底黑字（官方徽标 chip，细边分离）；doc 激活=该 tab 文档主题色
+          // 原色（白字）；doc 非激活=同色混白 40%（降调观感）
+          // 用户决策 2026-09-09（三改+修正）：主页 chip 底色=条底=下方侧栏背景
+          // 同色 —— 官方源码实测：侧栏背景 = 根变量 --background-normal
+          // #F7F7F7（theme-classic-light 不改写它；此前自拟 #F2F3F5 差 5 阶灰
+          // 被用户肉眼抓出）；非激活 doc chip=文档色混白 0.8；激活=主题色原色
+          .backgroundColor(item.ctx.kind === 'home' ? '#F7F7F7'
+            : (this.focus === index
+              ? accentOf(this.accents[index], item.ctx.state)
+              : hexBlend(accentOf(this.accents[index], item.ctx.state), '#FFFFFF', 0.8)))
+          // 用户决策 2026-09-09：主页 chip 无边框（白底黑字 + 条底浅灰反差已可辨）
+          .border({ width: 0, color: Color.Transparent })
+          // 收缩下限为**建议值**（实测 flexShrink 收缩可到 ≈73vp——constraintSize
+          // minWidth 与 flexShrink 并存时以收缩结果为准；不承诺下限，标题省略号兜底）
+          .constraintSize({ minWidth: item.ctx.kind === 'home' ? 72 : 96, maxWidth: 320 })
         }, (item: DocTabPair) => item.ctx.kind + '-' + item.ctx.id.toString())
       }
+      // 显式 Start——chip 加 flexShrink 后进 flex 自由项上下文，Row 未显式设
+      // justifyContent 时被默认居中（用户 2026-09-09 实证：tabs 跑到窗口中央）
+      .justifyContent(FlexAlign.Start)
       .width('100%')
-      .height(32)
-      .padding({ left: 10, right: 10 })
-      .backgroundColor('#FFFFFF')
+      .height(TAB_BAR_H)
+      // 左右内衬：左 0（chip 贴窗口左缘）；右 PC=150 固定（HiSH 参考——PcIndex
+      // 顶栏 padding{left:15,right:150}，150=系统三键区（−□✕）默认避让；Pad 无
+      // 按钮=0）。chip 已可收缩（flexShrink）→ 不产生溢出绘制，padding 恒生效
+      .padding({ left: 0, right: IS_PC ? 150 : 0 })
+      // 条底恒定=官方 --background-normal #F7F7F7（2026-09-09 用户决策：不随
+      // 激活文档换色——只有 chip 染色；与欢迎页侧栏同色，上下贯通无分界）
+      .backgroundColor('#F7F7F7')
 
       // —— 内容切换容器（barHeight 0；保活 = NodeContainer 节点复用）——
       Tabs({ barPosition: BarPosition.Start, index: this.focus, controller: this.tabsCtr }) {

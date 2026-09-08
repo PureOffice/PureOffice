@@ -92,6 +92,10 @@ struct EditorPage {
   /** tab 标题平行数组（@State 元素可观察——另存为改名即时刷新 chip）；与 docTabs 同步
    *  （index 对应；home 恒 '主页'） */
   @State docTitles: string[] = [];
+  /** tab 主题色平行数组（页面 00_theme 0.10 上报：当前主题 CSS 变量
+   *  --toolbar-header-<app>）——选中 chip 颜色跟随文档页当前主题色（官方桌面特性；
+   *  主题切换重报）。缺省 ''=回退静态 accent。 */
+  @State docAccents: string[] = [];
   private docTabSeq: number = 0;
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
@@ -662,10 +666,13 @@ struct EditorPage {
       ctx.url = this.editorUrl(extU, name, ctx.id); // sid=tabId：强制唯一加载 + 事件归属
       const arr = this.docTabs.slice();
       const tArr = this.docTitles.slice();
+      const aArr = this.docAccents.slice();
       arr.push(new DocTabPair(ctx));
       tArr.push(name.length > 0 ? name : this.defaultDocName(extU));
+      aArr.push('');
       this.docTabs = arr;
       this.docTitles = tArr;
+      this.docAccents = aArr;
       this.focusTab = this.docTabs.length - 1;
       this.arkLog('P1B_OPEN_TAB id=' + ctx.id + ' ext=' + extU + ' bin=' + buf.byteLength
         + ' target=' + ctx.state.saveTarget + ' name=' + name);
@@ -816,6 +823,7 @@ struct EditorPage {
           ((c: DocTabCtx) => this.onPageEndCB(c)));
         this.docTabs = [new DocTabPair(homeCtx)];
         this.docTitles = ['主页'];
+        this.docAccents = [''];
         this.arkLog('P1A_TABS_INIT home=' + homeCtx.url);
       } catch (e) {
         this.arkLog('P1A_TABS_ERR ' + String(e));
@@ -895,6 +903,10 @@ struct EditorPage {
     nativeDispatch.setLocalStartOpenHandler(() => {
       this.onDocReady(ctx);
     });
+    // 主题色上报（页面 00_theme 0.10 → 本实例的 chip 激活色）
+    nativeDispatch.setThemeReporter((payload: string) => {
+      return this.onThemeReport(ctx, payload);
+    });
     // save:type 询问（per-tab 单一事实源）：页面 asc_Save 同步询问保存目标——
     // 'none'（autosave 跳过/用户保存→另存为）| 'sandbox' | 'uri'
     nativeDispatch.setSaveTargetReader(() => ctx.state.saveTarget);
@@ -930,7 +942,9 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
   }
 
   /**
-   * 关闭 doc tab（file:close / tab ×）：移除节点（挂载即销毁）+ 标题同步 + 回主页。
+   * 关闭 doc tab（file:close / tab ×）：移除节点（挂载即销毁）+ 标题同步。
+   * 关闭后聚焦相邻（2026-09-09 用户需求）：关激活 tab → 选随后一个顶替原位的
+   * （关尾 → 前一个）；关非激活 tab → 焦点保持指向原来那个（数组前移一位）。
    * 无未保存守卫（P2 引入：官方 _state.isDocModified 读取——设计 §6.3）。
    */
   private closeDocTab(id: number): void {
@@ -945,17 +959,61 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
       if (idx < 0) {
         return;
       }
+      const wasFocus = this.focusTab === idx;
       const arr = this.docTabs.slice();
       arr.splice(idx, 1);
       this.docTabs = arr;
       const tArr = this.docTitles.slice();
       tArr.splice(idx, 1);
       this.docTitles = tArr;
-      this.focusTab = 0;
-      this.arkLog('P1B_CLOSE_TAB id=' + id);
+      const aArr = this.docAccents.slice();
+      aArr.splice(idx, 1);
+      this.docAccents = aArr;
+      if (wasFocus) {
+        // 相邻归位：原位置（idx）由后一个顶替；关的是最后一个 → 前一个
+        this.focusTab = Math.min(idx, this.docTabs.length - 1);
+      } else if (this.focusTab > idx) {
+        // 非激活关闭：数组前移，焦点保持指向同一文档
+        this.focusTab = this.focusTab - 1;
+      }
+      this.arkLog('P1B_CLOSE_TAB id=' + id + ' focus=' + this.focusTab);
     } catch (e) {
       this.arkLog('P1A_CLOSE_TAB_ERR ' + String(e));
     }
+  }
+
+  /**
+   * 主题色上报处理（页面 00_theme 0.10）：payload JSON {app,color}——color=当前主题
+   * CSS 变量 --toolbar-header-<app> 的实际值（官方 colors-table-<theme>.less 定义
+   * 为主题内配置，主题切换重报）。缓存到 docAccents（索引与 docTabs 对齐——选中
+   * chip 颜色跟随文档页当前主题色，官方桌面特性）。
+   */
+  private onThemeReport(ctx: DocTabCtx, payload: string): string {
+    try {
+      const o = JSON.parse(payload) as Record<string, string>;
+      const color = String(o['color'] ?? '').trim();
+      if (color.length === 0) {
+        return 'true';
+      }
+      for (let i = 0; i < this.docTabs.length; i++) {
+        if (this.docTabs[i].ctx === ctx) {
+          const aArr = this.docAccents.slice();
+          // 防御：上报到已关闭/未初始化 tab（race 时 docAccents 可能短于 docTabs）
+          // ——下标缺失段补 ''（静态 accent 兜底），避免数组空洞
+          if (i < aArr.length) {
+            aArr[i] = color;
+          } else {
+            aArr.push(color);
+          }
+          this.docAccents = aArr;
+          break;
+        }
+      }
+      this.arkLog('THEME_COLOR tab=' + ctx.id + ' ' + color);
+    } catch (e) {
+      this.arkLog('THEME_COLOR_ERR ' + String(e));
+    }
+    return 'true';
   }
 
   /** tab 切换（DocTabHost.onSwitch）：非激活实例打点（P0 判据复用：后台实例活） */
@@ -979,6 +1037,7 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
         tabs: $docTabs,
         focus: $focusTab,
         titles: $docTitles,
+        accents: $docAccents,
         onCloseDoc: (id: number) => this.closeDocTab(id),
         onSwitch: (idx: number) => this.onSwitchTab(idx)
       })

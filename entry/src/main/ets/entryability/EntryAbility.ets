@@ -1,5 +1,7 @@
 import { AbilityConstant, Want, UIAbility } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
+import { deviceInfo, BusinessError } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /**
  * 启动参数（want.parameters）——EditorPage 读取（自动验收开关 m7accept/m7file；
@@ -39,7 +41,76 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
-    windowStage.loadContent('pages/EditorPage');
+    windowStage.loadContent('pages/EditorPage', () => {
+      // loadContent 之后窗口装饰才就绪（wineohos WineWindowAbility 同款时序）。
+      // 2026-09-09 首次真机：loadContent 回调时窗口未显示——setWindowLayoutFullScreen
+      // 生效（内容伸入状态栏区）但 setSpecificSystemBarEnabled 未生效（时间/电量仍显示）。
+      // wineohos 是窗口 SHOWN 事件后才隐藏系统栏（WineWindowAbility WINDOW_SHOWN 段），
+      // 改为事件驱动重试（幂等，双保险）。
+      this.applyWindowMode(windowStage);
+      try {
+        const mw = windowStage.getMainWindowSync();
+        mw.on('windowEvent', (event) => {
+          if (event === window.WindowEventType.WINDOW_SHOWN) {
+            this.applyWindowMode(windowStage);
+          }
+        });
+      } catch (e) {
+        hilog.warn(0x0000, 'OfficeWin', 'windowEvent register err ' + JSON.stringify(e));
+      }
+    });
+  }
+
+  /**
+   * 窗口形态（2026-09-09 用户需求，参考 ../wineohos 窗口逻辑——PAD 虚拟桌面/
+   * PC 窗口实锤代码）：
+   *  - Pad（deviceType tablet/phone）→ 沉浸窗口模式：全屏布局 + 隐藏状态栏与
+   *    手势条——wineohos Index.ets「进入桌面」同款（setWindowLayoutFullScreen(true)
+   *    + setSpecificSystemBarEnabled('status'/'navigationIndicator', false)）；
+   *    1.8 真机已验证（状态栏消失、内容贴顶）。
+   *  - PC（deviceType 2in1/pc）→ 无边框沉浸：setWindowDecorVisible(false) +
+   *    setWindowDecorHeight(37)——用户拍板参考 ../wineohos/.temp/HiSH
+   *    （见 PC 分支注释）；1.4 真机验收通过（tab 恒不越系统三键区=另加 150 避让）。
+   * 判据官方枚举 deviceInfo.deviceType（String 常量；无 'pc' 时 2in1 即 PC 形态；
+   * 注意它只反映硬件——同一 Pad 切 PC 桌面模式仍报 tablet，窗口形态切换判据留待
+   * 窗口 mode/显示模式 API）。
+   * 幂等：SHOWN 重复调用无害（重复设置同值）。失败不阻断编辑器（退化=系统默认形态）。
+   */
+  private applyWindowMode(windowStage: window.WindowStage): void {
+    try {
+      const mw = windowStage.getMainWindowSync();
+      const dt = deviceInfo.deviceType;
+      hilog.info(0x0000, 'OfficeWin', 'applyWindowMode deviceType=' + dt);
+      if (dt === 'tablet' || dt === 'phone') {
+        mw.setWindowLayoutFullScreen(true)
+          .then(() => { hilog.info(0x0000, 'OfficeWin', 'fullScreen ok'); })
+          .catch((e: BusinessError) => { hilog.warn(0x0000, 'OfficeWin', 'fullScreen err ' + JSON.stringify(e)); });
+        mw.setSpecificSystemBarEnabled('status', false)
+          .then(() => { hilog.info(0x0000, 'OfficeWin', 'statusBar off ok'); })
+          .catch((e: BusinessError) => { hilog.warn(0x0000, 'OfficeWin', 'statusBar off err ' + JSON.stringify(e)); });
+        mw.setSpecificSystemBarEnabled('navigationIndicator', false)
+          .then(() => { hilog.info(0x0000, 'OfficeWin', 'navBar off ok'); })
+          .catch((e: BusinessError) => { hilog.warn(0x0000, 'OfficeWin', 'navBar off err ' + JSON.stringify(e)); });
+      } else {
+        // PC（2in1/pc）无边框沉浸——用户拍板参考 ../wineohos/.temp/HiSH
+        // （EntryAbility.ets:83-85）：setWindowDecorVisible(false)（隐藏系统
+        // 标题栏+按钮）+ setWindowDecorHeight(37)（**保留合法最小 37 装饰区=
+        // 顶部拖条**——[37,112] 官方范围；HiSH 用 48 是自选非下限，悬浮标题栏
+        // 固定 37vp）。canIUse 守卫保留（能力判定：2in1 自由窗口才生效；
+        // 不支持时走 else=系统默认标题栏而**不报错**——比直接调 801 兜底更
+        // 显式）。此前两个被否决的走法（WineWindowAbility 全隐藏禁拖动 /
+        // wineohos Index 保留标题栏+避让）不采用，勿回。
+        if (canIUse('SystemCapability.Window.SessionManager')) {
+          mw.setWindowDecorVisible(false);
+          mw.setWindowDecorHeight(37);
+          hilog.info(0x0000, 'OfficeWin', 'pc decor off h37');
+        } else {
+          hilog.warn(0x0000, 'OfficeWin', 'pc no SessionManager, decor kept');
+        }
+      }
+    } catch (e) {
+      hilog.warn(0x0000, 'OfficeWin', 'applyWindowMode err ' + JSON.stringify(e));
+    }
   }
 
   onWindowStageDestroy(): void {

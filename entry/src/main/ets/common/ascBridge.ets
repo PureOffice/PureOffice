@@ -99,6 +99,14 @@ export class AscNativeDispatch {
     this.rawRead = fn;
   }
 
+  /** 主题色上报（页面 00_theme 0.10 读取当前主题 CSS 变量 --toolbar-header-<app>
+   *  上报 → EditorPage 缓存到 docAccents——选中 tab 颜色跟随文档页当前主题色，
+   *  官方桌面特性复刻。payload JSON {app,color}）。 */
+  private themeReporter: ((payload: string) => string) | null = null;
+  setThemeReporter(fn: (payload: string) => string): void {
+    this.themeReporter = fn;
+  }
+
   private execCommand(args: BridgeArgs): string {
     const cmd = typeof args[0] === 'string' ? (args[0] as string) : '';
     const param = typeof args[1] === 'string' ? (args[1] as string) : '';
@@ -160,6 +168,9 @@ export class AscNativeDispatch {
           return '[{"url":"","pluginsData":[]},{"url":"","pluginsData":[]}]';
         case 'execCommand':
           return this.execCommand(args);
+        case 'theme:color':
+          // 主题色上报（00_theme 0.10）：per-instance（dispatch 按 ctx 装配）
+          return this.themeReporter ? this.themeReporter(String(args[0] ?? '')) : 'true';
         case 'LocalStartOpen':
           // 引擎加载完成（官方：编辑器 LocalFile counter 之一）——交给 EditorPage 注入字节
           if (this.localStartOpenCb) {
