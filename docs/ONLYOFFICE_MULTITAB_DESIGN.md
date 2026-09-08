@@ -277,6 +277,18 @@ P0 实现 = 最小补丁：P0TabsProbe 组件（`p0tabs=1` 启动参数门控—
 **结论：P0 通过，A 方案可行性实锤；Harmonix 模式在 1.8 ArkWeb 落地无坑。**
 转向 P1（容器化：现有单实例隧道整体搬进该骨架）。
 
+### 9.2 P1a 执行记录（2026-09-08 1.8 真机 ✅）
+
+容器骨架化（`DocTabHost.ets`：Tabs+ForEach+NodeContainer 通用容器，
+`EditorPage.onInstanceReady` 承载 per-node 完整装配；业务状态仍单例）：
+P1A_TABS_INIT home0 → 新建卡 → P1A_OPEN_TAB id=1（doc 节点懒构建）→
+INSTANCE_READY kind=doc → 编辑器全链（LSO_OPEN_DOCUMENT_OK/GW_BIN/FONT/
+KICK_SERVERID/LSO_MENUMODE 桌面离线档）→ 切主页 P1A_ALIVE doc1 rd=complete
+（后台保活）→ × 关闭 P1A_CLOSE_TAB id=1 → 回主页 → 保存链回归
+（SAVE_BIN_X2T rc=0 → 24742B zipok → SAVE_AS_DIALOG 弹系统保存框）。
+教训一则：tab chip 的 × 独立成节点并放大触区（标题文本承载切换、
+× 独立 onCloseDoc）——兄弟节点无冒泡干扰，一击即中。
+
 ## 10. 实施阶段（每阶段一次构建 + 真机冒烟）
 
 | 阶段 | 内容 | 验收 |

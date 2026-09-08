@@ -1,4 +1,3 @@
-import { webview } from '@kit.ArkWeb';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
@@ -12,6 +11,7 @@ import { getLaunchOptions } from '../entryability/EntryAbility';
 import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, u8ToStr } from '../common/bytes';
 import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } from '../common/recents';
 import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
+import { DocTabHost, DocTabCtx, DocTabPair } from './DocTabHost';
 
 /** ArkTS 侧调试开关：false=仅落 web_console.txt 文件（默认）；true=另 hilog 双写 */
 const ARK_DEBUG: boolean = false;
@@ -43,7 +43,6 @@ class ShellCommandHandler implements AscCommandHandler {
 @Entry
 @Component
 struct EditorPage {
-  controller: webview.WebviewController = new webview.WebviewController();
   private resourceManager: resourceManager.ResourceManager | undefined = undefined;
   private ascNative: AscNativeBridge | undefined = undefined;
   private hostFilesDir: string = '';
@@ -90,15 +89,6 @@ struct EditorPage {
     }
   }
 
-  // —— 页面注入入口（runJavaScript）——
-  private pageJS(fn: string): void {
-    this.controller.runJavaScript(fn, (err: BusinessError, res: string) => {
-      if (err) {
-        this.arkLog('OOH_SHELL ' + fn.substring(0, 40) + ' ERR ' + err.code + ' ' + err.message);
-      }
-    });
-  }
-
   /** 页缓存版本号：构建期按 rawfile/onlyoffice 内容哈希生成（version.json）
    *  → URL ?v=N cache-bust（原 VERSION_BUMP 手工递增已删，阶段3 2026-09-05） */
   private pageVer: string = '0';
@@ -109,6 +99,12 @@ struct EditorPage {
    *  产品态不挂载本分支——验证骨架，验证完可整体移除） */
   private p0On: boolean = false;
   @State p0Tabs: P0TabPair[] = [];
+  /** P1a 容器：tab 数组（home 恒第一，随打开/关闭变化）+ 活动 tab（DocTabHost 受控） */
+  @State docTabs: DocTabPair[] = [];
+  @State focusTab: number = 0;
+  /** 最近 doc 实例引用（P1a 单文档：保存链/注入链单例衔接；P1b 换 map） */
+  private docCtxRef: DocTabCtx | null = null;
+  private docTabSeq: number = 0;
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
    *  lang=zh-CN：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
@@ -214,9 +210,10 @@ struct EditorPage {
       return 'true';
     }
     if (cmd === 'go:folder') {
-      // 官方桌面"返回"（FileMenu 返回到文档列表）→ Desktop.process('goback')
-      this.arkLog('GOBACK -> welcome');
-      this.controller.loadUrl(this.homeUrl());
+      // 官方桌面"返回"（FileMenu 返回到文档列表）→ P1a：激活主页 tab（doc 实例保留
+      // ——tab 化语义：文档仍开着，回主页后点 doc chip 即回，状态零重建）
+      this.arkLog('GOBACK -> home tab');
+      this.focusTab = 0;
       return 'true';
     }
     if (cmd === 'files:explore') {
@@ -238,8 +235,12 @@ struct EditorPage {
       try {
         const oe = JSON.parse(param) as Record<string, Object>;
         if (String(oe['action']) === 'file:close') {
-          this.arkLog('CLOSE_FILE -> welcome');
-          this.controller.loadUrl(this.homeUrl());
+          this.arkLog('CLOSE_FILE -> doc tab close');
+          if (this.docCtxRef !== null) {
+            this.closeDocTab(this.docCtxRef.id);
+          } else {
+            this.focusTab = 0;
+          }
         }
       } catch (e) {
         this.arkLog('EDITOR_EVENT_ERR ' + String(e));
@@ -635,7 +636,7 @@ struct EditorPage {
         }
       }
       this.arkLog('OPEN_CONVERTED bin=' + buf.byteLength + ' target=' + this.saveTarget);
-      this.controller.loadUrl(this.editorUrl(extU, name));
+      this.openInDoc(extU, name);
       return 'true';
     } catch (e) {
       this.arkLog('OPEN_CONVERT_ERR ' + String(e));
@@ -658,6 +659,11 @@ struct EditorPage {
       this.arkLog('LSO_NO_PENDING (editor ready, no doc — create:new?)');
       return;
     }
+    const docC = this.docCtxRef;
+    if (docC === null) {
+      this.arkLog('LSO_NO_DOCTAB (editor ready, doc tab gone)');
+      return;
+    }
     // 页面 XHR 拉取沙箱 doct_bin（rawfileLoader 已拦 userfile/ → filesDir 返回真字节）→
     // window.postMessage openDocumentFromBinary（官方 api.js/Gateway/loadBinary →
     // asc_openDocumentFromBytes，checkStreamSignature 嗅探 DOCY 签名 —— web/服务器链，
@@ -674,7 +680,7 @@ struct EditorPage {
       + '}catch(e){console.error("LSO_LOAD_ERR "+String(e));}};'
       + 'x.onerror=function(){console.error("LSO_XHR_ERR st="+x.status);};'
       + 'x.send(null);}catch(e){console.error("LSO_INJECT_ERR "+String(e));}})();';
-    this.controller.runJavaScript(js, (err: BusinessError, res: string) => {
+    docC.controller.runJavaScript(js, (err: BusinessError, res: string) => {
       if (err) {
         this.arkLog('LSO_INJECT_ERR ' + err.code + ' ' + err.message);
       } else {
@@ -693,7 +699,12 @@ struct EditorPage {
       if (snap === null) {
         this.arkLog('SMOKE_SNAP_MISSING');
       } else {
-        setTimeout(() => this.pageJS(snap), 10000);
+        const c1 = this.docCtxRef;
+        setTimeout(() => {
+          if (c1 !== null) {
+            c1.js(snap, '');
+          }
+        }, 10000);
       }
       // AI 联网验证（2026-09-07 方案 A 放行）：与 AI 插件同形态的 fetch 直连
       // DeepSeek /v1（key 经启动参数 m7key 注入，不进 git/不落盘；见 ai_fetch_test.js）。
@@ -701,7 +712,12 @@ struct EditorPage {
       if (aiTest === null) {
         this.arkLog('SMOKE_AITEST_MISSING');
       } else {
-        setTimeout(() => this.pageJS(aiTest.replace('__AI_KEY__', Smoke.key)), 15000);
+        const c2 = this.docCtxRef;
+        setTimeout(() => {
+          if (c2 !== null) {
+            c2.js(aiTest.replace('__AI_KEY__', Smoke.key), '');
+          }
+        }, 15000);
       }
     }
   }
@@ -751,6 +767,19 @@ struct EditorPage {
         this.arkLog('P0_TABS_ERR ' + String(e));
       }
     }
+    // P1a 容器初始化：主页实例恒第一（常驻；doc 由 open*/create:new 动态追加）
+    if (!this.p0On) {
+      try {
+        const homeCtx = new DocTabCtx(0, 'home', '主页', this.homeUrl(),
+          this.resourceManager!, this.hostFilesDir,
+          ((m: string) => this.arkLog(m)), ((c: DocTabCtx) => this.onInstanceReady(c)),
+          ((c: DocTabCtx) => this.onPageEndCB(c)));
+        this.docTabs = [new DocTabPair(homeCtx)];
+        this.arkLog('P1A_TABS_INIT home=' + homeCtx.url);
+      } catch (e) {
+        this.arkLog('P1A_TABS_ERR ' + String(e));
+      }
+    }
   }
 
   /** rawfile 样本复制到沙箱 filesDir（open 链走 userfile/ 前缀；编辑/转换产物也在 filesDir）。
@@ -774,131 +803,160 @@ struct EditorPage {
     }
   }
 
-  build() {
-    if (this.p0On) {
-      // P0 探针分支：p0tabs=1（ability 启动参数）挂载多实例验证骨架；产品态恒 else
-      P0TabsProbe({ tabs: $p0Tabs })
-    } else {
-    Stack() {
-      // 注意：?v=N 是对 ArkWeb http cache 的 cache-bust——rawfileLoader 已剥离 query，
-      // 每次提升版本号强制再次取新页面（此 SDK 无 webview.CacheMode 枚举）。
-      // 桌面链（M3）：初始页 = 官方 loginpage 欢迎页（产品主界面）；打开文档 → loadUrl 编辑器
-      Web({ src: this.homeUrl(), controller: this.controller })
-        .javaScriptAccess(true)
-        .domStorageAccess(true)
-        .fileAccess(true)
-        // loadRaw 对非 localhost/onlyoffice URL 返回 null（= 放行，ArkWeb 默认网络栈
-        // 直连——AI 插件远程 API 正路，2026-09-07 方案 A）。null 是 onInterceptRequest
-        // 官方语义，但 SDK 回调类型为 WebResourceResponse，故 as 适配。
-        .onInterceptRequest((event) =>
-          loadRaw(event.request, this.resourceManager!, this.hostFilesDir, ((m: string) => this.arkLog(m))) as WebResourceResponse)
-        .onControllerAttached(() => {
-          // 桌面链桥——window.AscNative（ascshim.js 里 await 它出现再装 window.AscDesktopEditor）。
-          // registerJavaScriptProxy 的对象要到页面 (re)load 才出现在 window，故在
-          // onControllerAttached（早于加载）注册才对本页生效。
-          // 同步方法表：'_call'（JS 端阻塞取返回——官方 CEF V8 语义）、'_onReady'（安装完成）。
-          // 注：2026-09-05「启动清 webview 缓存（CACHE_CLEARED）」已撤回——History 假帧
-          // 真因=引擎内置空文档范文（getEmpty，word/document/editor.js:41）被 web 语义
-          // loadDocument 装载，与 webview 缓存无关（当时归因错误，卸载重装仍复现即证）。
-          // 升级自愈（2026-09-06）：install -r 整包替换 rawfile（新资源随包可取），但
-          // WebView 磁盘缓存（data/storage/el2/base/cache/web/Cache，install -r 不清空）
-          // 中同 URL 旧响应可能被命中——主页面/编辑页 URL 已带 ?v=<资源哈希>（cache-bust，
-          // 见 build() 注释）自愈，但插件 iframe 等子资源引用无版本参数（如
-          // plugins/v1/plugins.js）——兜底：资源版本变化后首次启动 flush 一次
-          // （once per version；记录于 files/app_version.json）。
-          // 前车之鉴：不得用缓存清理解释页面行为 bug（行为问题走事件打点诊断），
-          // 本逻辑仅服务「升级后新旧资源共存」这一件事。
-          if (!this.cacheFlushed) {
-            this.cacheFlushed = true;
-            try {
-              const vRaw = this.resourceManager?.getRawFileContentSync('onlyoffice/version.json') as Uint8Array | undefined;
-              const cur = vRaw ? String((JSON.parse(u8ToStr(vRaw)) as Record<string, string>).v || '') : '';
-              const metaP = this.hostFilesDir + '/app_version.json';
-              // meta 文件为纯文本版本号（非 JSON——写端 Uint8Array 直写，见下）
-              let old = '';
-              const oldB = readFileBuf(metaP);
-              if (oldB) {
-                old = u8ToStr(new Uint8Array(oldB)).trim();
-              }
-              if (old !== cur) {
-                this.controller.removeCache(true);
-                const curBytes = new Uint8Array(cur.length);
-                for (let bi = 0; bi < cur.length; bi++) {
-                  curBytes[bi] = cur.charCodeAt(bi);
-                }
-                writeFileBuf(metaP, curBytes);
-                this.arkLog('VERSION_CACHE_FLUSH v=' + cur + ' (was ' + (old || 'none') + ')');
-              }
-            } catch (ce) {
-              this.arkLog('VERSION_CACHE_ERR ' + String(ce));
-            }
+  /**
+   * 页面实例就绪（Web onControllerAttached，每实例一次——节点复用不重装配）：
+   * 桥装配（AscNative 注册）。P1a：装配与业务仍单例（handler/saveTarget 读 this）；
+   * P1b 起 per-tab 化。升级自愈 cacheFlush 仅 home 实例执行（removeCache 对同一
+   * user data dir 全实例生效——产品级一次即可）。
+   */
+  private onInstanceReady(ctx: DocTabCtx): void {
+    // 升级自愈（2026-09-06 注释原文）：install -r 整包替换 rawfile，但 WebView 磁盘
+    // 缓存（data/storage/el2/base/cache/web/Cache，install -r 不清空）中同 URL 旧响应
+    // 可能被命中——主页面/编辑页 URL 已带 ?v=<资源哈希>（cache-bust）自愈，但插件
+    // iframe 等子资源引用无版本参数（如 plugins/v1/plugins.js）——兜底：资源版本
+    // 变化后首次启动 flush 一次（once per version；记录于 files/app_version.json）。
+    // 前车之鉴：不得用缓存清理解释页面行为 bug。
+    if (ctx.kind === 'home' && !this.cacheFlushed) {
+      this.cacheFlushed = true;
+      try {
+        const vRaw = this.resourceManager?.getRawFileContentSync('onlyoffice/version.json') as Uint8Array | undefined;
+        const cur = vRaw ? String((JSON.parse(u8ToStr(vRaw)) as Record<string, string>).v || '') : '';
+        const metaP = this.hostFilesDir + '/app_version.json';
+        let old = '';
+        const oldB = readFileBuf(metaP);
+        if (oldB) {
+          old = u8ToStr(new Uint8Array(oldB)).trim();
+        }
+        if (old !== cur) {
+          ctx.controller.removeCache(true);
+          const curBytes = new Uint8Array(cur.length);
+          for (let bi = 0; bi < cur.length; bi++) {
+            curBytes[bi] = cur.charCodeAt(bi);
           }
-          // ascNative 字段保持强引用（registerJavaScriptProxy 代理对象避免被回收）。
-          const nativeDispatch = new AscNativeDispatch(this.hostFilesDir, ((m: string) => this.arkLog(m)));
-          // LoadFontBase64 桥（引擎桌面路径取字体字节）：rawfile/onlyoffice/fonts/<id>
-          // —— 2026-09-05 根因修复（此前缺失 → CJK 字体流空 → 方块）
-          nativeDispatch.setRawReader((p: string) => {
-            const raw = this.resourceManager?.getRawFileContentSync(p);
-            return raw ? (raw as Uint8Array) : null;
-          });
-          nativeDispatch.setHandler(new ShellCommandHandler(this));
-          nativeDispatch.setLocalStartOpenHandler(() => {
-            this.onEditorReadyForDoc();
-          });
-          // save:type 询问（v2 单点事实源）：页面 asc_Save 同步询问保存目标——
-          // 'none'（autosave 跳过/用户保存→另存为）| 'sandbox' | 'uri'
-          nativeDispatch.setSaveTargetReader(() => this.saveTarget);
-          this.ascNative = new AscNativeBridge(nativeDispatch);
-          this.controller.registerJavaScriptProxy(this.ascNative, 'AscNative', ['_call', '_onReady'], []);
-        })
-        .onPageEnd(() => {
-          // 统一日志入口（arkLog）：ArkTS 侧日志与页面 [web] 日志同文件 web_console.txt
-          //（hilog 部分环境不可抓），时间戳对齐便于诊断排序
-          const cu = this.controller.getUrl();
-          this.arkLog('PAGE_END url=' + cu);
-          // M7 诊断直达：welcome（首页）完成加载后触发样本打开（等待 welcome 不再与 loadUrl 竞争）
-          if (this.m7DirectQueued && cu.indexOf('/main/index.html') < 0) {
-            this.m7DirectQueued = false;
-            try {
-              const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/smoke/samples/' + this.m7Target) as Uint8Array;
-              const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
-              const ext = this.m7Target.substring(this.m7Target.lastIndexOf('.') + 1).toLowerCase();
-              this.arkLog('M7_DIRECT_OPEN ' + this.m7Target + ' len=' + ab.byteLength);
-              this.convertAndOpen(ab, ext, this.m7Target);
-            } catch (e) {
-              this.arkLog('M7_DIRECT_ERR ' + String(e));
-            }
-          }
-          // 页面级错误采集（app 初始化失败时 onerror/unhandledrejection 是最直接证据）
-          // 注：此段为页面 JS（runJavaScript 注入），内用 console.error 而非 this.arkLog——
-          // 页面侧 console.error 经 onConsole 自动落 web_console.txt（统一日志入口）。
-          const inject = `(function(){
+          writeFileBuf(metaP, curBytes);
+          this.arkLog('VERSION_CACHE_FLUSH v=' + cur + ' (was ' + (old || 'none') + ')');
+        }
+      } catch (ce) {
+        this.arkLog('VERSION_CACHE_ERR ' + String(ce));
+      }
+    }
+    // ascNative 字段保持强引用（registerJavaScriptProxy 代理对象避免被回收）。
+    const nativeDispatch = new AscNativeDispatch(this.hostFilesDir, ((m: string) => this.arkLog(m)));
+    // LoadFontBase64 桥（引擎桌面路径取字体字节）：rawfile/onlyoffice/fonts/<id>
+    // —— 2026-09-05 根因修复（此前缺失 → CJK 字体流空 → 方块）
+    nativeDispatch.setRawReader((p: string) => {
+      const raw = this.resourceManager?.getRawFileContentSync(p);
+      return raw ? (raw as Uint8Array) : null;
+    });
+    nativeDispatch.setHandler(new ShellCommandHandler(this));
+    nativeDispatch.setLocalStartOpenHandler(() => {
+      this.onEditorReadyForDoc();
+    });
+    // save:type 询问（v2 单点事实源）：页面 asc_Save 同步询问保存目标——
+    // 'none'（autosave 跳过/用户保存→另存为）| 'sandbox' | 'uri'
+    nativeDispatch.setSaveTargetReader(() => this.saveTarget);
+    this.ascNative = new AscNativeBridge(nativeDispatch);
+    ctx.controller.registerJavaScriptProxy(this.ascNative, 'AscNative', ['_call', '_onReady'], []);
+    this.arkLog('P1A_INSTANCE_READY kind=' + ctx.kind + ' id=' + ctx.id);
+  }
+
+  /** onPageEnd（每实例首次到达）：M7 直达（仅 home）+ 页面级错误采集（每实例幂等） */
+  private onPageEndCB(ctx: DocTabCtx): void {
+    const cu = ctx.controller.getUrl();
+    // M7 诊断直达：welcome（首页）完成加载后触发样本打开（避开加载竞争；仅 home）
+    if (ctx.kind === 'home' && this.m7DirectQueued && cu.indexOf('/main/index.html') < 0) {
+      this.m7DirectQueued = false;
+      try {
+        const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/smoke/samples/' + this.m7Target) as Uint8Array;
+        const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+        const ext = this.m7Target.substring(this.m7Target.lastIndexOf('.') + 1).toLowerCase();
+        this.arkLog('M7_DIRECT_OPEN ' + this.m7Target + ' len=' + ab.byteLength);
+        this.convertAndOpen(ab, ext, this.m7Target);
+      } catch (e) {
+        this.arkLog('M7_DIRECT_ERR ' + String(e));
+      }
+    }
+    // 页面级错误采集（onerror/unhandledrejection 是最直接证据；JS 内幂等 __ooh_installed）
+    const inject = `(function(){
 if(window.__ooh_installed){return;}
 window.__ooh_installed=true;
 try{var _er0=window.onerror;window.onerror=function(msg,src,ln,cl,err){console.error('JSERR '+String(msg).slice(0,160)+' @'+String(src||'').slice(-40)+':'+ln);if(_er0)return _er0.apply(this,arguments);return false;};}catch(e){}
 try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR '+String(ev.reason&&ev.reason.message||ev.reason).slice(0,160));});}catch(e){}
 })();`;
-          this.pageJS(inject);
-        })
-        .onErrorReceive((err: OnErrorReceiveEvent) => {
-          this.arkLog('Web error: ' + JSON.stringify(err));
-        })
-        .onConsole((event: OnConsoleEvent) => {
-          const line = event.message.getSourceId() + ':' + event.message.getLineNumber()
-            + ' ' + event.message.getMessage();
-          // 页面日志（web 控制台全量）→ 统一日志入口（落 web_console.txt；诊断基础
-          // 设施——页面侧错误 JSERR/UHR 生产可查，不随 ARK_DEBUG 关闭）。
-          this.arkLog('[web] ' + line);
-          return false;
-        })
-        .width('100%')
-        .layoutWeight(1)
-      // 注：M7 FAB「导出/打开」测试按钮已按稳定化计划阶段2删除（2026-09-05）——保存/打开
-      // 走官方菜单与欢迎页官方入口（loginpage Open local file → open:folder → onShellCommand）。
+    ctx.js(inject, '');
+  }
+
+  /**
+   * P1a 打开文档到容器（单文档 tab 语义：关旧开新——新 id/新节点=新页面加载；
+   * P1b 放开多文档并存）。字节链（open-in.bin）由调用方（convertAndOpen）先行就绪。
+   */
+  private openInDoc(ext: string, name: string): void {
+    try {
+      this.docTabSeq += 1;
+      const ctx = new DocTabCtx(this.docTabSeq, 'doc', name, this.editorUrl(ext, name),
+        this.resourceManager!, this.hostFilesDir,
+        ((m: string) => this.arkLog(m)), ((c: DocTabCtx) => this.onInstanceReady(c)),
+        ((c: DocTabCtx) => this.onPageEndCB(c)));
+      const arr = this.docTabs.filter((p: DocTabPair) => p.ctx.kind !== 'doc');
+      arr.push(new DocTabPair(ctx));
+      this.docTabs = arr;
+      this.docCtxRef = ctx; // 保存链/注入链单例衔接（P1b 换 map）
+      this.focusTab = this.docTabs.length - 1;
+      this.arkLog('P1A_OPEN_TAB id=' + this.docTabSeq + ' ext=' + ext + ' title=' + name);
+    } catch (e) {
+      this.arkLog('P1A_OPEN_TAB_ERR ' + String(e));
     }
-    .width('100%')
-    .height('100%')
-    .align(Alignment.BottomStart)
+  }
+
+  /** 关闭 doc tab（file:close / tab ×）：移除节点（挂载即销毁）+ 回主页 */
+  private closeDocTab(id: number): void {
+    try {
+      let idx = -1;
+      for (let i = 0; i < this.docTabs.length; i++) {
+        if (this.docTabs[i].ctx.id === id) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx < 0) {
+        return;
+      }
+      const arr = this.docTabs.slice();
+      arr.splice(idx, 1);
+      this.docTabs = arr;
+      if (this.docCtxRef !== null && this.docCtxRef.id === id) {
+        this.docCtxRef = null; // 引用丢弃 → NodeController 随数组移除回收（webview 销毁）
+      }
+      this.focusTab = 0;
+      this.arkLog('P1A_CLOSE_TAB id=' + id);
+    } catch (e) {
+      this.arkLog('P1A_CLOSE_TAB_ERR ' + String(e));
+    }
+  }
+
+  /** tab 切换（DocTabHost.onSwitch）：非激活实例打点（P0 判据复用：后台实例活） */
+  private onSwitchTab(idx: number): void {
+    for (let i = 0; i < this.docTabs.length; i++) {
+      const c = this.docTabs[i].ctx;
+      if (i !== idx && c.attached) {
+        c.js('(function(){try{console.error("P1A_ALIVE ' + c.kind + c.id
+          + ' rd="+document.readyState);}catch(e){console.error("P1A_ALIVE_ERR "+e);}})();', '');
+      }
+    }
+  }
+
+  build() {
+    if (this.p0On) {
+      // P0 探针分支：p0tabs=1（ability 启动参数）挂载多实例验证骨架；产品态恒 else
+      P0TabsProbe({ tabs: $p0Tabs })
+    } else {
+      // P1a 容器：主页常驻（恒第一）+ doc tab 动态（NodeContainer 节点复用=切回零重建）
+      DocTabHost({
+        tabs: $docTabs,
+        focus: $focusTab,
+        onCloseDoc: (id: number) => this.closeDocTab(id),
+        onSwitch: (idx: number) => this.onSwitchTab(idx)
+      })
     }
   }
 }
