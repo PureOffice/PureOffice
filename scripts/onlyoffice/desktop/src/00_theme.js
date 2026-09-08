@@ -108,4 +108,35 @@
       } catch (e3) {}
     } catch (e4) {}
   })();
+
+  // ---- 0.11 文件菜单「导出为PDF」隐藏（用户 2026-09-09 要求移除）----
+  //     官方显隐条件（spreadsheeteditor FileMenu.js:408）：
+  //     canDownload && isDesktopApp && isOffline —— 与「另存为」（407）**条件
+  //     完全相同**（不能动 canDownload/权限——会连带杀另存为）；官方
+  //     customization.features（FeaturesManager）无该功能开关——官方仅此一项级
+  //     DOM 通道。DOM 锚点=官方模板固定 id #fm-btn-export-pdf（MenuItem el）。
+  //     官方菜单每次打开会 show/hide 重置该元素 inline style——定向
+  //     MutationObserver 盯其 style 变化立即回 hide（只在命中元素上监听，
+  //     低成本；比构建链 FileMenu.js 字符串 patch 更贴近页面层可审计——
+  //     2026-09-09 用户选型）。
+  (function() {
+    // 【v1 JS 隐藏失败实测（2026-09-09 真机 1.4：导出为PDF 仍在）】v1 是
+    // 「getElementById 查找 + 只对命中元素挂定向 observer」——败因：菜单模板
+    // （FileMenu.template:12，`<li id="fm-btn-export-pdf" class="fm-btn"></li>`）
+    // 是**离线片段**；FileMenu 构造时（FileMenu.js:160 经 $markup.elementById，
+    // 见 utils.js:1254）先从 document.getElementById 取——取不到——**仅菜单打开
+    // (show) 才把模板挂载进 document**。页面 ascshim 于 head 执行：永远落空 →
+    // observer 未挂上 → 落空后无人接管（官方 menu 每次打开还会 show/hide 重置
+    // inline style）。
+    // 【v2 正解：CSS 注入 display:none!important】a) 零时序/零观察/零状态——
+    // 元素无论何时入 DOM、菜单重建多少次恒得隐藏；b) stylesheet 的 !important
+    // 恒胜非 !important 的 inline 声明（官方重置为 el.style.display=''，不带
+    // !important）——官方「每次打开重置」翻不过来；c) 页面层可审计（ascshim
+    // 挂 head，与本文件其余注入段、CJK 字体链 CSS 同惯例）。
+    try {
+      var _st = document.createElement('style');
+      _st.textContent = '#fm-btn-export-pdf{display:none!important}';
+      (document.head || document.documentElement).appendChild(_st);
+    } catch (e5) {}
+  })();
 })();
