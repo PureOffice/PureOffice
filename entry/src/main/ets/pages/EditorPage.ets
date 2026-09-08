@@ -11,6 +11,7 @@ import { Smoke } from '../common/smoke';
 import { getLaunchOptions } from '../entryability/EntryAbility';
 import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, u8ToStr } from '../common/bytes';
 import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } from '../common/recents';
+import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
 
 /** ArkTS 侧调试开关：false=仅落 web_console.txt 文件（默认）；true=另 hilog 双写 */
 const ARK_DEBUG: boolean = false;
@@ -104,6 +105,10 @@ struct EditorPage {
   /** 自动验收样本名（Smoke.target 的页面侧副本——smoke 行为见 Smoke 模块/Ascshim；
    *  空 = 产品态：无自动打开/诊断快照/样本拷贝） */
   private m7Target: string = '';
+  /** P0 多实例探针（docs/ONLYOFFICE_MULTITAB_DESIGN.md §9；p0tabs=1 启动参数门控，
+   *  产品态不挂载本分支——验证骨架，验证完可整体移除） */
+  private p0On: boolean = false;
+  @State p0Tabs: P0TabPair[] = [];
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
    *  lang=zh-CN：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
@@ -731,6 +736,21 @@ struct EditorPage {
     // M7_DIRECT 前置：onPageEnd（welcome 完成）后触发 open（见 onPageEnd 分支）——
     // 不能放此处 setTimeout 3s：与 welcome 慢加载（60s+）竞争会被覆盖。
     this.m7DirectQueued = this.m7Target.length > 0;
+    // P0 探针：启动参数 p0tabs=1 → 挂双实例验证骨架（tabs 数组用于 build 分支判断）
+    this.p0On = getLaunchOptions()['p0tabs'] === '1';
+    if (this.p0On) {
+      try {
+        const logFn: (m: string) => void = ((m: string) => this.arkLog(m));
+        this.p0Tabs = [
+          new P0TabPair(new P0TabCtx(1, '主页', this.homeUrl(), this.resourceManager!, this.hostFilesDir, logFn)),
+          new P0TabPair(new P0TabCtx(2, 'P0 文档', this.editorUrl('docx', 'P0 验证'), this.resourceManager!, this.hostFilesDir, logFn))
+        ];
+        this.arkLog('P0_TABS_INIT n=' + this.p0Tabs.length
+          + ' t1=' + this.p0Tabs[1].ctx.url);
+      } catch (e) {
+        this.arkLog('P0_TABS_ERR ' + String(e));
+      }
+    }
   }
 
   /** rawfile 样本复制到沙箱 filesDir（open 链走 userfile/ 前缀；编辑/转换产物也在 filesDir）。
@@ -755,6 +775,10 @@ struct EditorPage {
   }
 
   build() {
+    if (this.p0On) {
+      // P0 探针分支：p0tabs=1（ability 启动参数）挂载多实例验证骨架；产品态恒 else
+      P0TabsProbe({ tabs: $p0Tabs })
+    } else {
     Stack() {
       // 注意：?v=N 是对 ArkWeb http cache 的 cache-bust——rawfileLoader 已剥离 query，
       // 每次提升版本号强制再次取新页面（此 SDK 无 webview.CacheMode 枚举）。
@@ -875,5 +899,6 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     .width('100%')
     .height('100%')
     .align(Alignment.BottomStart)
+    }
   }
 }
