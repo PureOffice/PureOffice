@@ -3,7 +3,6 @@ import { common } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
 import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs, picker } from '@kit.CoreFileKit';
-import { loadRaw } from '../common/rawfileLoader';
 import { x2tConvertSync } from '../common/x2t';
 import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
 import { Smoke } from '../common/smoke';
@@ -25,18 +24,21 @@ const ARK_DEBUG: boolean = false;
  * 双重门控：ascshim 的 m7open/m7auto 另按 URL 参数触发（EditorPage 只在该模式拼参数）。
  */
 
-/** 桌面命令处理器：loginpage sdk.command/open:recent → EditorPage 业务动作 */
+/** 桌面命令处理器（per-instance：每 Web 实例一方，ctx 标识该实例——
+ *  open: 任意实例（接收方=发起者页面），save:bin / file:close 路由到该 ctx 的 per-tab 状态） */
 class ShellCommandHandler implements AscCommandHandler {
   private owner: EditorPage;
+  private ctx: DocTabCtx;
 
-  constructor(owner: EditorPage) {
+  constructor(owner: EditorPage, ctx: DocTabCtx) {
     this.owner = owner;
+    this.ctx = ctx;
   }
 
   onCommand(cmd: string, param: string, userFlag?: number): string {
     // userFlag 透传（ascBridge 第三参：1 用户保存 / 0 autosave——v2 保存语义，
     // 缺省 1 兜底用户保存）
-    return this.owner.onShellCommand(cmd, param, userFlag ?? 1);
+    return this.owner.onTabCommand(this.ctx, cmd, param, userFlag ?? 1);
   }
 }
 
@@ -47,28 +49,13 @@ struct EditorPage {
   private ascNative: AscNativeBridge | undefined = undefined;
   private hostFilesDir: string = '';
   private webLogPath: string = '';
-  // —— 官方打开链（M3）：open:recent → x2t → 临时文件 open-in.bin（页面 XHR 拉字节），
-  //     本布尔量仅作「有待打开文档」守卫（原 base64 暂存字段从未被消费，2026-09-05 删除） ——
-  private pendingOpenFile: boolean = false;
-  // 当前打开文档名（M4 保存回写源文件用；一次性，不残留）
-  private currentOpenName: string = '';
-  /** M7：当前打开文档扩展名（docx/xlsx/pptx）—— 保存链 save.<ext> 用 */
-  private currentOpenExt: string = 'docx';
-
   /** M7 诊断直达配额：onPageEnd 时打开样本（welcome 完成后才触发，避开加载竞争） */
   private m7DirectQueued: boolean = false;
-  /** 资源版本自愈 flush 一次守卫（onControllerAttached 周期内）——见 onControllerAttached 注释 */
+  /** 资源版本自愈 flush 一次守卫（onInstanceReady 周期内）——升级自愈只跑一次 */
   private cacheFlushed: boolean = false;
-  /**
-   * 保存目标（单一事实源）——页面 asc_Save 经 save:type 同步询问本值：
-   *   'none'    —— 新建（无文件身份）：用户保存=弹另存为；autosave=跳过
-   *   'sandbox' —— 打开的文件：保存写回沙箱源文件（recents 路径）
-   *   'uri'     —— 用户另存为的真实位置：保存写回 uri（+沙箱镜像兜底）
-   * 页面 asc_Save 经 save:type 同步询问本值（40_save 无本地状态）；
-   * 用户另存为成功后 'none' → 'uri'（会话内唯一演进点）。
-   */
-  private saveTarget: string = 'none';
-  private savePath: string = '';
+  // —— P1b（2026-09-08）：「保存目标」等文档身份字段已全部下沉 per-tab 的
+  //    DocTabCtx.state（DocTabState：name/ext/saveTarget/savePath/pendingOpen）——
+  //    原单例保留字段 savePath 等不再存在（多文档并存下单例必串写，见设计 §3）。
 
   /**
    * 统一日志入口（ArkTS 侧 → web_console.txt 镜像，与页面 [web] 日志同文件/时间戳）。
@@ -99,11 +86,12 @@ struct EditorPage {
    *  产品态不挂载本分支——验证骨架，验证完可整体移除） */
   private p0On: boolean = false;
   @State p0Tabs: P0TabPair[] = [];
-  /** P1a 容器：tab 数组（home 恒第一，随打开/关闭变化）+ 活动 tab（DocTabHost 受控） */
+  /** P1b 容器：tab 数组（home 恒第一，随打开/关闭变化）+ 活动 tab（DocTabHost 受控） */
   @State docTabs: DocTabPair[] = [];
   @State focusTab: number = 0;
-  /** 最近 doc 实例引用（P1a 单文档：保存链/注入链单例衔接；P1b 换 map） */
-  private docCtxRef: DocTabCtx | null = null;
+  /** tab 标题平行数组（@State 元素可观察——另存为改名即时刷新 chip）；与 docTabs 同步
+   *  （index 对应；home 恒 '主页'） */
+  @State docTitles: string[] = [];
   private docTabSeq: number = 0;
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
@@ -124,16 +112,17 @@ struct EditorPage {
    * 注：官方面向 API 调用方的桌面壳页（api/documents/index.html + iframe）组合已实测
    * 到 openDocument 前链；引擎模型初始化依赖 B 架构运行时序，本阶段以顶层页打开（后续 M4+ 返回 iframe 结构）。
    */
-  private editorUrl(type: string, title: string): string {
+  private editorUrl(type: string, title: string, sidVal?: number): string {
     const app = type === 'xlsx' ? 'spreadsheeteditor'
       : type === 'pptx' ? 'presentationeditor' : 'documenteditor';
     let url = 'http://localhost/onlyoffice/webapps/apps/' + app + '/main/index.html?v=' + this.pageVer
       + '&fileType=' + type + '&isDesktop=false&docType=' + type + '&lang=zh-CN&title=' + encodeURIComponent(title)
-      // sid=每次打开唯一化（2026-09-05 修复「关闭文档后再新建显示旧内容」：相同 URL 的
+      // sid=实例唯一化（2026-09-05 修复「关闭文档后再新建显示旧内容」：相同 URL 的
       // 二次导航 ArkWeb 复用引擎实例——页面事件照常（LSO_OPEN_DOCUMENT_OK 收到新模板
       // 字节 len=1086）但旧文档模型残留（真机实锤：新建「未命名的文档」显示 demo-cn 7 页
-      // 内容）；sid 强制全新导航。禁止回退为固定 URL（v= 仅防 HTTP 缓存，不防复用）。
-      + '&sid=' + Date.now();
+      // 内容）；sid 强制全新导航。P1b 起 sid=tabId（单调递增，比 Date.now 更保唯一；
+      // 语义=tab 标识）。禁止回退为固定 URL（v= 仅防 HTTP 缓存，不防复用）。
+      + '&sid=' + (sidVal !== undefined ? sidVal : Date.now());
     // M7 验收态：自动打开后追加 m7auto=1（ascshim：模型就绪→序列化→save:bin→x2t 落盘）
     if (this.m7Target.length > 0) {
       url = url + '&m7auto=1'
@@ -151,8 +140,12 @@ struct EditorPage {
    *   create:new  —— 空文档（无字节），直接打开外壳（引擎 OfflineApp 空文档）
    * 返回 'true'/'false'：loginpage 不依赖返回值（C++ 侧真正动作已由本函数执行）。
    */
-  onShellCommand(cmd: string, param: string, userFlag: number = 1): string {
-    this.arkLog('[ShellCommand] ' + cmd + ' ' + param.slice(0, 300));
+  /**
+   * 桌面命令（per-instance 分派入口——handler 按 ctx 路由；open: 由实例发起即合法，
+   * save:bin / file:close 只认发送者 ctx 的 per-tab 状态）。
+   */
+  onTabCommand(ctx: DocTabCtx, cmd: string, param: string, userFlag: number = 1): string {
+    this.arkLog('[TabCommand] ' + ctx.kind + ctx.id + ' ' + cmd + ' ' + param.slice(0, 300));
     if (cmd === 'open:recent') {
       return this.openRecent(param);
     }
@@ -174,7 +167,7 @@ struct EditorPage {
     }
     if (cmd === 'save:bin') {
       // userFlag=1 用户主动保存（补录 recents）/ 0 autosave（不补录——2026-09-05）
-      return this.saveBinRaw(param, userFlag > 0);
+      return this.saveBinRaw(ctx, param, userFlag > 0);
     }
     if (cmd === 'save:as') {
       // 官方另存为（asc_Save isSaveAs=true → 同格式）：40_save 发来的是**序列化流 DOCY**
@@ -183,35 +176,11 @@ struct EditorPage {
       // savePath 身份演进+recents 补录）。直接写 DOCY=伪 docx（外部打开损坏——
       // 2026-09-08 真机发现 SAVE_AS_WRITE 落盘的是 doct bin 流，必修）。不同格式导出
       // 走「下载为」（暂未支持，菜单已隐藏——2026-09-08 用户决策）。
-      const abS = b64ToBuf(param);
-      if (abS === null || abS.byteLength === 0) {
-        this.arkLog('SAVE_AS_B64_BAD len=' + param.length);
-        return 'false';
-      }
-      const extA = this.currentOpenExt.length > 0 ? this.currentOpenExt : 'docx';
-      const inA = this.hostFilesDir + '/saveas-in.bin';
-      const outA = this.hostFilesDir + '/saveas-out.' + extA;
-      if (!writeFileBuf(inA, abS)) {
-        this.arkLog('SAVE_AS_WRITE_ERR ' + inA);
-        return 'false';
-      }
-      const rcA = x2tConvertSync(x2tXml(inA, outA));
-      this.arkLog('SAVE_AS_X2T rc=0x' + (rcA >>> 0).toString(16));
-      if (rcA !== 0) {
-        this.arkLog('SAVE_AS_X2T_FAIL');
-        return 'false';
-      }
-      const docxBuf = readFileBuf(outA);
-      if (docxBuf === null) {
-        this.arkLog('SAVE_AS_SUBMISS ' + outA);
-        return 'false';
-      }
-      this.doSaveAs(docxBuf);
-      return 'true';
+      return this.saveAsBin(ctx, param);
     }
     if (cmd === 'go:folder') {
-      // 官方桌面"返回"（FileMenu 返回到文档列表）→ P1a：激活主页 tab（doc 实例保留
-      // ——tab 化语义：文档仍开着，回主页后点 doc chip 即回，状态零重建）
+      // 官方桌面"返回"（FileMenu 返回到文档列表）→ tab 化语义：激活主页 tab（doc 实例
+      // 保留——文档仍开着，点 doc chip 即回，状态零重建）
       this.arkLog('GOBACK -> home tab');
       this.focusTab = 0;
       return 'true';
@@ -235,12 +204,8 @@ struct EditorPage {
       try {
         const oe = JSON.parse(param) as Record<string, Object>;
         if (String(oe['action']) === 'file:close') {
-          this.arkLog('CLOSE_FILE -> doc tab close');
-          if (this.docCtxRef !== null) {
-            this.closeDocTab(this.docCtxRef.id);
-          } else {
-            this.focusTab = 0;
-          }
+          this.arkLog('CLOSE_FILE -> doc tab close id=' + ctx.id);
+          this.closeDocTab(ctx.id);
         }
       } catch (e) {
         this.arkLog('EDITOR_EVENT_ERR ' + String(e));
@@ -249,6 +214,40 @@ struct EditorPage {
     }
     // 其余桌面命令（files:check 等）M5 登记降级，当前 no-op
     return 'true';
+  }
+
+  /** 另存为命令体（per-tab：临时文件带 ctx 后缀——多文档隔离） */
+  private saveAsBin(ctx: DocTabCtx, param: string): string {
+    try {
+      const abS = b64ToBuf(param);
+      if (abS === null || abS.byteLength === 0) {
+        this.arkLog('SAVE_AS_B64_BAD len=' + param.length);
+        return 'false';
+      }
+      const extA = ctx.state.ext.length > 0 ? ctx.state.ext : 'docx';
+      const inA = ctx.tabPath('saveas-in.bin');
+      const outA = ctx.tabPath('saveas-out.' + extA);
+      if (!writeFileBuf(inA, abS)) {
+        this.arkLog('SAVE_AS_WRITE_ERR ' + inA);
+        return 'false';
+      }
+      const rcA = x2tConvertSync(x2tXml(inA, outA));
+      this.arkLog('SAVE_AS_X2T rc=0x' + (rcA >>> 0).toString(16) + ' tab=' + ctx.id);
+      if (rcA !== 0) {
+        this.arkLog('SAVE_AS_X2T_FAIL');
+        return 'false';
+      }
+      const docxBuf = readFileBuf(outA);
+      if (docxBuf === null) {
+        this.arkLog('SAVE_AS_SUBMISS ' + outA);
+        return 'false';
+      }
+      this.doSaveAs(ctx, docxBuf);
+      return 'true';
+    } catch (e) {
+      this.arkLog('SAVE_AS_ERR ' + String(e));
+      return 'false';
+    }
   }
 
   /** 官方语言包词条缓存（懒加载，一次；三 app 键值） */
@@ -306,7 +305,7 @@ struct EditorPage {
       // 未保存的新建无独立文件身份，点开即编辑 — 2026-09-05 修复（原 convertAndOpen
       // 无条件 appendRecent，创建一轮就把未命名文档堆进 recents，用户实测质疑）
       // 2026-09-05 根因修正：newDoc=true（零状态空文档，无模板文件/无写入源）
-      return this.convertAndOpen(ab, ext, this.defaultDocName(ext), false, true);
+      return this.openNewTabEntry(ab, ext, this.defaultDocName(ext), false, true);
     } catch (e) {
       this.arkLog('CREATE_NEW_ERR ' + String(e));
       return 'false';
@@ -351,7 +350,7 @@ struct EditorPage {
       }
       this.arkLog('OPEN_LOCAL_OK label=' + label + ' uri=' + uri + ' size=' + ab.byteLength);
       // userUri=系统选择器真实位置——保存目标=用户原文件（覆盖式保存，2026-09-05）
-      this.convertAndOpen(ab, ext, label, true, false, uri);
+      this.openNewTabEntry(ab, ext, label, true, false, uri);
     } catch (e) {
       this.arkLog('OPEN_LOCAL_ERR ' + String(e));
     }
@@ -395,7 +394,7 @@ struct EditorPage {
         return 'false';
       }
       // userUri=recents 记录的真实位置（uri→保存覆盖用户文件；历史沙箱路径→兼容）
-      return this.convertAndOpen(ab, ext, base.length > 0 ? base : name, true, false, path);
+      return this.openNewTabEntry(ab, ext, base.length > 0 ? base : name, true, false, path);
     } catch (e) {
       this.arkLog('OPEN_RECENT_ERR ' + String(e));
       return 'false';
@@ -403,54 +402,62 @@ struct EditorPage {
   }
 
   /**
-   * 另存为（新文件首次保存）：系统保存对话框（DocumentViewPicker.save）→ 用户选位置/
-   * 文件名 → 字节落盘（uri 写）→ 沙箱同步（后续保存=覆盖；重开链路径稳定）→
-   * recents 补录 + isNewUnsaved 复位。取消 → 不动（未保存状态保留）。
+   * 另存为（per-tab：ctx.state 唯一身份源）：系统保存对话框（DocumentViewPicker.save）
+   * → 用户选位置/文件名 → 字节落盘（uri 写）→ 身份演进（'none'→'uri'）→ recents 补录
+   * → tab 标题刷新（docTitles 平行数组——@State 元素级可观察）。取消 → 不动。
    */
-  private async doSaveAs(outBuf: ArrayBuffer): Promise<void> {
+  private async doSaveAs(ctx: DocTabCtx, outBuf: ArrayBuffer): Promise<void> {
     try {
-      const ctx = getContext(this) as common.UIAbilityContext;
-      const dvp = new picker.DocumentViewPicker(ctx);
+      const aCtx = getContext(this) as common.UIAbilityContext;
+      const dvp = new picker.DocumentViewPicker(aCtx);
       const opts = new picker.DocumentSaveOptions();
       // 默认名：已保存文档=当前名；新建=语言包中文未命名（defaultDocName——
       // 2026-09-08 补：doSaveAs 兜底名原写死 Unnamed.，与 openNewFile 语言包驱动对齐）
-      const defName = this.currentOpenName.length > 0 ? this.currentOpenName : this.defaultDocName(this.currentOpenExt);
+      const defName = ctx.state.name.length > 0 ? ctx.state.name : this.defaultDocName(ctx.state.ext);
       opts.newFileNames = [defName];
       const uris = await dvp.save(opts);
       if (!uris || uris.length === 0) {
-        this.arkLog('SAVE_AS_CANCEL');
+        this.arkLog('SAVE_AS_CANCEL tab=' + ctx.id);
         return;
       }
       const uri = uris[0];
       const ok = writeFileBuf(uri, outBuf);
-      this.arkLog('SAVE_AS_WRITE uri=' + uri + ' ok=' + ok + ' size=' + outBuf.byteLength);
+      this.arkLog('SAVE_AS_WRITE uri=' + uri + ' ok=' + ok + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
       if (!ok) {
         this.arkLog('SAVE_AS_WRITE_ERR ' + uri);
         return;
       }
-      this.savePath = uri; // 身份=真实位置（后续保存覆盖写它；工作副本由保存链同步）
-      // 文件身份 = 用户选择的位置（recents path=真实 uri——2026-09-05 用户：
-      // 「选了桌面路径列表还显示沙箱路径」）；文件名以 uri 尾段为准
+      ctx.state.savePath = uri; // 身份=真实位置（后续保存覆盖写它）
+      // 文件身份 = 用户选择的位置（recents path=真实 uri）；文件名以 uri 尾段为准
       const base = decodeURIComponent(uri.substring(uri.lastIndexOf('/') + 1));
       if (base.length > 0) {
-        this.currentOpenName = base;
+        ctx.state.name = base;
         const dot = base.lastIndexOf('.');
         if (dot > 0) {
           const e2 = base.substring(dot + 1).toLowerCase();
           if (e2 === 'docx' || e2 === 'xlsx' || e2 === 'pptx') {
-            this.currentOpenExt = e2;
+            ctx.state.ext = e2;
           }
         }
       }
       // 身份演进（saveTarget 单点）：'none' → 'uri'——页面经 save:type 同步询问即命中。
       // 不写沙箱镜像：用户数据只存用户选择的位置（重开后由打开链自动建立工作副本）。
-      this.saveTarget = 'uri';
-      if (this.currentOpenName.length > 0) {
-        const typeNum = this.currentOpenExt === 'xlsx' ? RECENT_TYPE_XLSX
-          : this.currentOpenExt === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
+      ctx.state.saveTarget = 'uri';
+      // tab 标题刷新（docTitles 平行数组 index 与 docTabs 一致）
+      for (let i = 0; i < this.docTabs.length; i++) {
+        if (this.docTabs[i].ctx === ctx) {
+          const tArr = this.docTitles.slice();
+          tArr[i] = base.length > 0 ? base : this.defaultDocName(ctx.state.ext);
+          this.docTitles = tArr;
+          break;
+        }
+      }
+      if (ctx.state.name.length > 0) {
+        const typeNum = ctx.state.ext === 'xlsx' ? RECENT_TYPE_XLSX
+          : ctx.state.ext === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
         // path=真实保存位置（uri）；重开走 readFileBuf(uri)（picker 授权持久）
-        if (appendRecent(this.hostFilesDir, this.currentOpenName, uri, typeNum)) {
-          this.arkLog('RECENTS_APPEND_SAVEAS name=' + this.currentOpenName + ' path=' + uri);
+        if (appendRecent(this.hostFilesDir, ctx.state.name, uri, typeNum)) {
+          this.arkLog('RECENTS_APPEND_SAVEAS name=' + ctx.state.name + ' path=' + uri);
         }
       }
     } catch (e) {
@@ -468,7 +475,13 @@ struct EditorPage {
    * 至此：写沙箱 in.bin → x2t doct_bin2docx → save.<ext>（zip 头校验）→ 回写当前源文件。
    * userSaved=1 用户保存（补录 recents）/ 0 autosave（只落盘不补录，2026-09-05 语义）。
    */
-  private saveBinRaw(b64: string, userSaved: boolean = true): string {
+  /**
+   * M4 保存链本体（per-tab 版：ctx.state 身份源 + ctx.tabPath 临时文件——多文档隔离）：
+   * save:bin ← ascshim saveDocument 接手 → 官方 asc_nativeGetFileData（BinaryFileWriter
+   * 序列化当前模型 → DOCY;v10）→ 本方法：写 per-tab in.<id>.bin → x2t doct_bin2docx →
+   * save.<id>.<ext>（zip 头校验）→ 回写当前源文件（ctx.state.savePath）。
+   */
+  private saveBinRaw(ctx: DocTabCtx, b64: string, userSaved: boolean = true): string {
     try {
       if (b64.length === 0) {
         this.arkLog('SAVE_BIN_EMPTY');
@@ -476,9 +489,9 @@ struct EditorPage {
       }
       const ab = b64ToBuf(b64);
       // M7 三格式：目标后缀决定 x2t 转换器（doct_bin2docx / xlst_bin2xlsx / pptt_bin2pptx）
-      const extU = this.currentOpenExt.length > 0 ? this.currentOpenExt : 'docx';
-      const inP = this.hostFilesDir + '/in.bin';
-      const outP = this.hostFilesDir + '/save.' + extU;
+      const extU = ctx.state.ext.length > 0 ? ctx.state.ext : 'docx';
+      const inP = ctx.tabPath('in.bin');
+      const outP = ctx.tabPath('save.' + extU);
       if (!writeFileBuf(inP, ab)) {
         this.arkLog('SAVE_BIN_WRITE_ERR ' + inP);
         return 'false';
@@ -508,42 +521,42 @@ struct EditorPage {
       // doSaveAs（async：dvp.save → uri 落盘 + 沙箱同步 + recents + 复位 isNewUnsaved）。
       // 对话框异步期间先回 'true'（保存受理）；取消=未保存（isNewUnsaved 仍 true，
       // 下次保存再弹）。
-      // v2 保存决策（单一事实源 saveTarget）：
-      if (userSaved && this.saveTarget === 'none') {
+      // v2 保存决策（单一事实源 saveTarget，per-tab）：
+      if (userSaved && ctx.state.saveTarget === 'none') {
         // 新建无身份 + 用户保存 → 弹另存为（async：dvp.save → uri 落盘 → 'none'→'uri'）
-        this.arkLog('SAVE_AS_DIALOG name=' + this.currentOpenName);
-        this.doSaveAs(outBuf);
+        this.arkLog('SAVE_AS_DIALOG name=' + ctx.state.name + ' tab=' + ctx.id);
+        this.doSaveAs(ctx, outBuf);
         return 'true';
       }
-      if (this.currentOpenName.length > 0) {
-        if (this.saveTarget === 'uri' && this.savePath.length > 0) {
-          // 已另存为：覆写真实位置 + 沙箱镜像同步（镜像不参与 recents，仅重开兜底）
-          const okUri = writeFileBuf(this.savePath, outBuf);
-          this.arkLog('SAVE_BIN_URI ok=' + okUri + ' uri=' + this.savePath + ' size=' + outBuf.byteLength);
+      if (ctx.state.name.length > 0) {
+        if (ctx.state.saveTarget === 'uri' && ctx.state.savePath.length > 0) {
+          // 已另存为：覆写真实位置（用户数据=savePath uri）
+          const okUri = writeFileBuf(ctx.state.savePath, outBuf);
+          this.arkLog('SAVE_BIN_URI ok=' + okUri + ' uri=' + ctx.state.savePath + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
           if (!okUri) {
-            this.arkLog('SAVE_BIN_URI_ERR ' + this.savePath);
+            this.arkLog('SAVE_BIN_URI_ERR ' + ctx.state.savePath);
             return 'false';
           }
         }
         // 引擎工作副本同步（打开/另存为后重开链以最新内容起步；不参与 recents/用户
         // 数据——用户文件=savePath（uri 或沙箱工作副本，2026-09-05）
-        const srcP = this.hostFilesDir + '/' + this.currentOpenName;
+        const srcP = this.hostFilesDir + '/' + ctx.state.name;
         if (!writeFileBuf(srcP, outBuf)) {
           this.arkLog('SAVE_BIN_BACK_ERR src=' + srcP);
           return 'false';
         }
-        this.arkLog('SAVE_BIN_BACK src=' + srcP + ' size=' + outBuf.byteLength);
+        this.arkLog('SAVE_BIN_BACK src=' + srcP + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
         // 保存成功 = 文件身份成立（官方桌面语义：保存后的文件进「最近使用」；
-        // 新建在打开链已禁 recents（convertAndOpen addRecent=false）——用户保存即补录；
+        // 新建在打开链已禁 recents（openNewTabEntry addRecent=false）——用户保存即补录；
         // appendRecent 同名去旧置顶，已打开文件的保存同样刷新置顶。
         // 仅用户保存补录（自动保存/autosave 不打扰列表——2026-09-05 用户实测后修正）。
         if (userSaved) {
-          const saveType = this.currentOpenExt === 'xlsx' ? RECENT_TYPE_XLSX
-            : this.currentOpenExt === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
+          const saveType = ctx.state.ext === 'xlsx' ? RECENT_TYPE_XLSX
+            : ctx.state.ext === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
           // recents.path：真实位置优先（uri），否则沙箱（打开链/兼容）
-          const recentPath = this.saveTarget === 'uri' ? this.savePath : srcP;
-          if (appendRecent(this.hostFilesDir, this.currentOpenName, recentPath, saveType)) {
-            this.arkLog('RECENTS_APPEND_SAVE name=' + this.currentOpenName);
+          const recentPath = ctx.state.saveTarget === 'uri' ? ctx.state.savePath : srcP;
+          if (appendRecent(this.hostFilesDir, ctx.state.name, recentPath, saveType)) {
+            this.arkLog('RECENTS_APPEND_SAVE name=' + ctx.state.name);
           }
         }
       }
@@ -566,13 +579,31 @@ struct EditorPage {
    *                首次=另存为；此前把新建当「打开模板文件」导致保存/recents 路径/未保存
    *                语义全部错位）
    */
-  private convertAndOpen(ab: ArrayBuffer, ext: string, name: string, addRecent: boolean = true,
+  /**
+   * 打开管线（per-tab 版，P1b——多文档并存的基础）：
+   * 先建 doc 实例（tab id 定名）→ 沙箱工作副本（newDoc 跳过）→ x2t 转换
+   * （临时文件带 tab 后缀：open-in.<id>.*——多实例互不踩）→ per-tab 身份 state
+   * （name/ext/saveTarget/savePath/pendingOpen 全部下沉）→ 追加 tab 并列（不再关旧开新）。
+   * m7 验收锁（设计 §6.4）：验收态单 tab 隧道（关旧开新）——产品态自由多开。
+   */
+  private openNewTabEntry(ab: ArrayBuffer, ext: string, name: string, addRecent: boolean = true,
     newDoc: boolean = false, userUri?: string): string {
     try {
       const extU = ext.toLowerCase();
+      if (Smoke.enabled()) {
+        const oldDocs = this.docTabs.filter((p: DocTabPair) => p.ctx.kind === 'doc');
+        for (let i = 0; i < oldDocs.length; i++) {
+          this.closeDocTab(oldDocs[i].ctx.id);
+        }
+      }
+      // 身份对象先行（tabId 唯一化）：临时文件/url/state 全部以 id 定名
+      this.docTabSeq += 1;
+      const ctx = new DocTabCtx(this.docTabSeq, 'doc', name, '',
+        this.resourceManager!, this.hostFilesDir,
+        ((m: string) => this.arkLog(m)), ((c: DocTabCtx) => this.onInstanceReady(c)),
+        ((c: DocTabCtx) => this.onPageEndCB(c)));
       // M7：源文件持久化到沙箱 <name>（openRecent 的来源 / 保存回写目标 / recents 条目；
-      // 系统选择器授权 uri 的读权限只保证 select 返回后短暂有效，字节落盘即固化）
-      // 2026-09-05：newDoc（创建新文档）跳过——无文件身份（name 仅作引擎标题）
+      // 选择器授权 uri 读权限短暂——字节落盘即固化）。newDoc 跳过（无文件身份，2026-09-05）
       if (!newDoc) {
         const srcP = this.hostFilesDir + '/' + name;
         if (!writeFileBuf(srcP, ab)) {
@@ -580,17 +611,16 @@ struct EditorPage {
           return 'false';
         }
       }
-      // 临时文件本轮 TRUNC 重写（打开链字节在 onEditorReadyForDoc 派发完才由页面拉取；
-      // 不主动删除——清理时序与页面 XHR 存在竞态，2026-09-05 已修）
-      const inP = this.hostFilesDir + '/open-in.' + extU;
-      const outP = this.hostFilesDir + '/open-in.bin';
+      // 临时文件 per-tab（TRUNC 覆盖语义不变；不在回调里删——与页面 XHR 竞态，2026-09-05）
+      const inP = ctx.tabPath('open-in.' + extU);
+      const outP = ctx.tabPath('open-in.bin');
       if (!writeFileBuf(inP, ab)) {
         this.arkLog('OPEN_TMP_WRITE_ERR ' + inP);
         return 'false';
       }
       // x2t 按输入扩展名自动选 *2doct_bin 转换器；.bin 输出后缀已实机验证（POC 打开链 v10）
       const rc = x2tConvertSync(x2tXml(inP, outP));
-      this.arkLog('OPEN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
+      this.arkLog('OPEN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ') tab=' + ctx.id);
       if (rc !== 0) {
         this.arkLog('OPEN_X2T_FAIL ext=' + extU);
         return 'false';
@@ -600,43 +630,45 @@ struct EditorPage {
         this.arkLog('OPEN_BIN_MISS ' + outP);
         return 'false';
       }
-      this.pendingOpenFile = true;
+      // per-tab 身份赋值（原保存链单例字段→ctx.state）
       if (newDoc) {
-        // 新建语义：无文件身份（currentOpenName 置空——保存链见「无身份→另存为」回路）
-        this.currentOpenName = '';
-        this.currentOpenExt = extU;
-        this.saveTarget = 'none';
-        this.savePath = '';
+        ctx.state.name = '';
+        ctx.state.ext = extU;
+        ctx.state.saveTarget = 'none';
+        ctx.state.savePath = '';
       } else {
-        this.currentOpenName = name;
-        this.currentOpenExt = extU;
-        // 打开链保存目标（2026-09-05 修正「打开文件保存后用户源文件不更新」）：
-        // 有用户真实位置（系统选择器 uri / recents path=uri）→ 'uri'（保存覆盖用户
-        // 文件）；无（历史 recents 条目 path 为沙箱）→ 'sandbox'（引擎工作副本）。
-        // 沙箱工作副本始终会由本函数写入（转换链需要），但不作保存目标。
+        ctx.state.name = name;
+        ctx.state.ext = extU;
         if (userUri !== undefined && userUri.length > 0) {
           // 历史 recents 的 path 是沙箱路径（=工作副本本身）→ 保存目标=沙箱；
           // 真实位置（file:/// 等）→ 保存覆盖用户文件
-          this.saveTarget = userUri.indexOf(this.hostFilesDir) === 0 ? 'sandbox' : 'uri';
-          this.savePath = userUri;
+          ctx.state.saveTarget = userUri.indexOf(this.hostFilesDir) === 0 ? 'sandbox' : 'uri';
+          ctx.state.savePath = userUri;
         } else {
-          this.saveTarget = 'sandbox';
-          this.savePath = this.hostFilesDir + '/' + name;
+          ctx.state.saveTarget = 'sandbox';
+          ctx.state.savePath = this.hostFilesDir + '/' + name;
         }
-        // M7：recents 真数据 —— 打开过即"最近"，type 按格式枚举上报（单一实现见 recents.ets）
-        // 2026-09-05：仅打开（addRecent=true）写入；新建（create:new）不写（见 openNewFile）
-        // recents.path = 保存目标真实路径（uri 优先；沙箱路径为历史兼容）
+        // recents 真数据（仅打开 addRecent=true 写入；新建不写）——path=保存目标真实路径
         if (addRecent) {
           const typeNum = extU === 'xlsx' ? RECENT_TYPE_XLSX : extU === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
-          if (appendRecent(this.hostFilesDir, name, this.savePath, typeNum)) {
+          if (appendRecent(this.hostFilesDir, name, ctx.state.savePath, typeNum)) {
             this.arkLog('RECENTS_APPEND name=' + name + ' type=0x' + typeNum.toString(16));
           } else {
-            this.arkLog('RECENTS_APPEND_ERR name=' + name); // 写失败（records 损坏保护）不阻断打开
+            this.arkLog('RECENTS_APPEND_ERR name=' + name);
           }
         }
       }
-      this.arkLog('OPEN_CONVERTED bin=' + buf.byteLength + ' target=' + this.saveTarget);
-      this.openInDoc(extU, name);
+      ctx.state.pendingOpen = true;
+      ctx.url = this.editorUrl(extU, name, ctx.id); // sid=tabId：强制唯一加载 + 事件归属
+      const arr = this.docTabs.slice();
+      const tArr = this.docTitles.slice();
+      arr.push(new DocTabPair(ctx));
+      tArr.push(name.length > 0 ? name : this.defaultDocName(extU));
+      this.docTabs = arr;
+      this.docTitles = tArr;
+      this.focusTab = this.docTabs.length - 1;
+      this.arkLog('P1B_OPEN_TAB id=' + ctx.id + ' ext=' + extU + ' bin=' + buf.byteLength
+        + ' target=' + ctx.state.saveTarget + ' name=' + name);
       return 'true';
     } catch (e) {
       this.arkLog('OPEN_CONVERT_ERR ' + String(e));
@@ -654,16 +686,24 @@ struct EditorPage {
    * 注：DesktopOfflineAppDocumentEndLoad 是编辑器 iframe 内 sdkjs 函数（顶层不可见）；
    *     API 层字节传送是官方唯一的跨 frame 通道。
    */
-  private onEditorReadyForDoc(): void {
-    if (!this.pendingOpenFile) {
-      this.arkLog('LSO_NO_PENDING (editor ready, no doc — create:new?)');
+  /**
+   * LocalStartOpen 回调（per-instance：dispatch 装配时绑定 ctx）——字节注入该实例。
+   * 多文档下每个 doc 实例独立就绪、独立注入（open-in.<id>.bin 隔离）。
+   */
+  private onDocReady(docC: DocTabCtx): void {
+    if (!docC.state.pendingOpen) {
+      this.arkLog('LSO_NO_PENDING (editor ready, no doc — create:new?) tab=' + docC.id);
       return;
     }
-    const docC = this.docCtxRef;
-    if (docC === null) {
-      this.arkLog('LSO_NO_DOCTAB (editor ready, doc tab gone)');
-      return;
-    }
+    // tab 关闭守卫（探针注入不再进已消亡实例；注入路径本身判 null 不崩）
+    const closedTab = (): boolean => {
+      for (let i = 0; i < this.docTabs.length; i++) {
+        if (this.docTabs[i].ctx === docC) {
+          return false;
+        }
+      }
+      return true;
+    };
     // 页面 XHR 拉取沙箱 doct_bin（rawfileLoader 已拦 userfile/ → filesDir 返回真字节）→
     // window.postMessage openDocumentFromBinary（官方 api.js/Gateway/loadBinary →
     // asc_openDocumentFromBytes，checkStreamSignature 嗅探 DOCY 签名 —— web/服务器链，
@@ -671,7 +711,7 @@ struct EditorPage {
     // 字体/native 通路三件套齐备后再启用）。
     const js = '(function(){'
       + 'try{var x=new XMLHttpRequest();'
-      + 'x.open("GET","http://localhost/userfile/open-in.bin?v="+Date.now(),true);'
+      + 'x.open("GET","http://localhost/userfile/open-in.' + docC.id + '.bin?v="+Date.now(),true);'
       + 'x.responseType="arraybuffer";'
       + 'x.onload=function(){try{var ab=x.response;'
       + 'if(!ab||!ab.byteLength){console.error("LSO_XHR_EMPTY st="+x.status);return;}'
@@ -686,11 +726,11 @@ struct EditorPage {
       } else {
         this.arkLog('LSO_INJECT_OK ' + res);
       }
-      // 注：不再在此删除 open-in.bin —— runJavaScript 回调先于页面 XHR onload 返回，
+      // 注：不再在此删除临时文件 —— runJavaScript 回调先于页面 XHR onload 返回，
       // 删文件会让 rawfileLoader 返回 404（实测 XHR 拿到 58B 的 "404: <url>" 响应体），
-      // 与字节交付竞态。临时文件本就每轮 TRUNC 覆盖（见 convertAndOpen），无需清理。
+      // 与字节交付竞态。临时文件本就每轮 TRUNC 覆盖（见 openNewTabEntry），无需清理。
     });
-    this.pendingOpenFile = false; // 一次性（下次打开重新转换）
+    docC.state.pendingOpen = false; // 一次性（下次打开重新转换）
     // smoke 诊断（自动验收态才注入，产品无此行为）：页面状态快照（区分"主线程卡死"
     // vs "链未走完但页面活"）。脚本外置 rawfile/onlyoffice/smoke/prof-snap.js
     //（源 scripts/onlyoffice/smoke/——多行可读，不再以 TS 字符串内嵌单行）。
@@ -699,9 +739,9 @@ struct EditorPage {
       if (snap === null) {
         this.arkLog('SMOKE_SNAP_MISSING');
       } else {
-        const c1 = this.docCtxRef;
+        const c1 = docC;
         setTimeout(() => {
-          if (c1 !== null) {
+          if (!closedTab()) {
             c1.js(snap, '');
           }
         }, 10000);
@@ -712,9 +752,9 @@ struct EditorPage {
       if (aiTest === null) {
         this.arkLog('SMOKE_AITEST_MISSING');
       } else {
-        const c2 = this.docCtxRef;
+        const c2 = docC;
         setTimeout(() => {
-          if (c2 !== null) {
+          if (!closedTab) {
             c2.js(aiTest.replace('__AI_KEY__', Smoke.key), '');
           }
         }, 15000);
@@ -767,7 +807,7 @@ struct EditorPage {
         this.arkLog('P0_TABS_ERR ' + String(e));
       }
     }
-    // P1a 容器初始化：主页实例恒第一（常驻；doc 由 open*/create:new 动态追加）
+    // P1a 容器初始化：主页实例恒第一（常驻；doc 由打开/新建命令动态追加）
     if (!this.p0On) {
       try {
         const homeCtx = new DocTabCtx(0, 'home', '主页', this.homeUrl(),
@@ -775,6 +815,7 @@ struct EditorPage {
           ((m: string) => this.arkLog(m)), ((c: DocTabCtx) => this.onInstanceReady(c)),
           ((c: DocTabCtx) => this.onPageEndCB(c)));
         this.docTabs = [new DocTabPair(homeCtx)];
+        this.docTitles = ['主页'];
         this.arkLog('P1A_TABS_INIT home=' + homeCtx.url);
       } catch (e) {
         this.arkLog('P1A_TABS_ERR ' + String(e));
@@ -848,13 +889,15 @@ struct EditorPage {
       const raw = this.resourceManager?.getRawFileContentSync(p);
       return raw ? (raw as Uint8Array) : null;
     });
-    nativeDispatch.setHandler(new ShellCommandHandler(this));
+    // per-instance 装配：handler/LocalStartOpen/save:type 全部绑定该 ctx
+    // （P1b 核心——多文档并存：每实例的保存/注入只走自己的 per-tab 状态）
+    nativeDispatch.setHandler(new ShellCommandHandler(this, ctx));
     nativeDispatch.setLocalStartOpenHandler(() => {
-      this.onEditorReadyForDoc();
+      this.onDocReady(ctx);
     });
-    // save:type 询问（v2 单点事实源）：页面 asc_Save 同步询问保存目标——
+    // save:type 询问（per-tab 单一事实源）：页面 asc_Save 同步询问保存目标——
     // 'none'（autosave 跳过/用户保存→另存为）| 'sandbox' | 'uri'
-    nativeDispatch.setSaveTargetReader(() => this.saveTarget);
+    nativeDispatch.setSaveTargetReader(() => ctx.state.saveTarget);
     this.ascNative = new AscNativeBridge(nativeDispatch);
     ctx.controller.registerJavaScriptProxy(this.ascNative, 'AscNative', ['_call', '_onReady'], []);
     this.arkLog('P1A_INSTANCE_READY kind=' + ctx.kind + ' id=' + ctx.id);
@@ -871,7 +914,7 @@ struct EditorPage {
         const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
         const ext = this.m7Target.substring(this.m7Target.lastIndexOf('.') + 1).toLowerCase();
         this.arkLog('M7_DIRECT_OPEN ' + this.m7Target + ' len=' + ab.byteLength);
-        this.convertAndOpen(ab, ext, this.m7Target);
+        this.openNewTabEntry(ab, ext, this.m7Target, true, false);
       } catch (e) {
         this.arkLog('M7_DIRECT_ERR ' + String(e));
       }
@@ -887,28 +930,9 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
   }
 
   /**
-   * P1a 打开文档到容器（单文档 tab 语义：关旧开新——新 id/新节点=新页面加载；
-   * P1b 放开多文档并存）。字节链（open-in.bin）由调用方（convertAndOpen）先行就绪。
+   * 关闭 doc tab（file:close / tab ×）：移除节点（挂载即销毁）+ 标题同步 + 回主页。
+   * 无未保存守卫（P2 引入：官方 _state.isDocModified 读取——设计 §6.3）。
    */
-  private openInDoc(ext: string, name: string): void {
-    try {
-      this.docTabSeq += 1;
-      const ctx = new DocTabCtx(this.docTabSeq, 'doc', name, this.editorUrl(ext, name),
-        this.resourceManager!, this.hostFilesDir,
-        ((m: string) => this.arkLog(m)), ((c: DocTabCtx) => this.onInstanceReady(c)),
-        ((c: DocTabCtx) => this.onPageEndCB(c)));
-      const arr = this.docTabs.filter((p: DocTabPair) => p.ctx.kind !== 'doc');
-      arr.push(new DocTabPair(ctx));
-      this.docTabs = arr;
-      this.docCtxRef = ctx; // 保存链/注入链单例衔接（P1b 换 map）
-      this.focusTab = this.docTabs.length - 1;
-      this.arkLog('P1A_OPEN_TAB id=' + this.docTabSeq + ' ext=' + ext + ' title=' + name);
-    } catch (e) {
-      this.arkLog('P1A_OPEN_TAB_ERR ' + String(e));
-    }
-  }
-
-  /** 关闭 doc tab（file:close / tab ×）：移除节点（挂载即销毁）+ 回主页 */
   private closeDocTab(id: number): void {
     try {
       let idx = -1;
@@ -924,11 +948,11 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
       const arr = this.docTabs.slice();
       arr.splice(idx, 1);
       this.docTabs = arr;
-      if (this.docCtxRef !== null && this.docCtxRef.id === id) {
-        this.docCtxRef = null; // 引用丢弃 → NodeController 随数组移除回收（webview 销毁）
-      }
+      const tArr = this.docTitles.slice();
+      tArr.splice(idx, 1);
+      this.docTitles = tArr;
       this.focusTab = 0;
-      this.arkLog('P1A_CLOSE_TAB id=' + id);
+      this.arkLog('P1B_CLOSE_TAB id=' + id);
     } catch (e) {
       this.arkLog('P1A_CLOSE_TAB_ERR ' + String(e));
     }
@@ -950,10 +974,11 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
       // P0 探针分支：p0tabs=1（ability 启动参数）挂载多实例验证骨架；产品态恒 else
       P0TabsProbe({ tabs: $p0Tabs })
     } else {
-      // P1a 容器：主页常驻（恒第一）+ doc tab 动态（NodeContainer 节点复用=切回零重建）
+      // P1b 容器：主页常驻（恒第一）+ doc tab 多开（NodeContainer 节点复用=切回零重建）
       DocTabHost({
         tabs: $docTabs,
         focus: $focusTab,
+        titles: $docTitles,
         onCloseDoc: (id: number) => this.closeDocTab(id),
         onSwitch: (idx: number) => this.onSwitchTab(idx)
       })

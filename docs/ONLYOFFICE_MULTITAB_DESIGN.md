@@ -289,6 +289,24 @@ KICK_SERVERID/LSO_MENUMODE 桌面离线档）→ 切主页 P1A_ALIVE doc1 rd=com
 教训一则：tab chip 的 × 独立成节点并放大触区（标题文本承载切换、
 × 独立 onCloseDoc）——兄弟节点无冒泡干扰，一击即中。
 
+### 9.3 P1b 执行记录（2026-09-08 1.8 真机 ✅ 真多文档）
+
+多文档并存（用户纠正后直接落地——「主页上连续新建应出多 tab」）：
+- **状态 per-tab**：DocTabState{name/ext/saveTarget/savePath/pendingOpen} 挂
+  DocTabCtx.state（原 EditorPage 单例字段全部删除——多开下单例必串写）；
+  save:bin / save:as / save:type / LocalStartOpen 装配全部绑定该 ctx。
+- **临时文件后缀化**：DocTabCtx.tabPath(base) → open-in.<id>.bin / in.<id>.bin /
+  save.<id>.<ext> / saveas-*.<id>.*（实证：连续开 id=2(fonts_test 开) / id=3(word
+  1086B) / id=4(pptx 60721B) —— per-tab 字节零互踩）。
+- **tab 标题平行数组** docTitles（@State 元素级可观察）——另存为改名即时刷新 chip。
+- **m7 验收锁**（§6.4）：Smoke.enabled() 时开新=关旧（单 tab 隧道），产品态自由多开。
+- 实测：主页+3 文档 tab 并列，切换 P1A_ALIVE 全 rd=complete（三实例并存零重建）；
+  样式=产品中性浅色（用户指出 word/cell/slide 主题色各异——深蓝固定底不协调，
+  改浅底+官方品牌蓝胶囊 #4B71A5，任何编辑器主题下统一）。
+- 坑（两次同款）：ArkTS 块注释里 `save:*/close`、`open*/create:new` 的 `*/` 会
+  提前闭合注释（Rollup Unexpected token + 连带 null 报错假象）——**注释禁止出现
+  `*/` 序列**；已加全工程扫描脚本防复发。
+
 ## 10. 实施阶段（每阶段一次构建 + 真机冒烟）
 
 | 阶段 | 内容 | 验收 |

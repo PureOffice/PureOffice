@@ -19,12 +19,31 @@ import { resourceManager } from '@kit.LocalizationKit';
 /** 实例装载回调：Web onControllerAttached 后执行（EditorPage 灌入完整装配） */
 export type CtxReady = (ctx: DocTabCtx) => void;
 
+/**
+ * 文档身份状态（per-tab 单一事实源；原 EditorPage 单例字段下沉——多文档并存的核心）。
+ * saveBinRaw/doSaveAs/save:as 全部只经 ctx.state 读写。
+ */
+export class DocTabState {
+  /** 当前文档名（保存回写源文件/另存为默认名/tab 标题） */
+  name: string = '';
+  /** 当前扩展名 docx/xlsx/pptx（转换器选择） */
+  ext: string = 'docx';
+  /** 保存目标 'none'（新建无身份）/ 'sandbox' | 'uri' */
+  saveTarget: string = 'none';
+  /** 真实保存位置（uri 或沙箱工作副本） */
+  savePath: string = '';
+  /** 有待打开文档（LocalStartOpen 注入守卫） */
+  pendingOpen: boolean = false;
+}
+
 export class DocTabCtx {
   id: number;
   kind: string; // 'home' | 'doc'
   title: string;
   url: string;
   attached: boolean = false;
+  /** per-tab 文档身份（home 实例空态——不使用） */
+  state: DocTabState = new DocTabState();
   controller: webview.WebviewController = new webview.WebviewController();
   resMgr: resourceManager.ResourceManager | null = null;
   filesDir: string = '';
@@ -60,6 +79,15 @@ export class DocTabCtx {
         this.log('[' + this.kind + (this.id) + '] attach err ' + String(e));
       }
     };
+  }
+
+  /** per-tab 临时文件名（多文档隔离——共享名互踩必现级 bug，2026-09-08） */
+  tabPath(base: string): string {
+    const dot = base.lastIndexOf('.');
+    if (dot > 0) {
+      return this.filesDir + '/' + base.substring(0, dot) + '.' + this.id + '.' + base.substring(dot + 1);
+    }
+    return this.filesDir + '/' + base + '.' + this.id;
   }
 
   /** runJavaScript 帮助（打点/守卫共用；错误留痕） */
@@ -150,6 +178,8 @@ export struct DocTabHost {
   @Link tabs: DocTabPair[];
   /** 活动 tab（EditorPage 受控：open 后自动切到新 doc；TabsController index 同步） */
   @Link focus: number;
+  /** tab 标题平行数组（@State 元素级可观察——另存为改名即时刷新 chip 标题） */
+  @Link titles: string[];
   private tabsCtr: TabsController = new TabsController();
   onCloseDoc: (id: number) => void = () => {
   };
@@ -158,44 +188,47 @@ export struct DocTabHost {
 
   build() {
     Column() {
-      // —— 自绘 tab 条 ——
-      Row({ space: 8 }) {
+      // —— 自绘 tab 条（紧凑 32vp；产品中性浅色系——word/cell/slide 三编辑器主题
+      //   各不同色（蓝/绿/紫），固定深蓝灰与当前编辑器不协调（2026-09-08 用户指出）；
+      //   浅底+官方品牌蓝胶囊与三格式/任意主题都和谐）——
+      Row({ space: 6 }) {
         ForEach(this.tabs, (item: DocTabPair, index: number) => {
-          Row({ space: 4 }) {
+          Row({ space: 2 }) {
             // 切换绑定在标题文本（× 为独立兄弟节点——点击互不干扰/无冒泡）
-            Text(item.ctx.kind === 'home' ? '主页' : item.ctx.title)
-              .fontSize(14)
+            Text(this.titles[index])
+              .fontSize(12)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .fontColor(this.focus === index ? Color.White : '#CCCCCC')
-              .constraintSize({ maxWidth: 240 })
+              .fontColor(this.focus === index ? Color.White : '#5A6572')
+              .constraintSize({ maxWidth: 200 })
               .onClick(() => {
                 this.tabsCtr.changeIndex(index);
                 this.focus = index;
                 this.onSwitch(index);
               })
             if (item.ctx.kind === 'doc') {
-              // 关闭钮：独立节点 + 大触区（矩形 >=40x40 物理）
+              // 关闭钮：独立节点 + 大触区（≥44px 物理）；激活态时与标题同色
               Text('×')
-                .fontSize(16)
-                .fontColor(this.focus === index ? Color.White : '#999999')
-                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.focus === index ? Color.White : '#9AA3AD')
+                .padding({ left: 10, right: 10, top: 8, bottom: 8 })
                 .onClick(() => {
                   this.onCloseDoc(item.ctx.id);
                 })
             }
           }
           .justifyContent(FlexAlign.Center)
-          .padding({ left: 14, right: 8, top: 6, bottom: 6 })
-          .borderRadius(6)
-          .backgroundColor(this.focus === index ? Color.Blue : '#444444')
-          .constraintSize({ maxWidth: 340 })
+          .padding({ left: 12, right: 6, top: 4, bottom: 4 })
+          .borderRadius(16)
+          .backgroundColor(this.focus === index ? '#4B71A5' : '#E8EAEE')
+          .constraintSize({ maxWidth: 320 })
         }, (item: DocTabPair) => item.ctx.kind + '-' + item.ctx.id.toString())
       }
       .width('100%')
-      .height(44)
-      .padding({ left: 8, right: 8 })
-      .backgroundColor('#222222')
+      .height(32)
+      .padding({ left: 10, right: 10 })
+      .backgroundColor('#FFFFFF')
 
       // —— 内容切换容器（barHeight 0；保活 = NodeContainer 节点复用）——
       Tabs({ barPosition: BarPosition.Start, index: this.focus, controller: this.tabsCtr }) {
