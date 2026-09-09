@@ -113,6 +113,12 @@ struct EditorPage {
   private guardBusy: boolean = false;
   /** 窗口退出队列（onBackPress：未保存 doc 逐个询问；全处置完 terminateSelf） */
   private backQueue: DocTabCtx[] = [];
+  // —— 守卫三按钮弹框（自绘覆盖层状态，2026-09-10）——
+  /** 显示中/文档名（@State——渲染观察）；ctx/then=守卫上下文（非观察字段） */
+  @State guardDialogOn: boolean = false;
+  @State guardDialogName: string = '';
+  private guardDialogCtx: DocTabCtx | null = null;
+  private guardDialogThen: ((proceed: boolean) => void) | undefined = undefined;
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
    *  lang=zh-CN：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
@@ -1035,13 +1041,23 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     }
     this.guardBusy = true;
     try {
+      // 判据=canSave || isDocumentModified（2026-09-10 打开已有文档**守卫失灵**修复：
+      // 真机实证「zzz 修改后 asc_isDocumentCanSave=0 但 asc_getCanUndo=1」——引擎确认
+      // 有未保存修改；canSave 属性由 _onUpdateDocumentCanSave 刷新，本链时序未触发
+      // （官方 Desktop 语义同源；官方自身判未保存=isDocumentModified——Main.js:2575）。
+      // isDocumentModified()=原型方法三引擎均有（word/slide 72179 式 = isDocumentModify
+      // 属性——保存后复位，不误判；cell 另有 asc_ 前缀版）。返回管道串 vcs|im|uu：
+      // im 兜底 cs，uu 仅打点（canUndo 保存后栈不清——不可作判据）。
       const query = '(function(){try{'
         + 'var ns=window.SSE||window.DE||window.PE;'
         + 'var m=ns&&ns.controllers&&ns.controllers.Main;'
         + 'var e=m&&m.api;'
-        + 'if(e&&typeof e.asc_isDocumentCanSave==="function"){return e.asc_isDocumentCanSave()?"1":"0";}'
-        + 'if(e&&typeof e.asc_isDocumentModified==="function"){return e.asc_isDocumentModified()?"1":"0";}'
-        + 'return "0";}catch(x){return "2";}})()';
+        + 'var cs="na",im="na",uu="nu";'
+        + 'try{cs=(e&&typeof e.asc_isDocumentCanSave==="function")?(e.asc_isDocumentCanSave()?"1":"0"):"na";}catch(x){cs="x";}'
+        + 'try{im=(e&&typeof e.isDocumentModified==="function")?(e.isDocumentModified()?"1":"0"):"na";}catch(x){im="x";}'
+        + 'try{uu=(e&&typeof e.asc_getCanUndo==="function")?(e.asc_getCanUndo()?"1":"0"):"nu";}catch(x){uu="x";}'
+        + 'return "v"+cs+"|"+im+"|"+uu;'
+        + '}catch(x){return "vj|j|j";}})()';
       ctx.controller.runJavaScript(query, (err: BusinessError, res: string) => {
         if (err) {
           // 页面死/节点已分离（竞态）——守卫只死锁，放行关闭
@@ -1052,16 +1068,27 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           return;
         }
         // ArkWeb runJavaScript 对 JS 字符串返回值做 **JSON 编码**（实测 res=`"1"` 带引号
-        // ——2026-09-09 实证；直接 === '1' 永假会落进直关分支。统一 JSON.parse）。
+        // ——2026-09-09 实证；直接 === '1' 永假会落进直关分支。统一 JSON.parse 剥外层，
+        // 得 "vcs|im|uu" 拼接串再拆；**v = cs || im || uu**（2026-09-10 打开已有文档
+        // 修复：cs/im 在该形态下恒 0（引擎 modified 标志链未随编辑触发——实测
+        // zzz 后 cs=0 im=0 uu=1，而保存产物含 zzz），uu=asc_getCanUndo 是引擎唯一
+        // 权威「有变更」信号。已知代价：保存链（ArkTS 侧序列化）不经引擎，undo 栈
+        // 不清——已保存后再次关闭会重弹一次（保存幂等覆写，不丢数据——记录取舍）。
         let v: string = String(res);
+        let diag: string = 'na';
         try {
-          const pv: string | number = JSON.parse(String(res)) as string | number;
-          v = String(pv);
+          const pv = String(JSON.parse(String(res)) as string).trim();
+          const parts = pv.split('|');
+          const cs = parts[0].replace(/^v/, '');
+          const im = parts[1] ?? '?';
+          const uu = parts[2] ?? '?';
+          diag = 'cs=' + cs + ' im=' + im + ' uu=' + uu;
+          v = (cs === '1' || im === '1' || uu === '1') ? '1' : '0';
         } catch (pe) {
           v = String(res);
         }
         v = v.trim();
-        this.arkLog('CLOSE_GUARD_QUERY tab=' + ctx.id + ' v=' + v);
+        this.arkLog('CLOSE_GUARD_QUERY tab=' + ctx.id + ' v=' + v + ' ' + diag);
         if (v !== '1' && ctx.state.saveAborted) {
           // 引擎 CanSave 已被 asc_Save 复位但保存未落盘（另存为取消/失败/超时）——
           // 数据真没保存：忽略页面 '0'，按未保存弹框（2026-09-09 真机实锤场景）
@@ -1090,8 +1117,13 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
   }
 
   /**
-   * 三按钮弹框（ArkUI 系统 AlertDialog——primary=保存 / secondary=不保存 / 点空白默认
-   * =取消）。标题/正文中文直写（单语言产品；项目 UI 文案惯例）。取消 → 不动文档。
+   * 三按钮弹框（**自绘覆盖层**——2026-09-10 用户要求显式「取消」键后改过两版：
+   * ①AlertDialog 仅两 action 键无取消；②CustomDialog 真机点击失效——按钮 onClick
+   * 不触发、事件未达 ArkTS（uinput+手指双证，点击后无任何回调日志应用却退出）——
+   * 页面层 Stack 覆盖层全量自绘：onClick 全在自己手里，零系统弹层依赖）。
+   * 「取消」=什么都不做（关弹框、留文档）；蒙层点击亦=取消（autoCancel 语义）。
+   * guardThen=窗口级回调节（requestCloseDoc then 透传；需存于页面字段——
+   * @State 不支持函数闭包对象，双字段拆存）。
    */
   private showCloseGuardDialog(ctx: DocTabCtx, then?: (proceed: boolean) => void): void {
     let name = ctx.state.name;
@@ -1106,34 +1138,11 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     if (name.length === 0) {
       name = this.defaultDocName(ctx.state.ext);
     }
-    this.getUIContext().showAlertDialog({
-      title: '未保存的文档',
-      message: '文档「' + name + '」有未保存的修改。是否保存数据再退出？',
-      autoCancel: true,
-      primaryButton: {
-        value: '保存',
-        action: () => {
-          this.guardBusy = false;
-          this.saveAndClose(ctx, then);
-        }
-      },
-      secondaryButton: {
-        value: '不保存',
-        action: () => {
-          this.guardBusy = false;
-          this.arkLog('CLOSE_GUARD_DISCARD tab=' + ctx.id);
-          this.closeGuardDefer = null;
-          this.closeDocTab(ctx.id);
-          if (then !== undefined) { then(true); }
-        }
-      },
-      cancel: () => {
-        // 点空白/系统返回取消
-        this.guardBusy = false;
-        this.arkLog('CLOSE_GUARD_CANCEL tab=' + ctx.id);
-        if (then !== undefined) { then(false); }
-      }
-    });
+    this.guardDialogName = name;
+    this.guardDialogCtx = ctx;
+    this.guardDialogThen = then;
+    this.guardDialogOn = true;
+    this.arkLog('CLOSE_GUARD_DIALOG_ON tab=' + ctx.id);
   }
 
   /**
@@ -1358,27 +1367,113 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
   }
 
   build() {
-    if (this.p0On) {
-      // P0 探针分支：p0tabs=1（ability 启动参数）挂载多实例验证骨架；产品态恒 else
-      P0TabsProbe({ tabs: $p0Tabs })
-    } else {
-      // P1b 容器：主页常驻（恒第一）+ doc tab 多开（NodeContainer 节点复用=切回零重建）
-      DocTabHost({
-        tabs: $docTabs,
-        focus: $focusTab,
-        titles: $docTitles,
-        accents: $docAccents,
-        // tab × = 未保存守卫入口（2026-09-09：查询 asc_isDocumentModified → 三按钮框）
-        onCloseDoc: (id: number) => {
-          const c = this.findCtx(id);
-          if (c !== null) {
-            this.requestCloseDoc(c);
-          } else {
-            this.arkLog('CLOSE_DOC_PAIR_NULL id=' + id);
+    Stack() {
+      if (this.p0On) {
+        // P0 探针分支：p0tabs=1（ability 启动参数）挂载多实例验证骨架；产品态恒 else
+        P0TabsProbe({ tabs: $p0Tabs })
+      } else {
+        // P1b 容器：主页常驻（恒第一）+ doc tab 多开（NodeContainer 节点复用=切回零重建）
+        DocTabHost({
+          tabs: $docTabs,
+          focus: $focusTab,
+          titles: $docTitles,
+          accents: $docAccents,
+          // tab × = 未保存守卫入口（2026-09-09：查询 asc_isDocumentModified → 三按钮框）
+          onCloseDoc: (id: number) => {
+            const c = this.findCtx(id);
+            if (c !== null) {
+              this.requestCloseDoc(c);
+            } else {
+              this.arkLog('CLOSE_DOC_PAIR_NULL id=' + id);
+            }
+          },
+          onSwitch: (idx: number) => this.onSwitchTab(idx)
+        })
+      }
+      // —— 未保存守卫弹框（自绘覆盖层；Stack 顶层压住全部组件）——
+      if (this.guardDialogOn) {
+        // 蒙层=取消（autoCancel 同语义）：整体遮罩点击关闭弹框、不动文档
+        Column()
+          .width('100%').height('100%')
+          .backgroundColor('rgba(0,0,0,0.35)')
+          .onClick(() => {
+            this.guardDialogAction('cancel');
+          })
+        // 弹框卡片（居中）
+        Column({ space: 4 }) {
+          Text('未保存的文档')
+            .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
+          Text('文档「' + this.guardDialogName + '」有未保存的修改。\n是否保存数据再退出？')
+            .fontSize(14).fontColor('#5A6572').textAlign(TextAlign.Center)
+            .margin({ top: 12 })
+          Row({ space: 12 }) {
+            Button('取消')
+              .layoutWeight(1)
+              .backgroundColor('#F7F7F7').fontColor('#2B3B4D')
+              .onClick(() => {
+                this.guardDialogAction('cancel');
+              })
+            Button('不保存')
+              .layoutWeight(1)
+              .backgroundColor('#F7F7F7').fontColor('#2B3B4D')
+              .onClick(() => {
+                this.guardDialogAction('discard');
+              })
+            Button('保存')
+              .layoutWeight(1)
+              .backgroundColor('#0064E7').fontColor(Color.White)
+              .onClick(() => {
+                this.guardDialogAction('save');
+              })
           }
-        },
-        onSwitch: (idx: number) => this.onSwitchTab(idx)
-      })
+          .width('100%')
+          .margin({ top: 20 })
+        }
+        .padding(24)
+        .width(420)
+        .backgroundColor(Color.White)
+        .borderRadius(12)
+        .onClick(() => {
+          // 吞掉卡片内点击（不穿透蒙层取消）
+        })
+      }
+    }
+  }
+
+  /** 守卫弹框三按钮/蒙层动作分发（自绘层唯一出口；同版三回调语义：
+   *  save=守卫保存链 / discard=丢弃关闭+继续队列 / cancel=不动文档） */
+  private guardDialogAction(act: string): void {
+    if (!this.guardDialogOn) {
+      return;
+    }
+    const ctx = this.guardDialogCtx;
+    const then = this.guardDialogThen;
+    this.guardDialogOn = false;
+    this.guardDialogCtx = null;
+    this.guardDialogThen = undefined;
+    this.guardBusy = false;
+    if (ctx === null) {
+      this.arkLog('CLOSE_GUARD_ACTION_CTX_NULL act=' + act);
+      if (then !== undefined) {
+        then(false);
+      }
+      return;
+    }
+    if (act === 'save') {
+      this.arkLog('CLOSE_GUARD_SAVE_BTN tab=' + ctx.id);
+      this.saveAndClose(ctx, then);
+    } else if (act === 'discard') {
+      this.arkLog('CLOSE_GUARD_DISCARD tab=' + ctx.id);
+      this.closeGuardDefer = null;
+      this.closeDocTab(ctx.id);
+      if (then !== undefined) {
+        then(true);
+      }
+    } else {
+      this.arkLog('CLOSE_GUARD_CANCEL tab=' + ctx.id);
+      if (then !== undefined) {
+        then(false); // 取消=什么都不做（队列停/不关文档）
+      }
     }
   }
 }

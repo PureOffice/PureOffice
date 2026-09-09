@@ -179,6 +179,16 @@ ascshim 更改无需动 build（40_save 已在 assemble 列表——确认：ass
    新建+编辑（正文输入 guardtest）→ 点系统 ✕ → 弹「未保存的文档」三按钮框 ✅
    （截图 .temp/1.4-close-guard.png）→「不保存」→ 应用退出（pid 消失）✅。
    自绘键组（−□✕）已全删：右上角仅剩系统三键（1.4 截图+UI dump 双证）。
+10. **打开已有文档守卫失灵（用户报障 2026-09-10，真机实证+修复）**：打开
+    sample.docx → 输入文字 → 关闭 → **不弹框**！三值诊断：`cs=0 im=0 uu=1`——
+    保存链可正常序列化（落盘文件中确实含编辑内容）但引擎 **modified 标志链
+    未随编辑触发**（asc_isDocumentCanSave / isDocumentModified 恒 0；undo 栈
+    asc_getCanUndo=1 —— 引擎"承认"有变更的唯一权威信号）。修复=**判据改为
+    cs||im||uu 任一即弹**（uu=asc_getCanUndo）。
+    **已知取舍（记录）**：本壳保存链=ArkTS 侧序列化（save:bin→x2t→落盘），
+    **不经引擎 asc_Save**——引擎 undo 栈保存后不清 → **保存成功后再次关闭
+    仍会重弹一次**（保存幂等覆写，不丢数据）。彻底消解=改保存链走引擎
+    asc_Save（引擎自复位 modified），留待后续。
 
 ## 5. 验证清单（✅=2026-09-09/10 真机 1.4（MOR-M1）已验；✳=当前 UI 不可达
    （休眠守卫，逻辑已接、无触发点）；⏳=待验）
