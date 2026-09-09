@@ -261,13 +261,21 @@ export struct DocTabHost {
       Row() {
         ForEach(this.tabs, (item: DocTabPair, index: number) => {
           Row({ space: 2 }) {
-            // 标题 flexShrink 在固定宽 chip 内近似居中（官方语义：标题居中、× 定右）
+            // 标题区恒占满「剩余宽 − ×」——用户 2026-09-10 方案 B（标题左对齐、
+            // × 定右）：layoutWeight(1) 后内层 Row 无剩余空间，chip 的
+            // justifyContent(Center) 自然失效，× 恒贴右；标题短/长都不再带跑 ×
+            //（此前无 layoutWeight：标题短时「标题+×」整体居中、× 漂向窗口中部）。
+            // 主页 chip 特例（同用户拍板 2026-09-10）：无 × → 标题在 chip 内居中
+            //（textAlign Center；doc chip 保持 Start 左对齐——× 定右已由
+            // layoutWeight 保证）。
             Text(this.titles[index])
               .fontSize(12)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .fontColor(item.ctx.kind === 'home' || this.focus !== index ? '#2B3B4D' : Color.White)
               .flexShrink(1)
+              .layoutWeight(1)
+              .textAlign(item.ctx.kind === 'home' ? TextAlign.Center : TextAlign.Start)
             if (item.ctx.kind === 'doc') {
               // 关闭钮：官方图标（HarmonyOS symbol——wineohos 同款惯例 SymbolGlyph），
               // 独立节点 + 大触区（≥44px 物理）；hitTestBehavior Block 拦截命中
@@ -296,7 +304,8 @@ export struct DocTabHost {
             this.focus = index;
             this.onSwitch(index);
           })
-          .justifyContent(FlexAlign.Center)
+          // 原 justifyContent(Center) 已删（用户 2026-09-10 方案 B）：标题
+          // layoutWeight(1) 占满剩余后无剩余空间，Center 恒不生效——留着误导。
           // 官方形态：chip = 固定宽块（doc≈160vp / home≈100vp；仅横向小内衬；
           // 通栏高、方角——参考图 .temp/desktop-example.png。禁止 layoutWeight/
           // stretch（曾导致 chip 撑满整行等宽——用户 2026-09-09 指正）。
