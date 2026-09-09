@@ -72,7 +72,10 @@
     e.stopPropagation();
     ensure();
     // 2026-09-10 用户：许可弹层打开时把其下的官方 dialog（欢迎页 AboutDialog 等
-    //  `<dialog class="dlg">` 元素）关掉——遮罩是全屏覆盖，下面叠着关于面板没意义
+    //  `<dialog class="dlg">` 元素）关掉——遮罩是全屏覆盖，下面叠着关于面板没意义。
+    // 范围=原生 dialog 元素；文档页 About 面板（#about-menu-panel，div 非 dialog）
+    // 不受此分支影响（它以左侧栏面板形态叠放，遮罩盖它时仍然可见属可接受的简单
+    // 行为，留待用户反馈再决定要不要一并关）。
     try {
       document.querySelectorAll('dialog.dlg').forEach(function (d) {
         if (typeof d.close === 'function') { d.close(); }

@@ -701,11 +701,13 @@ def patch_about_brand():
     if n_brand:
         print('  about品牌: appName 行 → asc-about-brand ×%d' % n_brand)
     tag = 'id-about-licensor-version-name'
+    # 许可链接文案（编辑器 About 与欢迎页 AboutDialog 共用一处定义——2026-09-10
+    # 用户：链接后不要「（点击查看全文）」）
+    LIC_TEXT = '许可信息：GNU AGPL v3.0'
     new_line = ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
                 + CREDIT + '</label></td></tr>\',')
     lic_line = ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
-                '<a href="' + LIC_URL + '" target="_blank">许可信息：GNU AGPL v3.0'
-                '（点击查看全文）</a></label></td></tr>\',')
+                '<a href="' + LIC_URL + '" target="_blank">' + LIC_TEXT + '</a></label></td></tr>\',')
     if new_line not in s:
         old_line = ('\'<td align="center"><label class="asc-about-version" id="' + tag + '">\''
                     ' + this.txtVersion + this.txtVersionNum + \'</label></td>\',')
@@ -805,7 +807,7 @@ def patch_about_brand():
         ('<p id="idx-about-version"><span l10n>${i}</span> ${t.version}</p>',
          '<p id="idx-about-version">${t.version}</p>', '版本行 label'),
         ('<a class="ver-site link about-field" target="popup" href="${t.link}">${t.site}</a>',
-         '<a class="ver-site link about-field" target="_blank" href="' + LIC_URL + '">许可信息：GNU AGPL v3.0</a>', '官网行→许可'),
+         '<a class="ver-site link about-field" target="_blank" href="' + LIC_URL + '">' + LIC_TEXT + '</a>', '官网行→许可'),
         ('<div class="ver-copyright about-field">${t.rights}</div>',
          '<div class="ver-copyright about-field">' + CREDIT + '</div>', '版权行'),
     ]

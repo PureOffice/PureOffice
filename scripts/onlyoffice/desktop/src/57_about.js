@@ -32,8 +32,11 @@
   if (_p.indexOf('/onlyoffice/index.html') < 0) { return; }
 
   // 产品版本（fetch 异步填充；'use strict' 下未声明赋值=ReferenceError，
-  // 2026-09-10 真机踩坑：.then 里裸 v= 抛错 → promise 链断 → 永不执行）
-  var v = '';
+  // 2026-09-10 真机踩坑：.then 里裸 ver= 抛错 → promise 链断 → 永不执行）
+  var ver = '';
+  // 诊断节流：SENT 只打首次成功；EXHAUSTED 只在 8 次全失败时打（避免重发刷屏）
+  var sentLogged = false;
+  var everOk = false;
 
   function fire() {
     try {
@@ -41,7 +44,7 @@
       var opts = {
         appname: 'Pure Office',
         // 产品版本（version.json.ver；空串=版本行留白，不展示构建哈希——2026-09-10）
-        version: (v ? '版本 ' + v : ''),
+        version: (ver ? '版本 ' + ver : ''),
         commercial: false,
         active: false,
         changelog: false
@@ -50,7 +53,11 @@
       // apply 被当类数组转换抛 CreateListFromArrayLike（2026-09-10 真机踩坑；
       // 官方 window.onupdaterecents=function(){i("publish",...)} 同款用法）
       window.sdk.fire('on_native_message', ['app:version', JSON.stringify(opts)]);
-      console.error('LSO_APP_VERSION_SENT v=' + v);
+      everOk = true;
+      if (!sentLogged) {
+        sentLogged = true;
+        console.error('LSO_APP_VERSION_SENT ver=' + ver);
+      }
       return true;
     } catch (e) {
       console.error('LSO_APP_VERSION_ERR ' + String(e));
@@ -83,11 +90,11 @@
 
   // ---- B. 面板视图创建：版本就绪即开始重发 app:version ----
   function scheduleFire() {
-    var t2 = 0;
+    var tries = 0;
     var tickB = function () {
       fire();
-      if (++t2 < 8) { setTimeout(tickB, 500); }
-      else { console.error('LSO_ABOUT_RETRY_EXHAUSTED'); }
+      if (++tries < 8) { setTimeout(tickB, 500); }
+      else if (!everOk) { console.error('LSO_ABOUT_RETRY_EXHAUSTED'); }
     };
     setTimeout(tickB, 250);
   }
@@ -96,16 +103,16 @@
     fetch('/onlyoffice/version.json')
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        // ver=产品版本（About 展示）；v=资源哈希（URL 指纹，不在面板展示）
-        v = (j && j.ver) ? String(j.ver) : '';
+        // version.json.ver=产品版本（About 展示）；v=资源哈希（URL 指纹，不上面板）
+        ver = (j && j.ver) ? String(j.ver) : '';
         scheduleFire();
       })
       .catch(function () {
-        v = '';
+        ver = '';
         scheduleFire();
       });
   } catch (e2) {
-    v = '';
+    ver = '';
     scheduleFire();
   }
 })();
