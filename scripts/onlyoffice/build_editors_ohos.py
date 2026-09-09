@@ -844,6 +844,26 @@ def main():
                 shutil.rmtree(p, ignore_errors=True)
                 print('  删除 ' + os.path.relpath(p, W3D))
 
+    # —— 2.5 裁剪：内置帮助手册（2026-09-09 用户决策：HAP 1GB 首因）——
+    #    apps 五编辑器 + common 的 main/resources/help/ 合计 596M（HAP 1016M 的
+    #    最大单体；每语言一份 HTML+截图手册，语言 = de/en/es/fr/it/pt/ru/sr-Latn/tr）。
+    #    ① 无中文手册——官方从未输出 zh 版（五编辑器 help 目录均无 zh），「只留
+    #       中文」不可行；② UI 无任何帮助入口——2026-09-05 已按官方开关关闭：
+    #       customization.help:false（Main.js:1759 canHelp=help!==false → 文件菜单
+    #       「帮助」隐藏）、feedback:false/suggestFeature:false（LeftMenu.js:117
+    #       feedback.url 非空才渲染；文件菜单同类）；③ 官方桌面的帮助按钮可用性
+    #       检查（Desktop.js:337 _checkHelpAvailable）靠 fetch
+    #       resources/help/<lang>/Contents.json——目录不存在 → 404 → helpUrl 空 →
+    #       按钮天然不显示，**不会出现「入口在、内容空」的坏态**。
+    #    裁剪=装配时删除（本链可重放；勿手删 rawfile——生成产物，下轮装配覆盖还原）。
+    #    未来若要恢复：官方无 zh 手册，须自产 zh 目录放回 SRC 同路径并从本段排除。
+    for root, dirs, _ in os.walk(W3D):
+        for d in dirs:
+            if d == 'help' and root.endswith(os.path.join('main', 'resources')):
+                p = os.path.join(root, d)
+                shutil.rmtree(p, ignore_errors=True)
+                print('  裁剪 help ' + os.path.relpath(p, W3D))
+
     # 3. api/documents index.html.desktop → index.html（官方 build_js.py:68）
     #    grunt 构建产物不含 .desktop——从源码树取
     doct_orig_src = os.path.join(ROOT, 'third_party', 'web-apps', 'apps', 'api', 'documents', 'index.html.desktop')
