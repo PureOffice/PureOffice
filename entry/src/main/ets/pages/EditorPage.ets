@@ -6,11 +6,20 @@ import { fileIo as fs, picker } from '@kit.CoreFileKit';
 import { x2tConvertSync } from '../common/x2t';
 import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
 import { Smoke } from '../common/smoke';
-import { getLaunchOptions } from '../entryability/EntryAbility';
+import { getLaunchOptions, setWindowCloseHandler } from '../entryability/EntryAbility';
 import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, u8ToStr } from '../common/bytes';
 import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } from '../common/recents';
 import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
 import { DocTabHost, DocTabCtx, DocTabPair } from './DocTabHost';
+
+/** 未保存关闭守卫：保存动作在途（设计 docs/UNSAVED_CLOSE_GUARD_DESIGN.md §3.3）——
+ *  ctx=目标文档；awaitingSaveAs=新建首次保存=系统另存为框在途（save:bin 同步返回
+ *  时不得提前关——框取消=不关）；then=窗口级退出队列的继续回调（undefined=tab 级） */
+interface CloseGuardDefer {
+  ctx: DocTabCtx;
+  awaitingSaveAs: boolean;
+  then: ((proceed: boolean) => void) | undefined;
+}
 
 /** ArkTS 侧调试开关：false=仅落 web_console.txt 文件（默认）；true=另 hilog 双写 */
 const ARK_DEBUG: boolean = false;
@@ -97,6 +106,13 @@ struct EditorPage {
    *  主题切换重报）。缺省 ''=回退静态 accent。 */
   @State docAccents: string[] = [];
   private docTabSeq: number = 0;
+  // —— 未保存关闭守卫（2026-09-09，设计 §3）——
+  /** 保存动作在途（至多一个——弹框模态互斥；待 save:bin/doSaveAs 完成消费） */
+  private closeGuardDefer: CloseGuardDefer | null = null;
+  /** 守卫单弹框互斥（查询窗口期/弹框在途时不再起新询问——默认不叠框） */
+  private guardBusy: boolean = false;
+  /** 窗口退出队列（onBackPress：未保存 doc 逐个询问；全处置完 terminateSelf） */
+  private backQueue: DocTabCtx[] = [];
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
    *  lang=zh-CN：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
@@ -171,7 +187,15 @@ struct EditorPage {
     }
     if (cmd === 'save:bin') {
       // userFlag=1 用户主动保存（补录 recents）/ 0 autosave（不补录——2026-09-05）
-      return this.saveBinRaw(ctx, param, userFlag > 0);
+      const r = this.saveBinRaw(ctx, param, userFlag > 0);
+      // 未保存关闭守卫：保存链同步完成 → 消费 defer（关 tab 或存失败不关）。
+      // 新建首次保存（saveTarget='none'）saveBinRaw 内已另起 doSaveAs（异步系统框）
+      // 并置 awaitingSaveAs——本处不得消费（框取消=不关；成功由 doSaveAs 尾消费）。
+      if (this.closeGuardDefer !== null && this.closeGuardDefer.ctx === ctx
+        && !this.closeGuardDefer.awaitingSaveAs) {
+        this.clearCloseGuard(ctx, r === 'true');
+      }
+      return r;
     }
     if (cmd === 'save:as') {
       // 官方另存为（asc_Save isSaveAs=true → 同格式）：40_save 发来的是**序列化流 DOCY**
@@ -208,8 +232,14 @@ struct EditorPage {
       try {
         const oe = JSON.parse(param) as Record<string, Object>;
         if (String(oe['action']) === 'file:close') {
-          this.arkLog('CLOSE_FILE -> doc tab close id=' + ctx.id);
-          this.closeDocTab(ctx.id);
+          this.arkLog('CLOSE_FILE -> guard id=' + ctx.id);
+          this.requestCloseDoc(ctx);
+        }
+        if (String(oe['action']) === 'close-request') {
+          // 官方 Header X（40_save _hookCloseEditor 重定向 closeEditor → 本上报）——
+          // 统一走三按钮守卫（官方 web 弹框无「保存」项，语义不符离线单机）
+          this.arkLog('CLOSE_REQUEST(HeaderX) -> guard id=' + ctx.id);
+          this.requestCloseDoc(ctx);
         }
       } catch (e) {
         this.arkLog('EDITOR_EVENT_ERR ' + String(e));
@@ -422,6 +452,11 @@ struct EditorPage {
       const uris = await dvp.save(opts);
       if (!uris || uris.length === 0) {
         this.arkLog('SAVE_AS_CANCEL tab=' + ctx.id);
+        // 未保存关闭守卫：另存为取消=数据未保存 → 不关（留在文档），守卫终止。
+        // saveAborted 显式置位（clearCloseGuard 仅守卫路径生效——手动保存（非守卫）
+        // 取消同样代表「未落盘」，下次关闭守卫须弹框）
+        ctx.state.saveAborted = true;
+        this.clearCloseGuard(ctx, false);
         return;
       }
       const uri = uris[0];
@@ -429,6 +464,9 @@ struct EditorPage {
       this.arkLog('SAVE_AS_WRITE uri=' + uri + ' ok=' + ok + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
       if (!ok) {
         this.arkLog('SAVE_AS_WRITE_ERR ' + uri);
+        // 未保存关闭守卫：落盘失败=未保存 → 不关
+        ctx.state.saveAborted = true;
+        this.clearCloseGuard(ctx, false);
         return;
       }
       ctx.state.savePath = uri; // 身份=真实位置（后续保存覆盖写它）
@@ -464,8 +502,16 @@ struct EditorPage {
           this.arkLog('RECENTS_APPEND_SAVEAS name=' + ctx.state.name + ' path=' + uri);
         }
       }
+      // 未保存关闭守卫：另存为成功（身份成立/落盘完成）→ 清除「保存中止」标记
+      //（幂等；defer 存在时消费关闭——普通另存为（非守卫）defer null=仅清标记）
+      // 与关闭目标 tab（守卫 defer 仅「保存」路径产生；普通另存为无 defer 空操作）
+      ctx.state.saveAborted = false;
+      this.clearCloseGuard(ctx, true);
     } catch (e) {
       this.arkLog('SAVE_AS_ERR ' + String(e));
+      // 未保存关闭守卫：另存为异常=未保存 → 不关
+      ctx.state.saveAborted = true;
+      this.clearCloseGuard(ctx, false);
     }
   }
 
@@ -529,6 +575,11 @@ struct EditorPage {
       if (userSaved && ctx.state.saveTarget === 'none') {
         // 新建无身份 + 用户保存 → 弹另存为（async：dvp.save → uri 落盘 → 'none'→'uri'）
         this.arkLog('SAVE_AS_DIALOG name=' + ctx.state.name + ' tab=' + ctx.id);
+        // 未保存关闭守卫：「保存」→ 另存为框在途——守卫消费移交 doSaveAs 完成回调
+        //（此时 save:bin 将返回 'true'，handler 见 awaitingSaveAs 不消费）
+        if (this.closeGuardDefer !== null && this.closeGuardDefer.ctx === ctx) {
+          this.closeGuardDefer.awaitingSaveAs = true;
+        }
         this.doSaveAs(ctx, outBuf);
         return 'true';
       }
@@ -564,6 +615,10 @@ struct EditorPage {
           }
         }
       }
+      // 保存真正落盘（URI/沙箱覆写完成）→ 清「保存中止」标记（2026-09-09 review：
+      // 仅守卫消费路径清不够——另存为取消后用户**手动** Ctrl+S 保存成功的场景，
+      // saveAborted 残留会导致下次关闭误弹框；落盘终点统一复位，幂等）
+      ctx.state.saveAborted = false;
       return 'true';
     } catch (e) {
       this.arkLog('SAVE_BIN_ERR ' + String(e));
@@ -774,6 +829,13 @@ struct EditorPage {
     this.resourceManager = ctx.resourceManager;
     this.hostFilesDir = ctx.filesDir;
     this.webLogPath = ctx.filesDir + '/web_console.txt';
+    // 系统三键 ✕ 关闭守卫（2026-09-10，WPS 同款正路）：EntryAbility 里
+    // windowStageClose 恒拦（return true=不关窗）→ 本回调 = 与返回键同链的
+    // requestBackExit（未保存逐个弹框→全处置完 terminateSelf；取消=窗口保留）。
+    // 替代已移除的自绘关闭 ✕（系统三键本就常驻——decor 只藏标题栏）。
+    setWindowCloseHandler((): void => {
+      this.requestBackExit();
+    });
     // 自动验收开关（ability 启动参数 → Smoke；见 smoke.ets / EntryAbility）：无参数 = 产品态
     Smoke.fromParams(getLaunchOptions());
     this.m7Target = Smoke.target;
@@ -941,11 +1003,279 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     ctx.js(inject, '');
   }
 
+  /** tab id → DocTabCtx（守卫/关闭共用；未找到=已关闭 → null） */
+  private findCtx(id: number): DocTabCtx | null {
+    for (let i = 0; i < this.docTabs.length; i++) {
+      if (this.docTabs[i].ctx.id === id) {
+        return this.docTabs[i].ctx;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 未保存关闭守卫（2026-09-09，docs/UNSAVED_CLOSE_GUARD_DESIGN.md §3）——
+   * 所有「关闭文档」入口统一入口：关闭瞬间向页面点查官方引擎 API。句柄链（真机实证
+   * 2026-09-09）：window.<SSE|DE|PE>.controllers.Main.api —— **controllers 是小写**
+   * （打包后实际名；源码写 <NS>.Controllers.Main 大写是写法，运行时不存在大写 C——
+   * ascshim LSO_KICK_SERVERID 链 10_engine 同句柄可用，为唯一实证句柄；window.editor/
+   * window.Asc.editor 此壳不存在）。查询 API：asc_isDocumentCanSave（三引擎均含，
+   * DE 官方自身以它判 onDocumentModifiedChanged 的 isModified——Main.js:2575）；
+   * asc_isDocumentModified 仅 cell 引擎有（保底）。
+   *   '1' 未保存 → 三按钮弹框（保存/不保存/取消；不调用官方 web 两按钮框——无保存项）
+   *   '0' 干净/未就绪 → 直关（closeDocTab 权威关闭）
+   *   '2'/查询失败/页面死 → 直关（数据已不可救，守卫只会死锁——日志留证）
+   * then：窗口级退出队列继续回调（undefined=tab 级关闭）；proceed=false=用户取消
+   */
+  private requestCloseDoc(ctx: DocTabCtx, then?: (proceed: boolean) => void): void {
+    if (this.guardBusy || this.closeGuardDefer !== null) {
+      // 查询/弹框/保存在途：不叠新询问（弹框模态应在 UI 层挡住；防御路径=日志留证）
+      this.arkLog('CLOSE_GUARD_BUSY tab=' + ctx.id);
+      return;
+    }
+    this.guardBusy = true;
+    try {
+      const query = '(function(){try{'
+        + 'var ns=window.SSE||window.DE||window.PE;'
+        + 'var m=ns&&ns.controllers&&ns.controllers.Main;'
+        + 'var e=m&&m.api;'
+        + 'if(e&&typeof e.asc_isDocumentCanSave==="function"){return e.asc_isDocumentCanSave()?"1":"0";}'
+        + 'if(e&&typeof e.asc_isDocumentModified==="function"){return e.asc_isDocumentModified()?"1":"0";}'
+        + 'return "0";}catch(x){return "2";}})()';
+      ctx.controller.runJavaScript(query, (err: BusinessError, res: string) => {
+        if (err) {
+          // 页面死/节点已分离（竞态）——守卫只死锁，放行关闭
+          this.guardBusy = false;
+          this.arkLog('CLOSE_GUARD_QUERY_ERR tab=' + ctx.id + ' ' + String(err.code));
+          this.closeDocTab(ctx.id);
+          if (then !== undefined) { then(true); }
+          return;
+        }
+        // ArkWeb runJavaScript 对 JS 字符串返回值做 **JSON 编码**（实测 res=`"1"` 带引号
+        // ——2026-09-09 实证；直接 === '1' 永假会落进直关分支。统一 JSON.parse）。
+        let v: string = String(res);
+        try {
+          const pv: string | number = JSON.parse(String(res)) as string | number;
+          v = String(pv);
+        } catch (pe) {
+          v = String(res);
+        }
+        v = v.trim();
+        this.arkLog('CLOSE_GUARD_QUERY tab=' + ctx.id + ' v=' + v);
+        if (v !== '1' && ctx.state.saveAborted) {
+          // 引擎 CanSave 已被 asc_Save 复位但保存未落盘（另存为取消/失败/超时）——
+          // 数据真没保存：忽略页面 '0'，按未保存弹框（2026-09-09 真机实锤场景）
+          this.arkLog('CLOSE_GUARD_SAVEABORTED tab=' + ctx.id + ' v=' + v);
+          this.showCloseGuardDialog(ctx, then);
+          return;
+        }
+        if (v === '1') {
+          this.arkLog('CLOSE_GUARD_MODIFIED tab=' + ctx.id);
+          this.showCloseGuardDialog(ctx, then);
+          return; // guardBusy 由弹框回调消费复位
+        }
+        if (v === '2') {
+          this.arkLog('CLOSE_GUARD_UNKNOWN tab=' + ctx.id);
+        }
+        this.guardBusy = false;
+        this.closeDocTab(ctx.id);
+        if (then !== undefined) { then(true); }
+      });
+    } catch (e) {
+      this.guardBusy = false;
+      this.arkLog('CLOSE_GUARD_ERR ' + String(e));
+      this.closeDocTab(ctx.id);
+      if (then !== undefined) { then(true); }
+    }
+  }
+
+  /**
+   * 三按钮弹框（ArkUI 系统 AlertDialog——primary=保存 / secondary=不保存 / 点空白默认
+   * =取消）。标题/正文中文直写（单语言产品；项目 UI 文案惯例）。取消 → 不动文档。
+   */
+  private showCloseGuardDialog(ctx: DocTabCtx, then?: (proceed: boolean) => void): void {
+    let name = ctx.state.name;
+    if (name.length === 0) {
+      for (let i = 0; i < this.docTabs.length; i++) {
+        if (this.docTabs[i].ctx === ctx) {
+          name = this.docTitles[i];
+          break;
+        }
+      }
+    }
+    if (name.length === 0) {
+      name = this.defaultDocName(ctx.state.ext);
+    }
+    this.getUIContext().showAlertDialog({
+      title: '未保存的文档',
+      message: '文档「' + name + '」有未保存的修改。是否保存数据再退出？',
+      autoCancel: true,
+      primaryButton: {
+        value: '保存',
+        action: () => {
+          this.guardBusy = false;
+          this.saveAndClose(ctx, then);
+        }
+      },
+      secondaryButton: {
+        value: '不保存',
+        action: () => {
+          this.guardBusy = false;
+          this.arkLog('CLOSE_GUARD_DISCARD tab=' + ctx.id);
+          this.closeGuardDefer = null;
+          this.closeDocTab(ctx.id);
+          if (then !== undefined) { then(true); }
+        }
+      },
+      cancel: () => {
+        // 点空白/系统返回取消
+        this.guardBusy = false;
+        this.arkLog('CLOSE_GUARD_CANCEL tab=' + ctx.id);
+        if (then !== undefined) { then(false); }
+      }
+    });
+  }
+
+  /**
+   * 「保存」动作：挂 defer → 触发页面 asc_Save()（40_save 原型覆写 → save:bin →
+   * ArkTS x2t → 已命名=覆写目标 / 新建=系统另存为框）。完成信号：
+   *   save:bin handler 同步完成（uri/sandbox）或 doSaveAs 完成（none）——再关闭。
+   * 失败/取消/10s 超时（页面链断/引擎卡）→ 清 defer 不关（数据不丢优先）。
+   */
+  private saveAndClose(ctx: DocTabCtx, then?: (proceed: boolean) => void): void {
+    if (this.closeGuardDefer !== null) {
+      this.closeGuardDefer = null; // 防御（弹框互斥，理论上不双在途）
+    }
+    this.closeGuardDefer = { ctx: ctx, awaitingSaveAs: false, then: then };
+    const js = '(function(){try{'
+      + 'var ns=window.SSE||window.DE||window.PE;'
+      + 'var m=ns&&ns.controllers&&ns.controllers.Main;'
+      + 'var e=m&&m.api;'
+      + 'if(e&&typeof e.asc_Save==="function"){e.asc_Save();return "ok";}'
+      + 'return "noed";}catch(x){return "err";}})()';
+    ctx.controller.runJavaScript(js, (err: BusinessError, res: string) => {
+      // 同 requestCloseDoc：ArkWeb JSON 编码字符串返回值（带引号）——必须先解
+      let rv: string = String(res);
+      try {
+        const pv2: string | number = JSON.parse(String(res)) as string | number;
+        rv = String(pv2);
+      } catch (pe2) {
+        rv = String(res);
+      }
+      if (err || rv.indexOf('ok') < 0) {
+        // 保存入口不可用（页面死/无 asc_Save）——不关（与保存失败同语义）
+        this.arkLog('CLOSE_GUARD_SAVE_ERR tab=' + ctx.id + ' res=' + rv);
+        this.clearCloseGuard(ctx, false);
+      }
+    });
+    // 超时兜底：页面 save:bin 链断/引擎卡（awaitingSaveAs 在途=系统另存为框，不在此列）
+    setTimeout(() => {
+      if (this.closeGuardDefer !== null && this.closeGuardDefer.ctx === ctx
+        && !this.closeGuardDefer.awaitingSaveAs) {
+        this.arkLog('CLOSE_GUARD_SAVE_TIMEOUT tab=' + ctx.id);
+        this.clearCloseGuard(ctx, false);
+      }
+    }, 10000);
+  }
+
+  /**
+   * 守卫 defer 消费（唯一出口）：ok=true → 关闭目标 tab（保存成功）；false → 不关
+   *（取消/失败/超时）。then 继续窗口退出队列（proceed=ok；不关=终止队列语义由调用方
+   * 解释——back 队列 read proceed，tab 级无 then）。
+   */
+  private clearCloseGuard(ctx: DocTabCtx, ok: boolean): void {
+    const d = this.closeGuardDefer;
+    if (d === null || d.ctx !== ctx) {
+      return;
+    }
+    this.closeGuardDefer = null;
+    if (ok) {
+      // 保存真正落盘：清「保存中止」标记（下次守卫以页面 CanSave 为准）
+      ctx.state.saveAborted = false;
+      this.closeDocTab(ctx.id);
+    } else {
+      // 保存未完成（另存为取消/落盘失败/超时）：标记数据仍未保存——
+      // 页面 CanSave 已复位（asc_Save 触发过），下次关闭守卫必须忽略 '0' 再弹框
+      ctx.state.saveAborted = true;
+      this.arkLog('CLOSE_GUARD_SAVE_INCOMPLETE tab=' + ctx.id);
+    }
+    if (d.then !== undefined) {
+      d.then(ok);
+    }
+  }
+
+  /**
+   * 系统返回键 = 关闭窗口守卫（设计 §3.5）：收集全部 doc tab（从焦点起），逐个询问
+   * 未保存（保存/不保存 → 继续下一个；取消 → 停，留在应用）；队列全处置完 →
+   * terminateSelf 退出（返回键语义=关闭窗口）。无 doc tab/仅主页 → 放行系统退出。
+   * 守卫弹框在途（defer/查找期）→ 拦截（不叠框）。
+   */
+  onBackPress(): boolean {
+    if (this.p0On) {
+      return false;
+    }
+    // 返回键与系统三键 ✕ 同语义（requestBackExit——系统 ✕ 经 EntryAbility
+    // windowStageClose → 本方法）：返回 true=拦截（退出时机由守卫队列决定）；
+    // false=放行系统默认（无文档/探针态）
+    return this.requestBackExit();
+  }
+
+  /**
+   * 关闭窗口（系统返回键 / 系统三键 ✕ 共用——✕ 经 EntryAbility windowStageClose 恒
+   * 拦后调用本方法）：收集全部 doc tab（从焦点起），逐个询问未保存（保存/不保存 →
+   * 继续下一个；取消 → 清队列停：留在应用）；队列全处置完 → terminateSelf 退出
+   * （关闭窗口语义）；无 doc tab（仅主页）→ 直接退出。
+   * 返回值恒定 true=本层已接管退出时机（onBackPress 拦截系统默认；系统 ✕ 侧由
+   * EntryAbility 的 return true 拦截）；守卫在途（defer/查询/弹框）→ 同样 return
+   * true 只挡不叠（弹框层自己消费返回键）。p0On 探针态由 onBackPress 先行放行。
+   */
+  private requestBackExit(): boolean {
+    if (this.closeGuardDefer !== null || this.guardBusy) {
+      return true; // 有在途守卫流程：弹框 layer 自己消费，本层只挡默认退出
+    }
+    const docCtxs: DocTabCtx[] = [];
+    for (let i = 0; i < this.docTabs.length; i++) {
+      if (this.docTabs[i].ctx.kind === 'doc') {
+        docCtxs.push(this.docTabs[i].ctx);
+      }
+    }
+    if (docCtxs.length === 0) {
+      // 无文档：窗口 ✕ 语义=直接退出；返回键语义=放行系统退出——统一在此退出
+      const ac = getContext(this) as common.UIAbilityContext;
+      ac.terminateSelf();
+      return true;
+    }
+    this.backQueue = docCtxs;
+    this.processBackQueue();
+    return true; // 退出时机由队列决定
+  }
+
+  /** 窗口退出队列处理（一次一个——多文档未保存不叠框）。
+   * 注：队列串行由模态弹框保证——requestCloseDoc 返回后必有回调（查询/弹框 callback）；
+   *   BUSY 直 return（弹框/保存在途）理论上不可达（上一元素回调前队列不动）；若可达
+   *   队列会停（应用不退出）而非错关——以数据安全为先，可接受。 */
+  private processBackQueue(): void {
+    const next = this.backQueue.shift();
+    if (next === undefined) {
+      // 队列空：全部处置完（关/保存成功）→ 退出应用
+      const ac = getContext(this) as common.UIAbilityContext;
+      ac.terminateSelf();
+      return;
+    }
+    this.requestCloseDoc(next, (proceed: boolean) => {
+      if (!proceed) {
+        this.backQueue = []; // 用户取消 → 停
+        return;
+      }
+      this.processBackQueue();
+    });
+  }
+
   /**
    * 关闭 doc tab（file:close / tab ×）：移除节点（挂载即销毁）+ 标题同步。
    * 关闭后聚焦相邻（2026-09-09 用户需求）：关激活 tab → 选随后一个顶替原位的
    * （关尾 → 前一个）；关非激活 tab → 焦点保持指向原来那个（数组前移一位）。
-   * 无未保存守卫（P2 引入：官方 _state.isDocModified 读取——设计 §6.3）。
+   * 权威关闭（无守卫——守卫在 requestCloseDoc；本方法经守卫决策后触发）。
    */
   private closeDocTab(id: number): void {
     try {
@@ -1038,7 +1368,15 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
         focus: $focusTab,
         titles: $docTitles,
         accents: $docAccents,
-        onCloseDoc: (id: number) => this.closeDocTab(id),
+        // tab × = 未保存守卫入口（2026-09-09：查询 asc_isDocumentModified → 三按钮框）
+        onCloseDoc: (id: number) => {
+          const c = this.findCtx(id);
+          if (c !== null) {
+            this.requestCloseDoc(c);
+          } else {
+            this.arkLog('CLOSE_DOC_PAIR_NULL id=' + id);
+          }
+        },
         onSwitch: (idx: number) => this.onSwitchTab(idx)
       })
     }

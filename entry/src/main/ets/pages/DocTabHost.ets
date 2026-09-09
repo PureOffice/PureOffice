@@ -41,6 +41,10 @@ export class DocTabState {
   savePath: string = '';
   /** 有待打开文档（LocalStartOpen 注入守卫） */
   pendingOpen: boolean = false;
+  /** 保存被中止/失败（2026-09-09 未保存关闭守卫）：asc_Save 触发后引擎即复位
+   *  canSave——但另存为取消/落盘失败=数据未保存、页面 CanSave 却已 false——
+   *  ArkTS 侧记忆此态，守卫查询时忽略页面 '0'（真数据未落盘，必须再弹框） */
+  saveAborted: boolean = false;
 }
 
 export class DocTabCtx {
@@ -322,6 +326,14 @@ export struct DocTabHost {
           // minWidth 与 flexShrink 并存时以收缩结果为准；不承诺下限，标题省略号兜底）
           .constraintSize({ minWidth: item.ctx.kind === 'home' ? 72 : 96, maxWidth: 320 })
         }, (item: DocTabPair) => item.ctx.kind + '-' + item.ctx.id.toString())
+        // —— 系统三键区说明（2026-09-10 用户纠正+UI dump 实证）——
+        // setWindowDecorVisible(false) **只隐藏标题栏，系统 −□✕ 三键仍在窗口
+        // 右上角**（1.4 实测：三键 [2370,297]-[2560,335]，原生 38px 键距）。
+        // 此前「decor 隐藏三键即不存在」为错误结论——取证样本 1.8（tablet
+        // 沉浸窗口本无三键），与 decor 无关。故**不再自绘任何窗口键**。
+        // 关闭窗口守卫由 WindowStage.on('windowStageClose') 拦截（EntryAbility
+        // → requestBackExit，与返回键同链）。最小化/最大化=系统原生，零参与。
+        // 三键在右 padding 150 内——下方 padding 正是避让其左缘。
       }
       // 显式 Start——chip 加 flexShrink 后进 flex 自由项上下文，Row 未显式设
       // justifyContent 时被默认居中（用户 2026-09-09 实证：tabs 跑到窗口中央）
@@ -330,7 +342,7 @@ export struct DocTabHost {
       .height(TAB_BAR_H)
       // 左右内衬：左 0（chip 贴窗口左缘）；右 PC=150 固定（HiSH 参考——PcIndex
       // 顶栏 padding{left:15,right:150}，150=系统三键区（−□✕）默认避让；Pad 无
-      // 按钮=0）。chip 已可收缩（flexShrink）→ 不产生溢出绘制，padding 恒生效
+      // 三键=0。chip 已可收缩（flexShrink）→ 不产生溢出绘制，padding 恒生效
       .padding({ left: 0, right: IS_PC ? 150 : 0 })
       // 条底恒定=官方 --background-normal #F7F7F7（2026-09-09 用户决策：不随
       // 激活文档换色——只有 chip 染色；与欢迎页侧栏同色，上下贯通无分界）

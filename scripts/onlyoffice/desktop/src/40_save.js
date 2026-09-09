@@ -434,3 +434,59 @@
     } catch (wx) { console.error('LSO_WELNAV_ERR ' + String(wx)); }
   })();
 
+  // ---- 3.8.5 官方 Header X 重定向（未保存关闭守卫，2026-09-09）----
+  //     官方链：Header.js:383 btnClose → NotificationCenter 'close' → Main.js:250
+  //     closeEditor → onRequestClose（Main.js:693）——asc_isDocumentModified 时弹
+  //     Common.UI.warning「放弃修改并离开/取消」**无「保存」项**（官方 web 语义假设
+  //     服务器已自动保存；离线单机 autosave=false 此假设不成立，点「确定」即丢数据）。
+  //     【UI 可达性实测（2026-09-09 真机）】本壳 targetApp='desktop'（isDesktopApp
+  //     =true）→ Header.js:969 canCloseEditor = customization.close.visible &&
+  //     canRequestClose && !isDesktopApp 为假 → **btnClose 不渲染**——UI 上无 X；
+  //     「文件→退出」同受 Common.Controllers.Desktop.isActive() 门控（isActive=false
+  //     → FileMenu.js:505 不注入 fm-btn-exit）——两个官方关闭入口当前 UI 均不可达，
+  //     本段与 ArkTS close-request 分支是**未来恢复 web 关闭档时的守卫一致性**（零
+  //     风险，UI 不触发即休眠）。当前真实可达关闭入口=tab ×（DocTabHost）+返回键
+  //     （onBackPress），均已接守卫。
+  //     【修正】覆写 app 主控制器实例的 closeEditor 方法：不再进官方弹框，转而向
+  //     ArkTS 上报 editor:event close-request → EditorPage.requestCloseDoc 统一
+  //     三按钮守卫（保存/不保存/取消——与 tab ×、文件菜单退出同框）。
+  //     三编辑器主控制器全局：**运行时命名空间 = window.SSE/DE/PE.controllers（小写）**
+  //     —— 词性关键坑（2026-09-09 实证）：源码写 `<NS>.Controllers.Main`（大写 C），
+  //     但打包后挂载在 `<NS>.controllers`（小写——LSO_KICK_SERVERID 链 10_engine
+  //     `window.SSE.controllers.Main.api` 真机打点证实为唯一可用句柄；用大写 C 的
+  //     hook 空转 60s 静默）。closeEditor 是实例方法（app 初始化后挂载），首次出现
+  //     即覆写——重试轮询模式同 _hookSave（offline 页空转可退避，不下死循环）。
+  (function _hookCloseEditor() {
+    try {
+      var _qc = (window.location || {}).pathname || '';
+      if (_qc.indexOf('/main/index.html') < 0) { return; }
+      var _ns = window.SSE || window.DE || window.PE;
+      var _m = _ns && _ns.controllers && _ns.controllers.Main;
+      if (!_m || typeof _m.closeEditor !== 'function') {
+        if ((window.__lsoCEWaitN = (window.__lsoCEWaitN || 0) + 1) < 300) { setTimeout(_hookCloseEditor, 200); }
+        return;
+      }
+      if (!_m.__lsoCEHooked) {
+        _m.__lsoCEHooked = true;
+        var _reqClose = function() {
+          try {
+            console.error('LSO_CLOSE_EDITOR -> close-request');
+            // AscNative 空值防御（页面注册于 onInstanceReady——注册前被点则丢弃+日志）
+            if (window.AscNative && typeof window.AscNative._call === 'function') {
+              window.AscNative._call('execCommand', ['editor:event', JSON.stringify({action: 'close-request'})]);
+            } else {
+              console.error('LSO_CLOSEREQ_NATIVE_MISSING');
+            }
+          } catch (e) { console.error('LSO_CLOSEREQ_ERR ' + String(e)); }
+        };
+        _m.closeEditor = _reqClose;
+        console.error('LSO_CE_HOOKED');
+      }
+    } catch (e) { console.error('LSO_CE_HOOK_ERR ' + String(e)); }
+  })();
+
+  // ---- 3.8.6（诊断段，已删——2026-09-09 调查结论固化在 3.8.5 注释与 EditorPage
+  //      requestCloseDoc 注释：接口句柄=window.<NS>.controllers.Main.api（小写
+  //      controllers）、查询 API=asc_isDocumentCanSave（三引擎均有）、ArkWeb
+  //      runJavaScript 返回值 JSON 编码、saveAborted 修复 canSave 复位缝隙）
+

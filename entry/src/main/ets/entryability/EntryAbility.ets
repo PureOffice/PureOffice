@@ -28,6 +28,20 @@ export function getLaunchOptions(): Record<string, string> {
   return launchOptions;
 }
 
+// —— 系统三键 ✕ 关闭守卫桥（2026-09-10，WPS 同款正路）——
+// WindowStage.on('windowStageClose')（@since 14）：主窗口三键导航栏「关闭」点击
+// 事件——回调 **return true = 不关窗**（d.ts 类型标注 Callback<void>，语义在返回
+// 值；真机行为为准）。策略=恒拦：先阻止系统关窗，再转 EditorPage 守卫
+// （requestBackExit：未保存逐个弹三按钮框→全处置完 terminateSelf；用户取消=窗口
+// 保留）。此前「系统 ✕ 不可拦截/×随标题栏隐藏」结论错误：setWindowDecorVisible
+// (false) 只藏标题栏，三键常驻右上角（1.4 UI dump [2370,297]-[2560,335] 实证）——
+// 旧结论取证样本是 1.8（tablet 沉浸窗口本无三键），与 decor 无关。
+let windowCloseHandler: (() => void) | null = null;
+
+export function setWindowCloseHandler(h: (() => void) | null): void {
+  windowCloseHandler = h;
+}
+
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     // POC-1: 无业务初始化；仅收集启动参数（能力验证/验收开关用）
@@ -41,6 +55,21 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
+    // 系统三键 ✕ 关闭守卫入口（2026-09-10）：拦截（return true=不关窗）仅当
+    // windowCloseHandler 已注册（EditorPage aboutToAppear 设置=requestBackExit）；
+    // **未注册（loadContent 首帧前）→ 放行系统默认关窗**——恒拦会死锁（handler 为
+    // null 时无人终止，窗口卡死）。首帧前亦无文档可编辑，放行零数据风险。
+    try {
+      windowStage.on('windowStageClose', () => {
+        if (windowCloseHandler !== null) {
+          windowCloseHandler();
+          return true;
+        }
+        return false;
+      });
+    } catch (e) {
+      hilog.warn(0x0000, 'OfficeWin', 'windowStageClose register err ' + JSON.stringify(e));
+    }
     windowStage.loadContent('pages/EditorPage', () => {
       // loadContent 之后窗口装饰才就绪（wineohos WineWindowAbility 同款时序）。
       // 2026-09-09 首次真机：loadContent 回调时窗口未显示——setWindowLayoutFullScreen
