@@ -71,6 +71,13 @@
     e.preventDefault();
     e.stopPropagation();
     ensure();
+    // 2026-09-10 用户：许可弹层打开时把其下的官方 dialog（欢迎页 AboutDialog 等
+    //  `<dialog class="dlg">` 元素）关掉——遮罩是全屏覆盖，下面叠着关于面板没意义
+    try {
+      document.querySelectorAll('dialog.dlg').forEach(function (d) {
+        if (typeof d.close === 'function') { d.close(); }
+      });
+    } catch (e6) {}
     // 标题固定（取链接整文会把「（点击查看全文）」等链接文案带进标题栏——2026-09-07 用户指出）
     title.textContent = '许可证文本';
     iframe.srcdoc = '<pre style="white-space:pre-wrap;padding:20px 24px;font:12px/1.6 monospace;color:#333;">加载中…</pre>';

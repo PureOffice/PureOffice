@@ -56,6 +56,10 @@ SDK_DST = os.path.join(DST, 'sdkjs')
 PLUGIN_SRC = os.path.join(ROOT, 'scripts', 'onlyoffice', 'plugins')
 PLUGIN_DST = os.path.join(DST, 'plugins')          # 本地插件目录（web 语义 server_plugins 链消费）
 LOGIN = os.path.join(ROOT, 'third_party', 'desktop-apps', 'common', 'loginpage', 'deploy', 'index.html')
+# 产品版本号（2026-09-10 用户拍板：About 面板版本行显示产品版本——与资源哈希
+# version.json.v 分开：v 是 URL 缓存指纹（不展示），ver 是对用户展示的产品版本，
+# 随发布手工推进（semver 起步 1.0.0；多引擎版本尾号留待产品化再对齐）。
+PRODUCT_VERSION = '1.0.0'
 FONT_DST = os.path.join(DST, 'fonts')          # GlobalLoaders.fontFilesPath - ../fonts/
 # 系统字体路径（Environment 可覆盖：OHOS_LIBERATION_FONTS；跨机不统一时保持一致性
 # —— 字体版本差异会反映进 version.json 哈希，2026-09-05 审查补）
@@ -723,6 +727,9 @@ def patch_about_brand():
         print('  about品牌: licensor 公司信息表 → hidden')
     elif info_new not in s:
         raise SystemExit('About 模板 licensor 信息表未找到（结构变化？）')
+    # 幂等判定的权威信号在 About.js 上下文里（new_line in s）——(3) 段 app.css 循环
+    # 会复用并覆写 s，底部判定不能再用裸 s（会拿最后一个 app.css 误判）
+    about_has_new = new_line in s
     with open(about_p, 'w', encoding='utf-8') as f:
         f.write(s)
 
@@ -763,10 +770,65 @@ def patch_about_brand():
         print('  about品牌: %s css logo 图示清除 ×%d + asc-about-brand 规则%s'
               % (app, n1 + n2, '追加' if n1 or n2 else '已存在'))
 
-    if patched == 0 and n_upper == 0 and n_brand == 0 and logos == 0 and new_line in s:
-        print('  about品牌: 已全部生效（幂等重跑，跳过）')
-    elif patched == 0 and n_upper == 0 and n_brand == 0 and logos == 0 and new_line not in s:
-        raise SystemExit('About 品牌 patch 无任何命中——请检查 grunt 产物完整性')
+    if patched == 0 and n_upper == 0 and n_brand == 0 and logos == 0:
+        if about_has_new:
+            print('  about品牌: 已全部生效（幂等重跑，跳过）')
+        else:
+            raise SystemExit('About 品牌 patch 无任何命中——请检查 grunt 产物完整性')
+
+    # —— 欢迎页 AboutDialog 品牌化（2026-09-10 用户拍板方案 A：入口放欢迎页侧栏
+    #    「关于」）——
+    # 官方欢迎页自带整套 About：侧栏项 `<li class="menu-item hidden"><a action="about">`
+    # （官方默认 hidden）+ AboutDialog（dlg-about，570 宽）+ 事件通路
+    #   window.sdk.on("on_native_message", …, () => /app\:version/.test(e) &&
+    #     $(".tool-menu a[action=about]").parent().removeClass("hidden"))
+    # 官方壳（CEF/Electron）发 app:version 才显示；本壳未发 → 项恒 hidden（这是
+    # 「关于入口不见」的根因——2026-09-10 调查，多 tab 与 ascshim 均未动过它）。
+    # 补发 = ascshim 57_about.js（页面侧模拟壳事件）；本段只品牌化对话框产物：
+    #   1) appname 行写死 Pure Office（事件 opts.appname 同值双保险）；
+    #   2) 官方 logo 块（#idx-about-cut-logo 内 idx-logo-light/dark use 图示——
+    #      同「官方 logo 图示內含超大 ONLYOFFICE 字样」）→ 内联 style display:none；
+    #   3) 版本行去「商业版/社区版」前缀 label（strVersionCommunity 语义属官方
+    #      订阅版；本壳 = AGPL 社区构建，label 不成立——版本值=构建哈希
+    #      version.json.v，事件注入）；
+    #   4) 官网/站点行（ver-site，target=popup 无新标签页语义）→ 许可信息链接
+    #      （target=_blank + localhost LICENSE.txt → 55_lic.js 弹层拦截渲染，
+    #      与编辑器 About 同款交互，满足官方附加条款 3(iii)）；
+    #   5) 版权行（ver-copyright ${t.rights}）→ CREDIT 归属行硬编码（事件不发
+    #      rights，单一来源——同编辑器 About 的 CREDIT 常量）。
+    WELCOME = os.path.join(DST, 'index.html')
+    wsteps = [
+        ('<p id="idx-about-appname">${t.appname}</p>',
+         '<p id="idx-about-appname">Pure Office</p>', 'appname'),
+        ('<div id="idx-about-cut-logo" class="${t.logocls}">',
+         '<div id="idx-about-cut-logo" class="${t.logocls}" style="display:none">', 'logo'),
+        ('<p id="idx-about-version"><span l10n>${i}</span> ${t.version}</p>',
+         '<p id="idx-about-version">${t.version}</p>', '版本行 label'),
+        ('<a class="ver-site link about-field" target="popup" href="${t.link}">${t.site}</a>',
+         '<a class="ver-site link about-field" target="_blank" href="' + LIC_URL + '">许可信息：GNU AGPL v3.0</a>', '官网行→许可'),
+        ('<div class="ver-copyright about-field">${t.rights}</div>',
+         '<div class="ver-copyright about-field">' + CREDIT + '</div>', '版权行'),
+    ]
+    wpatched = 0
+    if os.path.isfile(WELCOME):
+        with open(WELCOME, 'r', encoding='utf-8') as f:
+            s = f.read()
+        for old, new, desc in wsteps:
+            # 幂等：old 已不在且 new 已在 → 已生效跳过；命中 → 替换计数
+            if old in s:
+                n = s.count(old)
+                s = s.replace(old, new)
+                wpatched += n
+                print('  about品牌: 欢迎页 %s ×%d' % (desc, n))
+        if wpatched:
+            with open(WELCOME, 'w', encoding='utf-8') as f:
+                f.write(s)
+        # 结构性探测：5 步应全部「已替换 or 已生效」，否则 loginpage 结构变了
+        missing = [d for (o, _nw, d) in wsteps if (o not in s) and (_nw not in s)]
+        if missing:
+            raise SystemExit('欢迎页 About 品牌 patch 未命中: %s ——请检查 loginpage 结构' % ','.join(missing))
+    else:
+        print('  !! 欢迎页 index.html 不存在——跳过 welcome About 品牌化（loginpage 未部署）')
 
 
 def gen_version_json():
@@ -789,7 +851,8 @@ def gen_version_json():
             h.update(f.read())
     v = h.hexdigest()[:12]
     with open(os.path.join(DST, 'version.json'), 'w', encoding='utf-8') as f:
-        json.dump({'v': v}, f)
+        # ver=产品版本（About 面板展示，PRODUCT_VERSION 常量）；v=资源哈希（URL 指纹）
+        json.dump({'v': v, 'ver': PRODUCT_VERSION}, f)
     return v
 
 
