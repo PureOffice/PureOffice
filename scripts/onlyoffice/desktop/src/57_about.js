@@ -57,6 +57,7 @@
       if (!sentLogged) {
         sentLogged = true;
         console.error('LSO_APP_VERSION_SENT ver=' + ver);
+        (window.__lsoShim = window.__lsoShim || []).push('about');  // 自检登记（仅欢迎页）
       }
       return true;
     } catch (e) {

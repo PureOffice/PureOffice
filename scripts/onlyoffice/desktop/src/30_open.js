@@ -262,6 +262,7 @@
                     } catch (cc) {}
                   }
                   console.error('LSO_INIT_ALL_OK n=' + _nInit);
+                  (window.__lsoShim = window.__lsoShim || []).push('open');  // 自检登记
                 } catch (iax) { console.error('LSO_INIT_ALL_ERR ' + String(iax)); }
               } catch (le) {
                 console.error('LSO_LC_ERR ' + String(le));

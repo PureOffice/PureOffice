@@ -20,6 +20,7 @@ src 内以占位符接入脚本动态内容（一一对应下面 .replace）：
   @@FONT_INFOS_JSON@@ 字体元数据表
 
 产物校验：node --check（JS 语法硬校验，失败即非零退出；宿主机无 node 时降级告警）。
+设计总览（分层 / 各段职责 / 自检用法 / 使用边界）见 docs/ONLYOFFICE_ASC_SHIM_DESIGN.md
 修改页面适配请改 src/*.js 后重新生成；**ascshim.js 是生成产物，勿手改**。
 """
 import os

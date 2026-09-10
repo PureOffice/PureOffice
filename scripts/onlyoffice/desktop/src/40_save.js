@@ -180,6 +180,7 @@
         }
       };
       console.error('LSO_SAVE_HOOKED');
+      (window.__lsoShim = window.__lsoShim || []).push('save');  // 自检登记
     } catch (cbx) { console.error('LSO_SAVE_HOOK_ERR ' + String(cbx)); }
   })();
 

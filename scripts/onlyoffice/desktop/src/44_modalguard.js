@@ -36,9 +36,14 @@
   //   三事件扩到整族；旧前缀只出现在本次排查前的日志里。）
   // 已知残留（不变）：吞掉后**排在其后的同名 handler 仍被跳过**（Backbone 无法逐个
   //   隔离），本轮排查未发现因此造成的可见故障；若后续需要彻底隔离，再改 per-handler 包装。
-  // 页门控：无（欢迎页 / 编辑器页共用同一 Common 实例，两页都有这些事件）。
+  // 页门控：仅编辑器页（欢迎页不加载 webapps 的 Common——见函数内实证说明）。
   (function _guardShellEvents() {
     try {
+      // 页门控：仅编辑器页——2026-09-11 自检实证：欢迎页 URL=/onlyoffice/index.html **不加载
+      //   webapps 的 Common**（NotificationCenter 永不存在），本段在欢迎页只会空等到 GIVEUP。
+      //   （文件头原写「两页共用同一 Common」不成立，据此更正；本段保护的事件也都是编辑器页的。）
+      var _pp = (window.location || {}).pathname || '';
+      if (_pp.indexOf('/main/index.html') < 0) { return; }
       var _n = 0;
       // 白名单 = 已确认无保护且会调 native 的壳层事件；其余事件原样透传（不改变语义）
       var _GUARDED = {
@@ -63,6 +68,7 @@
             return _orig.apply(this, arguments);
           };
           console.error('LSO_EVT_GUARD_HOOKED');
+          (window.__lsoShim = window.__lsoShim || []).push('modal');  // 自检登记
           return;
         }
         if (_n < 900) { setTimeout(_tick, 200); } else { console.error('LSO_EVT_GUARD_GIVEUP'); }

@@ -139,4 +139,7 @@
       (document.head || document.documentElement).appendChild(_st);
     } catch (e5) {}
   })();
+
+  // 自检登记：本段同步执行（head 早于官方 themeinit），走到这里=默认主题已预写
+  (window.__lsoShim = window.__lsoShim || []).push('theme');
 })();

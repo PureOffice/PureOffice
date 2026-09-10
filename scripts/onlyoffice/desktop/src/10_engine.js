@@ -84,6 +84,7 @@
                   return r;
                 };
                 console.error('LSO_GW_ONBIN_HOOKED');
+                (window.__lsoShim = window.__lsoShim || []).push('engine');  // 自检登记
                 return _oldOn.call(G, event, _h);
               }
               return _oldOn.call(G, event, handler);

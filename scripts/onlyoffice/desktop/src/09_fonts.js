@@ -86,6 +86,8 @@
         filled = true;
         console.error('FONT_WARM_FILLED id=' + ID + ' idx=' + (streams.length - 1)
           + ' bytes=' + bytes.length + ' status=' + ff.Status);
+        // 自检登记（多字体循环各 push 一次，读侧 indexOf 判存在，重复无害）
+        (window.__lsoShim = window.__lsoShim || []).push('fonts');
       } catch (e) { console.error('FONT_WARM_FILL_ERR id=' + ID + ' ' + String(e)); }
     }
     (function poll() {

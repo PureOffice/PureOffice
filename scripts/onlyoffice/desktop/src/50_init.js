@@ -1,5 +1,7 @@
     // ---- 4. 初始化尾 ----
     if (window.AscNative && window.AscNative._onReady) window.AscNative._onReady();
+    // 自检登记：INSTALL 仅在 AscNative 注入后调用 → 走到这里=页面侧壳桥已就绪
+    (window.__lsoShim = window.__lsoShim || []).push('bridge');
   };
 
   // —— 中文渲染阶段诊断段（PROF_LF/HB/HBS/GS/CG/RAST/MEAS/DRAW 等探针，多轮单次采集）——

@@ -62,6 +62,7 @@
         }
       };
       console.error('LSO_PRINT_HOOKED');
+      (window.__lsoShim = window.__lsoShim || []).push('print');  // 自检登记
     } catch (cbx) { console.error('LSO_PRINT_HOOK_HOOK_ERR ' + String(cbx)); }
   })();
 
