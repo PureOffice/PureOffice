@@ -405,21 +405,6 @@
         // DnDFileZone 渲染的 .dnd-zone。
         var _dz = document.querySelector('.dnd-zone');
         if (_dz) { _dz.style.display = 'none'; }
-        // 新建文档入口 2×2 网格（2026-09-05 用户：4 个入口一行排列过挤，改两行）。
-        // 官方 .document-creation-grid 为 flex 一行（item 固定 172×172、gap 32）；
-        // 用 inline 改（同 dnd-zone——<style> 注入按源顺序层叠，ascshim 头部引入在
-        // 官方 <style> 之前会被官方 display:flex 覆盖；且本段必须置于 _whide 内由
-        // MutationObserver 反复执行——一次性执行时网格尚未渲染，2026-09-05 实测两坑）。
-        var _g = document.querySelector('.document-creation-grid');
-        if (_g) {
-          _g.style.display = 'grid';
-          _g.style.gridTemplateColumns = 'repeat(2, 172px)';
-          _g.style.gap = '16px 32px';
-          // grid 的 justify-content 默认 start（左对齐）——官方 flex 版居中来自
-          // media 规则 justify-content:center，改 grid 后需显式补（2026-09-05
-          // 用户：还原（非最大化）窗口网格不居中，最大化居中是因为中央列宽差异掩盖）。
-          _g.style.justifyContent = 'center';
-        }
       };
       var _wobs = new MutationObserver(_whide);
       if (document.body) {

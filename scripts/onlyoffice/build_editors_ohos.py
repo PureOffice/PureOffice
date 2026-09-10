@@ -659,7 +659,6 @@ def patch_about_brand():
     # `--text-tertiary` 灰字，链接嵌在句中须显链接色；编辑器 About 侧由 BRAND_CSS
     # 的 `.about-dlg .asc-about-note a` 规则承担（官方 `.about-dlg a` 同染正文色）。
     LIC_URL = 'http://localhost/onlyoffice/licenses/LICENSE.txt'
-    CREDIT_TEXT = '基于 ONLYOFFICE DesktopEditors（AGPL-3.0）'
     CREDIT = ('基于 ONLYOFFICE DesktopEditors（<a class="link" href="' + LIC_URL
               + '" target="_blank">AGPL-3.0</a>）')
     APP_BRAND = "appName: 'Pure Office'"
@@ -710,21 +709,6 @@ def patch_about_brand():
     tag = 'id-about-licensor-version-name'
     new_line = ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
                 + CREDIT + '</label></td></tr>\',')
-    # 上一版补丁格式清理（历史形态 = 纯文本归属行 + 独占「许可信息」行）：
-    # 本轮 patch 对象是 grunt 产物未补丁态（main() 每回先重拷 W3D）→ 正常路径不会
-    # 遇到；但本地干跑（不重拷、直接再跑本函数）会落到旧补丁态——显式清除旧两行，
-    # 使任意入口重跑都收敛到新格式（单行 + AGPL-3.0 链接），不留双份文案。
-    prev_rows = [
-        ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
-         '基于 ONLYOFFICE DesktopEditors（AGPL-3.0）</label></td></tr>\',', '纯文本归属行'),
-        ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
-         '<a href="' + LIC_URL + '" target="_blank">许可信息：GNU AGPL v3.0</a>'
-         '</label></td></tr>\',', '独占许可行'),
-    ]
-    for dead, desc in prev_rows:
-        if '\n                ' + dead in s:
-            s = s.replace('\n                ' + dead, '')
-            print('  about品牌: 清除上一版 %s（升级收敛）' % desc)
     if new_line not in s:
         old_line = ('\'<td align="center"><label class="asc-about-version" id="' + tag + '">\''
                     ' + this.txtVersion + this.txtVersionNum + \'</label></td>\',')
@@ -825,59 +809,66 @@ def patch_about_brand():
     #      全文链接，target=_blank + localhost LICENSE.txt → 55_lic.js 弹层拦截
     #      渲染，满足官方附加条款 3(iii)）。
     WELCOME = os.path.join(DST, 'index.html')
-    # 每步 =（可接受的旧串元组, 新串, 描述）：旧串含「上一版补丁态」形态——仅本地
-    # 干跑（不重拷产物直接重跑）会遇到，一并列入使任意入口重跑收敛到同一结果
     wsteps = [
-        (('<p id="idx-about-appname">${t.appname}</p>',),
+        ('<p id="idx-about-appname">${t.appname}</p>',
          '<p id="idx-about-appname">Pure Office</p>', 'appname'),
-        (('<div id="idx-about-cut-logo" class="${t.logocls}">',),
+        ('<div id="idx-about-cut-logo" class="${t.logocls}">',
          '<div id="idx-about-cut-logo" class="${t.logocls}" style="display:none">', 'logo'),
-        (('<p id="idx-about-version"><span l10n>${i}</span> ${t.version}</p>',),
+        ('<p id="idx-about-version"><span l10n>${i}</span> ${t.version}</p>',
          '<p id="idx-about-version">${t.version}</p>', '版本行 label'),
-        (('<div class="ver-copyright about-field">${t.rights}</div>',
-          '<div class="ver-copyright about-field">' + CREDIT_TEXT + '</div>'),
+        ('<div class="ver-copyright about-field">${t.rights}</div>',
          '<div class="ver-copyright about-field">' + CREDIT + '</div>', '版权行'),
     ]
-    # 整行删除步（不在 wsteps 里——它没有「新串」，幂等/探测用下方的目标串判定）
+    # 整行删除步（无「新串」，幂等/探测看下方判定）
     del_line = '<a class="ver-site link about-field" target="popup" href="${t.link}">${t.site}</a>'
     wpatched = 0
     if os.path.isfile(WELCOME):
         with open(WELCOME, 'r', encoding='utf-8') as f:
             s = f.read()
-        for olds, new, desc in wsteps:
-            # 幂等：new 已在 → 已生效跳过；否则按各旧串形态逐个替换（含上一版补丁态）
-            if new in s:
-                continue
-            for old in olds:
-                if old in s:
-                    n = s.count(old)
-                    s = s.replace(old, new)
-                    wpatched += n
-                    print('  about品牌: 欢迎页 %s ×%d' % (desc, n))
-        # 删官网行：两态都要能判定已生效——① 未补丁态：行还在 → 删；
-        # ② 上一版补丁态（行已被换成许可链接，见下 del_prev）→ 一并删（升级路径）
-        del_prev = ('<a class="ver-site link about-field" target="_blank" href="' + LIC_URL
-                    + '">许可信息：GNU AGPL v3.0</a>')
-        del_done = False
-        for dead in (del_line, del_prev):
-            if dead in s:
-                n = s.count(dead)
-                s = s.replace(dead, '')
+        for old, new, desc in wsteps:
+            if old in s:  # 幂等：已替换（old 不在）即跳过
+                n = s.count(old)
+                s = s.replace(old, new)
                 wpatched += n
-                del_done = True
-                print('  about品牌: 欢迎页 删官网/许可行 ×%d' % n)
+                print('  about品牌: 欢迎页 %s ×%d' % (desc, n))
+        if del_line in s:
+            n = s.count(del_line)
+            s = s.replace(del_line, '')
+            wpatched += n
+            print('  about品牌: 欢迎页 删官网行 ×%d' % n)
         if wpatched:
             with open(WELCOME, 'w', encoding='utf-8') as f:
                 f.write(s)
         # 结构性探测：各步应全部「已替换 or 已生效」，否则 loginpage 结构变了
-        missing = ([d for (olds, nw, d) in wsteps
-                    if nw not in s and all(o not in s for o in olds)]
-                   + ([] if del_done or (del_line not in s and del_prev not in s)
-                      else ['官网行(删)']))
+        missing = ([d for (o, nw, d) in wsteps if o not in s and nw not in s]
+                   + ([] if del_line not in s else ['官网行(删)']))
         if missing:
             raise SystemExit('欢迎页 About 品牌 patch 未命中: %s ——请检查 loginpage 结构' % ','.join(missing))
     else:
         print('  !! 欢迎页 index.html 不存在——跳过 welcome About 品牌化（loginpage 未部署）')
+
+    # —— 新建文档入口裁为 docx/xlsx/pptx（2026-09-10 用户：「主页入口中，只保留
+    #    docx/xlsx/pptx，PDF 入口去掉」）——
+    # 官方 DocumentCreationGrid 的 documentTypes 数组含第 4 项 PDF 表单卡（id:"form"），
+    # 点击 create:new id=form——本壳 EditorPage.onTabCommand 无 form 分支（会落到 docx
+    # 默认），入口本身就是错的，直接删卡。删整项（连同相邻逗号，保持数组语法）。
+    PDF_CARD = ('{id:"form",title:utils.Lang.newForm,langKey:"newForm",'
+                'formatLabel:{value:"PDF",gradientColorStart:"#F36653",'
+                'gradientColorEnd:"#D2402D",bgColorWinXP:"#e54d39"},icon:"#pdf-big"}')
+    if os.path.isfile(WELCOME):
+        with open(WELCOME, 'r', encoding='utf-8') as f:
+            s = f.read()
+        if PDF_CARD in s:
+            # 官方把 PDF 卡放数组末项 → 前导逗号必在；若哪天它不在末项，下面的探测
+            # 会报错（不静默留下语法错的数组）
+            dead = ',' + PDF_CARD if ',' + PDF_CARD in s else PDF_CARD
+            s = s.replace(dead, '')
+            with open(WELCOME, 'w', encoding='utf-8') as f:
+                f.write(s)
+            print('  welcome: 删除 PDF 新建入口卡')
+        if PDF_CARD in s:
+            raise SystemExit('欢迎页 PDF 入口卡未删除——新建入口结构可能已变，'
+                             '请检查 loginpage 的 documentTypes 数组')
 
 
 def gen_version_json():

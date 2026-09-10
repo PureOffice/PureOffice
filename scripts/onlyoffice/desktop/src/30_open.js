@@ -584,10 +584,6 @@
               };
             } catch (iwx) { console.error('LSO_FONT_WRAP_ERR ' + String(iwx)); }
           })();
-          // （原 lsoSendFonts 补发段已删除——2026-09-06：官方链实证已跑（wrap 打点
-          //  LSO_FONT_INJ 出现官方调用 #1/#3）；补发制造 CFont type='' 空白行+混排
-          //  （截图实证）；后续若再遇"字体表未加载"，先查 wrap 的 LSO_FONT_INJ 是否
-          //  存在官方调用，再决定恢复补发（勿照旧结论 v13）。
         };
         // 应用命名空间随编辑器而异：DE(document)/SSE(spreadsheet)/PE(presentation)，
         // 不能用 window.DE（cell 页 DE=undefined → Main 永远找不到 → 不开文档）
@@ -611,20 +607,4 @@
         })();
       }
     } catch (nix) {}
-
-
-    // ---- 3.9（已移除，2026-09-05 稳定化）：插件装配时序包装。官方 web 链本就保证
-    //      「文档加载完成 → 装配插件」：onDocumentContentReady（Main.js:1298）→ app:ready
-    //      → pluginsController.setApi(Main.js:1463) → loadPlugins → asc_pluginsRegister
-    //      （Plugins.js:259）；官方另有 preSetupPlugins 延迟补发（apiBase.js:3662）。
-    //      「1500/4000ms + loading-mask 消失 + 30s 超时」的包装属于重复且不可靠的
-    //      权宜实现，删除。若再遇插件装配与文档打开的异常：不回加包装，先用官方事件
-    //      （asc_registerCallback('asc_onDocumentContentReady'/'asc_onPluginShow')）打点取证。
-
-    // ---- 3.10（已撤回，2026-09-05 用户决策：专注基础功能）：AI 插件 provider 预配置
-    //      （localStorage onlyoffice_ai_plugin_storage_key + ai-mock 端点）与 3.11 AI 按钮
-    //      点击诊断一起撤除。AI 后续启用时：恢复该段 + build_editors_ohos.py 的 AI 插件
-    //      安装步骤 + EditorPage smoke 的 AI 探针（git 历史可查）。
-
-    // ---- 3.11（已撤回，见 3.10 说明）。
 
