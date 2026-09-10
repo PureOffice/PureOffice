@@ -52,7 +52,8 @@
 | `LocalFileTemplates` | `[]` | 模板面板空 | loginpage 模板区留白；补充可后续注入 |
 | `GetHash` / `_GetHash` | false | | |
 | `GetSupportScaleValues` / `GetFontThumbnailHeight` | false | 无额外缩放集 | 系统缩放走设备系数 |
-| `CheckUserId` / `SetAdvancedOptions` / `ApplyAction` / `SetFullscreen` | false | 无内容交互 | 全屏可在 ArkTS 侧实现（当前未接） |
+| `CheckUserId` / `SetAdvancedOptions` / `ApplyAction` | false | 无内容交互 | |
+| `SetFullscreen` | true | **已接**（2026-09-11）：PPT 放映全屏——Pad 收起 tab 条 / PC 沉浸最大化（`ENTER_IMMERSIVE_DISABLE_TITLE_AND_DOCK_HOVER`），退出按进入前窗口状态精确还原 | 真机 1.5/1.6 均✅；调用被 ascshim 3.7.1 在放映期临时恢复的 `AscDesktopEditor` 触发（3.7 平时删除它） |
 
 ## 3. 未实现（无官方UI入口或登录页未暴露）
 
@@ -113,5 +114,4 @@
 1. 模板库：`LocalFileTemplates` 返回沙箱模板 JSON（官方 loginpage 模板卡片直接吃）
 2. PDF 编辑器/打印：接 core 的 doctrenderer（现有 x2t 链可作 pdf 输出的降级前身）
 3. 拼写检查词典包
-4. 全屏/窗口管理：ArkTS 全屏能力 + `SetFullscreen` 桥
-5. 宏：sdkjs macros + 宏存储
+4. 宏：sdkjs macros + 宏存储

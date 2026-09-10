@@ -241,6 +241,10 @@ export struct DocTabHost {
   @Link titles: string[];
   /** tab 主题色平行数组（页面 00_theme 0.10 上报当前主题 CSS 变量值；''=回退静态 accent） */
   @Link accents: string[];
+  /** 放映全屏态（EditorPage：sdkjs 放映引擎 SetFullscreen 桥驱动）——true 时整条
+   *  自绘 tab 条不渲染，Tabs 内容区（layoutWeight 1）自动吸顶铺满整个窗口。
+   *  2026-09-11：PPT 放映「只在 webview 内播、tab 栏还在」修复。 */
+  @Link fsMode: boolean;
   private tabsCtr: TabsController = new TabsController();
   onCloseDoc: (id: number) => void = () => {
   };
@@ -356,6 +360,10 @@ export struct DocTabHost {
       // 条底恒定=官方 --background-normal #F7F7F7（2026-09-09 用户决策：不随
       // 激活文档换色——只有 chip 染色；与欢迎页侧栏同色，上下贯通无分界）
       .backgroundColor('#F7F7F7')
+      // 放映全屏（2026-09-11）：Visibility.None = 隐藏且**不参与布局**（不占位）
+      // ——与 if 条件渲染等价，但保持本段组件树结构稳定（放映进出不重建 chip）。
+      // 条消失后 Tabs（layoutWeight 1）自动吸顶铺满整个窗口。
+      .visibility(this.fsMode ? Visibility.None : Visibility.Visible)
 
       // —— 内容切换容器（barHeight 0；保活 = NodeContainer 节点复用）——
       Tabs({ barPosition: BarPosition.Start, index: this.focus, controller: this.tabsCtr }) {

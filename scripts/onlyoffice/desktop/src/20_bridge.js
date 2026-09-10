@@ -45,6 +45,10 @@
     // ---- 2. window.AscDesktopEditor 就绪（引用已由 0.2 占位固化；此处维持原引用） ----
     window.AscDesktopEditor = obj;
     window.desktop = obj;
+    // 2.05 装配对象缓存（2026-09-11）：3.7 为字体链 web 语义会删除
+    //   window.AscDesktopEditor，而 sdkjs 放映引擎只在它存在时才调 SetFullscreen
+    //   （Transitions.js:4075）→ 3.7.1 在放映期用本缓存临时恢复、退出再删。勿删。
+    window.__lsoAscDE = obj;
 
     // ---- 2.1 LoadFontBase64 特化（2026-09-05 中文方块根因修复）----
     // 官方语义（Externals.js LoadFontAsync 桌面分支）：AscDesktopEditor.LoadFontBase64(id)

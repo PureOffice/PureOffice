@@ -38,7 +38,7 @@ ascshim 注入在 `<head>` 最早处——这带来一个后果：**官方对象
 | `10_engine` | Gateway 踢闸（serverId / images 引擎闸门）+ 字体流取证 | `Common.Gateway` 及其事件 | 文档加载卡住 | `LSO_GW_ONBIN_HOOKED` |
 | `20_bridge` | AscDesktopEditor 装配（方法表 / 字体注册表 / LocalStartOpen 派发） | `window.desktop`、`__fonts_files` 契约 | 文档打不开 | `LSO_FB64_OVERRIDDEN`、`ASC_FOUND` |
 | `30_open` | DI 打开链（loadConfig 补发 / CDocInfo / 权限 / 直调 Main）+ **新建入口**（`desktop://` 导航 → 桥命令） | 各 editor 的 `ApplicationController` / `Main`；全局 `window.open` | 打不开 / 空模型 / 点「新建」白屏 | `LSO_INIT_ALL_OK`、`LSO_CREATE_NEW` |
-| `40_save` | 保存 / 关闭 / 文件菜单档位适配 | sdkjs 保存链、`Gateway.requestClose` | 存不了 / 另存为不可用 | `LSO_SAVE_HOOKED` |
+| `40_save` | 保存 / 关闭 / 文件菜单档位适配 + **放映全屏通道**（3.7 平常删除 `AscDesktopEditor`；3.7.1 在 `preview:show/hide` 期间临时恢复它——引擎据此才调 `SetFullscreen`） | sdkjs 保存链、`Gateway.requestClose`、web-apps `preview:show`/`preview:hide` | 存不了 / 另存为不可用 / **放映不进入壳层全屏**（画面只在 webview 内铺） | `LSO_SAVE_HOOKED`、`LSO_FS_BRIDGE` |
 | `44_modalguard` | 壳层事件防护（native 缺失导致 handler 抛错 → Backbone 中断） | `Common.NotificationCenter` | 弹窗空白 / 主题只切一半 | `LSO_EVT_GUARD_HOOKED` |
 | `45_print` | 打印链（`asc_Print` 覆写→元文件流）+ 打印机注入 + 快速打印 | sdkjs `asc_Print` / `asc_nativeGetPDF` | 打印按钮无反应 | `LSO_PRINT_HOOKED` |
 | `50_init` | 初始化尾（等 `AscNative` 注入 → INSTALL） | `window.AscNative`（ArkWeb 注入） | 全链不工作 | `ASC_FOUND` |

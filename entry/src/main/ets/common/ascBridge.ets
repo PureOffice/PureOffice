@@ -107,6 +107,18 @@ export class AscNativeDispatch {
     this.themeReporter = fn;
   }
 
+  /** 放映全屏请求（2026-09-11 由降级 stub 提为真实现）。
+   *  页面侧 sdkjs 放映引擎在放映开始/结束调 window.AscDesktopEditor.SetFullscreen
+   *  （Transitions.js:4075 开始 / :4555 结束）——**官方桌面语义里全屏是 native 层
+   *  的事**：web-apps 的 Viewport.js:312 对 isDesktopApp 显式跳过浏览器 Fullscreen
+   *  API。我们此前与 ApplyAction 同段恒返回 'false' → 放映只在 webview 内铺开，
+   *  tab 栏与窗口都不动（用户实测报告）。转发 EditorPage：Pad 收 tab 条 / PC 沉浸
+   *  最大化，退出时按进入前窗口状态精确还原。 */
+  private fullscreenCb: ((on: boolean) => void) | null = null;
+  setFullscreenHandler(fn: ((on: boolean) => void) | null): void {
+    this.fullscreenCb = fn;
+  }
+
   private execCommand(args: BridgeArgs): string {
     const cmd = typeof args[0] === 'string' ? (args[0] as string) : '';
     const param = typeof args[1] === 'string' ? (args[1] as string) : '';
@@ -171,6 +183,15 @@ export class AscNativeDispatch {
         case 'theme:color':
           // 主题色上报（00_theme 0.10）：per-instance（dispatch 按 ctx 装配）
           return this.themeReporter ? this.themeReporter(String(args[0] ?? '')) : 'true';
+        case 'SetFullscreen': {
+          // 放映全屏进出（sdkjs Transitions.js:4075 开始 / :4555 结束；参数布尔）。
+          // 调用方不使用返回值（语句调用），回 'true' 表示已受理。
+          const on = args.length > 0 && (args[0] === true || String(args[0]) === 'true');
+          if (this.fullscreenCb !== null) {
+            this.fullscreenCb(on);
+          }
+          return 'true';
+        }
         case 'LocalStartOpen':
           // 引擎加载完成（官方：编辑器 LocalFile counter 之一）——交给 EditorPage 注入字节
           if (this.localStartOpenCb) {
@@ -241,7 +262,6 @@ export class AscNativeDispatch {
         case 'CheckUserId':
         case 'SetAdvancedOptions':
         case 'ApplyAction':
-        case 'SetFullscreen':
           return 'false';
 
         // ===== 官方 shim 调用、无本地实现 =====

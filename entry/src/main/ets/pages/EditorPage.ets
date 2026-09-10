@@ -1,6 +1,6 @@
-import { BusinessError, print } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo, print } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, window } from '@kit.ArkUI';
 import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs, picker, fileUri } from '@kit.CoreFileKit';
 import { x2tConvertSync } from '../common/x2t';
@@ -142,6 +142,13 @@ struct EditorPage {
    *  主题切换重报）。缺省 ''=回退静态 accent。 */
   @State docAccents: string[] = [];
   private docTabSeq: number = 0;
+  // —— 放映全屏（2026-09-11，PPT 放映「只在 webview 内播、tab 栏与窗口不动」）——
+  /** 放映全屏态：sdkjs 放映引擎经 AscDesktopEditor.SetFullscreen 桥驱动
+   *  （ascBridge → onFullscreenReq）。true 时 DocTabHost 收起 tab 条（Web 区自动
+   *  吸顶铺满）+ PC 窗口沉浸最大化。 */
+  @State fsMode: boolean = false;
+  /** 进入放映前的窗口状态（windowStatusType；PC 退出时精确还原；-1=未记录） */
+  private fsPreStatus: number = -1;
   // —— 未保存关闭守卫（2026-09-09，设计 §3）——
   /** 保存动作在途（至多一个——弹框模态互斥；待 save:bin/doSaveAs 完成消费） */
   private closeGuardDefer: CloseGuardDefer | null = null;
@@ -1297,6 +1304,11 @@ struct EditorPage {
     nativeDispatch.setThemeReporter((payload: string) => {
       return this.onThemeReport(ctx, payload);
     });
+    // 放映全屏（sdkjs 放映引擎 SetFullscreen → 壳层窗口/tab 条；2026-09-11）：
+    // 窗口级操作，不区分发起实例（与 go:folder 同型）。
+    nativeDispatch.setFullscreenHandler((on: boolean) => {
+      this.onFullscreenReq(on);
+    });
     // save:type 询问（per-tab 单一事实源）：页面 asc_Save 同步询问保存目标——
     // 'none'（autosave 跳过/用户保存→另存为）| 'sandbox' | 'uri'
     nativeDispatch.setSaveTargetReader(() => ctx.state.saveTarget);
@@ -1545,6 +1557,14 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     if (this.p0On) {
       return false;
     }
+    // 放映中：返回键 = 退出放映（tab 条隐藏时这是系统侧唯一出口；退放映 ≠ 关文档）。
+    // 不自行改状态——注入官方公开 API EndDemonstration() 让引擎走完整退出流程
+    // （End → SetFullscreen(false) → 桥回调恢复壳层），避免「tab 条回来了但放映
+    // 画面还在」的半拍状态。
+    if (this.fsMode) {
+      this.exitPresentation();
+      return true;
+    }
     // 返回键与系统三键 ✕ 同语义（requestBackExit——系统 ✕ 经 EntryAbility
     // windowStageClose → 本方法）：返回 true=拦截（退出时机由守卫队列决定）；
     // false=放行系统默认（无文档/探针态）
@@ -1679,8 +1699,130 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     return 'true';
   }
 
+  /**
+   * 放映全屏请求（页面 sdkjs 放映引擎 SetFullscreen 桥 → ascBridge → 本方法）。
+   * 语义 = 官方桌面版：放映开始让出整屏（Pad 收 tab 条；PC 沉浸最大化），结束精确
+   * 还原。幂等（引擎可能重复发同值——StartWaitReporter/Start 双路径）。
+   * 判据日志：LSO_FULLSCREEN 1/0。
+   */
+  private onFullscreenReq(on: boolean): void {
+    if (on === this.fsMode) {
+      return;
+    }
+    this.fsMode = on;
+    this.arkLog('LSO_FULLSCREEN ' + (on ? '1' : '0'));
+    this.applyFsWindow(on);
+  }
+
+  /**
+   * 窗口形态随放映切换（PC；Pad 已由 EntryAbility.applyWindowMode 沉浸，只切 tab
+   * 条）。参照 ../wineohos .../VirtualDesktopAbility.ets:78-127（PC 虚拟桌面全屏）：
+   *   进入 = maximize(ENTER_IMMERSIVE_DISABLE_TITLE_AND_DOCK_HOVER)——用 DISABLE_HOVER
+   *     变体而非默认 ENTER_IMMERSIVE：铺满的同时鼠标贴屏幕边缘不唤出标题栏/dock
+   *     （wineohos 全屏游戏同因；放映时鼠标划到边缘不该弹系统 UI）。
+   *   退出 仅当仍处 FULL_SCREEN（说明用户没手动退过全屏）才还原——FLOATING/
+   *     SPLIT_SCREEN → recover() 回浮动；本已是 MAXIMIZE/FULL_SCREEN →
+   *     maximize(EXIT_IMMERSIVE) 保持最大化、只退沉浸。用户放映中自行退出全屏
+   *     （系统手势）→ 读到的当前态已非 FULL_SCREEN → 不干预（不再动用户调好的窗口）。
+   * 时序：fire-and-forget（桥同步、窗口 API 异步）——失败仅日志，不阻断放映。
+   */
+  private applyFsWindow(on: boolean): void {
+    try {
+      const dt = deviceInfo.deviceType;
+      if (dt === 'tablet' || dt === 'phone') {
+        return; // Pad：窗口已沉浸（EntryAbility.applyWindowMode），此处只切 tab 条
+      }
+      const actx = this.abilityCtx;
+      if (actx === undefined) {
+        this.arkLog('LSO_FS_WIN no context');
+        return;
+      }
+      window.getLastWindow(actx).then((mw: window.Window) => {
+        try {
+          if (on) {
+            this.fsPreStatus = mw.getWindowStatus();
+            this.arkLog('LSO_FS_WIN pre=' + this.fsPreStatus);
+            mw.maximize(window.MaximizePresentation.ENTER_IMMERSIVE_DISABLE_TITLE_AND_DOCK_HOVER)
+              .then(() => {
+                this.arkLog('LSO_FS_WIN enter ok');
+              })
+              .catch((e: BusinessError) => {
+                this.arkLog('LSO_FS_WIN enter err ' + e.code + ' ' + e.message);
+              });
+          } else {
+            const cur = mw.getWindowStatus();
+            const pre = this.fsPreStatus;
+            this.fsPreStatus = -1;
+            this.arkLog('LSO_FS_WIN cur=' + cur + ' pre=' + pre);
+            if (cur !== window.WindowStatusType.FULL_SCREEN) {
+              return; // 用户已自行退出全屏 → 不干预
+            }
+            if (pre === window.WindowStatusType.MAXIMIZE
+              || pre === window.WindowStatusType.FULL_SCREEN) {
+              mw.maximize(window.MaximizePresentation.EXIT_IMMERSIVE)
+                .then(() => {
+                  this.arkLog('LSO_FS_WIN exit-immersive ok');
+                })
+                .catch((e: BusinessError) => {
+                  this.arkLog('LSO_FS_WIN exit-immersive err ' + e.code + ' ' + e.message);
+                });
+            } else {
+              mw.recover()
+                .then(() => {
+                  this.arkLog('LSO_FS_WIN recover ok');
+                })
+                .catch((e: BusinessError) => {
+                  this.arkLog('LSO_FS_WIN recover err ' + e.code + ' ' + e.message);
+                });
+            }
+          }
+        } catch (e2) {
+          this.arkLog('LSO_FS_WIN inner err ' + String(e2));
+        }
+      }).catch((e: BusinessError) => {
+        this.arkLog('LSO_FS_WIN getwin err ' + e.code + ' ' + e.message);
+      });
+    } catch (e) {
+      this.arkLog('LSO_FS_WIN err ' + String(e));
+    }
+  }
+
+  /**
+   * 退出放映（返回键路径；2026-09-11）。注入官方公开 API `window.editor.
+   * EndDemonstration()`（sdkjs api.js:10023 导出为公开成员；web-apps 放映控制条
+   * ✕ 按钮 DocumentPreview.js:246 同款调用）——引擎走完整退出流程：
+   * DemonstrationManager.End → SetFullscreen(false) → 桥回调 → 壳层还原。
+   * 兜底：注入后 1s 仍未见桥回调（实例已关/API 缺失等）→ 自查恢复壳层，保证用户
+   * 不会卡在「tab 条隐藏」态（幂等：fsMode 已 false 则无操作）。
+   */
+  private exitPresentation(): void {
+    let sent = 0;
+    for (let i = 0; i < this.docTabs.length; i++) {
+      const c = this.docTabs[i].ctx;
+      if (c.kind === 'doc' && c.state.ext === 'pptx' && c.attached) {
+        sent++;
+        c.js('(function(){try{if(window.editor&&window.editor.EndDemonstration){'
+          + 'window.editor.EndDemonstration();console.error("LSO_END_DEMO ok");}'
+          + 'else{console.error("LSO_END_DEMO noapi");}}catch(e){'
+          + 'console.error("LSO_END_DEMO err "+e);}})();', '');
+      }
+    }
+    this.arkLog('LSO_END_DEMO sent=' + sent);
+    setTimeout(() => {
+      if (this.fsMode) {
+        this.arkLog('LSO_END_DEMO timeout force-exit');
+        this.onFullscreenReq(false);
+      }
+    }, 1000);
+  }
+
   /** tab 切换（DocTabHost.onSwitch）：非激活实例打点（P0 判据复用：后台实例活） */
   private onSwitchTab(idx: number): void {
+    // 兜底：放映中切 tab（正常态 tab 条已收起点不到；防御 openNewTabEntry 等程序化
+    // 切换）→ 先退放映全屏，避免壳层停在「tab 条隐藏」态而切不回。
+    if (this.fsMode) {
+      this.onFullscreenReq(false);
+    }
     for (let i = 0; i < this.docTabs.length; i++) {
       const c = this.docTabs[i].ctx;
       if (i !== idx && c.attached) {
@@ -1702,6 +1844,8 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           focus: $focusTab,
           titles: $docTitles,
           accents: $docAccents,
+          // 放映全屏：true 时收起 tab 条（Web 区自动吸顶铺满）
+          fsMode: $fsMode,
           // tab × = 未保存守卫入口（2026-09-09：查询 asc_isDocumentModified → 三按钮框）
           onCloseDoc: (id: number) => {
             const c = this.findCtx(id);
