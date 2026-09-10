@@ -637,10 +637,11 @@ def patch_about_brand():
     品牌化（patch 对象 = grunt 产物，可再生成；upstream 重建后本脚本自动
     重新生效——与 inject_ascshim 同模式）：
       1) 五个编辑器 LeftMenu.js About 构造 appName「文档编辑器」→「Pure Office」；
-      2) About.js licensor 模板版本行下加兼容/归属行「基于 ONLYOFFICE
-         DesktopEditors（AGPL-3.0）」（用户定稿；修改版日期经用户决策不展示——
-         官方附加条款 2 的日期声明由随包 LICENSE 中的说明文本承接）+ 许可链接行
-         （.asc-about-lic 12px 灰字；满足官方附加条款 3(i/ii/iii)）；
+      2) About.js licensor 模板版本行下加归属行「基于 ONLYOFFICE
+         DesktopEditors（AGPL-3.0）」，其中「AGPL-3.0」即许可全文链接（用户
+         2026-09-10：删独占「许可信息：…」行，链接并入本行；修改版日期经用户
+         决策不展示——官方附加条款 2 的日期声明由随包 LICENSE 中的说明文本承接；
+         .asc-about-lic 12px 灰字，满足官方附加条款 3(i/ii/iii)）；
       3) 五编辑器 app.css `.asc-about-office:before{content:url(logo_s.svg)}`
          → `content:''`（亮/暗主题两变体）——官方 logo 图示清除；
       4) licensor 公司信息表（公司名/地址/邮箱/电话/网址）→ class hidden
@@ -649,12 +650,18 @@ def patch_about_brand():
     幂等：已替换（目标串不再存在）即跳过；应替换却没替换（0 命中）→ 非零退出
     （grunt 产物结构变化立即暴露，防静默空 patch）。
     """
-    # 归属确认行：满足官方附加条款 2（修改版显式声明+日期）与 3(i)(ii)（识别 ONLYOFFICE
-    # 为原始开发者 + 本版为修改版）；「原始开发者 Ascensio System SIA」由同一行
-    # 「基于 ONLYOFFICE DesktopEditors（AGPL-3.0）」完成识别——官方附加条款原文另行
-    # 随包（install_licenses）
-    CREDIT = '基于 ONLYOFFICE DesktopEditors（AGPL-3.0）'
+    # 归属确认行 + 许可入口：满足官方附加条款 2（修改版显式声明+日期）与 3(i)(ii)（识别
+    # ONLYOFFICE 为原始开发者 + 本版为修改版）；「原始开发者 Ascensio System SIA」由本行
+    # 完成识别——官方附加条款原文另行随包（install_licenses）。
+    # 2026-09-10 用户：删「许可信息：GNU AGPL v3.0」独占行，链接改挂本行「AGPL-3.0」
+    # 文字（点击=55_lic.js 弹层渲染全文；纯文本仍是完整归属句，不点也能读懂）。
+    # class="link" 供欢迎页复用其内置 `.link{color:var(--text-link)}`——版权行是
+    # `--text-tertiary` 灰字，链接嵌在句中须显链接色；编辑器 About 侧由 BRAND_CSS
+    # 的 `.about-dlg .asc-about-note a` 规则承担（官方 `.about-dlg a` 同染正文色）。
     LIC_URL = 'http://localhost/onlyoffice/licenses/LICENSE.txt'
+    CREDIT_TEXT = '基于 ONLYOFFICE DesktopEditors（AGPL-3.0）'
+    CREDIT = ('基于 ONLYOFFICE DesktopEditors（<a class="link" href="' + LIC_URL
+              + '" target="_blank">AGPL-3.0</a>）')
     APP_BRAND = "appName: 'Pure Office'"
     patched = 0
 
@@ -701,21 +708,31 @@ def patch_about_brand():
     if n_brand:
         print('  about品牌: appName 行 → asc-about-brand ×%d' % n_brand)
     tag = 'id-about-licensor-version-name'
-    # 许可链接文案（编辑器 About 与欢迎页 AboutDialog 共用一处定义——2026-09-10
-    # 用户：链接后不要「（点击查看全文）」）
-    LIC_TEXT = '许可信息：GNU AGPL v3.0'
     new_line = ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
                 + CREDIT + '</label></td></tr>\',')
-    lic_line = ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
-                '<a href="' + LIC_URL + '" target="_blank">' + LIC_TEXT + '</a></label></td></tr>\',')
+    # 上一版补丁格式清理（历史形态 = 纯文本归属行 + 独占「许可信息」行）：
+    # 本轮 patch 对象是 grunt 产物未补丁态（main() 每回先重拷 W3D）→ 正常路径不会
+    # 遇到；但本地干跑（不重拷、直接再跑本函数）会落到旧补丁态——显式清除旧两行，
+    # 使任意入口重跑都收敛到新格式（单行 + AGPL-3.0 链接），不留双份文案。
+    prev_rows = [
+        ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
+         '基于 ONLYOFFICE DesktopEditors（AGPL-3.0）</label></td></tr>\',', '纯文本归属行'),
+        ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
+         '<a href="' + LIC_URL + '" target="_blank">许可信息：GNU AGPL v3.0</a>'
+         '</label></td></tr>\',', '独占许可行'),
+    ]
+    for dead, desc in prev_rows:
+        if '\n                ' + dead in s:
+            s = s.replace('\n                ' + dead, '')
+            print('  about品牌: 清除上一版 %s（升级收敛）' % desc)
     if new_line not in s:
         old_line = ('\'<td align="center"><label class="asc-about-version" id="' + tag + '">\''
                     ' + this.txtVersion + this.txtVersionNum + \'</label></td>\',')
         n = s.count(old_line)
         if n != 1:
             raise SystemExit('About 模板 licensor 版本行命中 %d != 1，结构变化?' % n)
-        s = s.replace(old_line, old_line + '\n                ' + new_line + '\n                ' + lic_line)
-        print('  about品牌: licensor 模板 + 辅行（%s） + 许可链接' % CREDIT)
+        s = s.replace(old_line, old_line + '\n                ' + new_line)
+        print('  about品牌: licensor 模板 + 归属/许可行')
     # （b2）licensor 公司信息表整体隐藏（用户决策 2026-09-07「暂时先不放公司信息」——
     #     官方公司名/地址/邮箱/电话/网址不再展示，仅保留主品牌/版本/归属/许可；
     #     官方附加条款未要求 UI 展示公司联系方式，版权声明保留在源码头与随包 LICENSE）。
@@ -746,10 +763,17 @@ def patch_about_brand():
     # 排版（2026-09-07 用户「排列太紧，之前 ONLYOFFICE 的多美观」）：主名顶部留白
     # margin 40px + 与版本行间距 10px；辅行/许可行 note 类块级行距——零 logo 后重排
     # 面板重心下移、行间通透（官方原版行间疏朗感来自 logo(45px)+20px 表距，已无 logo）
-    BRAND_CSS = ('.asc-about-brand{font:bold 24px Tahoma;letter-spacing:.02em;'
-                 'color:#444;color:var(--text-normal);user-select:text;'
-                 'margin:40px 0 10px}'
-                 '.asc-about-note{display:block;padding:4px 0;line-height:1.7}')
+    # 逐条判存补写（各条在 css 里出现即视为已生效）——升级路径与幂等由它统一承担
+    BRAND_CSS = [
+        '.asc-about-brand{font:bold 24px Tahoma;letter-spacing:.02em;'
+        'color:#444;color:var(--text-normal);user-select:text;'
+        'margin:40px 0 10px}',
+        '.asc-about-note{display:block;padding:4px 0;line-height:1.7}',
+        # 归属行里的「AGPL-3.0」是许可全文入口（2026-09-10）——官方 `.about-dlg a`
+        # 把面板内链接染成正文色（--text-normal），链接嵌在句子中间会完全看不出
+        # 可点；这里恢复链接色（选择器比 `.about-dlg a` 更具体，不依赖书写顺序）
+        '.about-dlg .asc-about-note a{color:var(--text-link)}',
+    ]
     logos = 0
     for app in ('documenteditor', 'spreadsheeteditor', 'presentationeditor',
                 'pdfeditor', 'visioeditor'):
@@ -760,17 +784,18 @@ def patch_about_brand():
             s = f.read()
         n1 = s.count(OLD_LOGO)
         n2 = s.count(OLD_LOGO_D)
-        if n1 == 0 and n2 == 0 and '.asc-about-brand{' in s:
-            continue  # 幂等重跑：logo 与规则均已处理
+        rules = [r for r in BRAND_CSS if r not in s]
+        if n1 == 0 and n2 == 0 and not rules:
+            continue  # 幂等重跑：logo 与全部规则均已处理
         if n1 or n2:
             s = s.replace(OLD_LOGO, 'content:none').replace(OLD_LOGO_D, 'content:none')
-        if '.asc-about-brand{' not in s:
-            s = s.rstrip('\n') + '\n' + BRAND_CSS + '\n'
+        if rules:
+            s = s.rstrip('\n') + '\n' + '\n'.join(rules) + '\n'
         with open(p, 'w', encoding='utf-8') as f:
             f.write(s)
         logos += n1 + n2
-        print('  about品牌: %s css logo 图示清除 ×%d + asc-about-brand 规则%s'
-              % (app, n1 + n2, '追加' if n1 or n2 else '已存在'))
+        print('  about品牌: %s css logo 图示清除 ×%d + about 样式规则%s'
+              % (app, n1 + n2, '追加×%d' % len(rules) if rules else '已存在'))
 
     if patched == 0 and n_upper == 0 and n_brand == 0 and logos == 0:
         if about_has_new:
@@ -793,40 +818,62 @@ def patch_about_brand():
     #   3) 版本行去「商业版/社区版」前缀 label（strVersionCommunity 语义属官方
     #      订阅版；本壳 = AGPL 社区构建，label 不成立——版本值=构建哈希
     #      version.json.v，事件注入）；
-    #   4) 官网/站点行（ver-site，target=popup 无新标签页语义）→ 许可信息链接
-    #      （target=_blank + localhost LICENSE.txt → 55_lic.js 弹层拦截渲染，
-    #      与编辑器 About 同款交互，满足官方附加条款 3(iii)）；
+    #   4) 官网/站点行（ver-site，target=popup 无新标签页语义）→ 删除（用户
+    #      2026-09-10：面板不留两处 AGPL 文案；承接合规入口见下条）；
     #   5) 版权行（ver-copyright ${t.rights}）→ CREDIT 归属行硬编码（事件不发
-    #      rights，单一来源——同编辑器 About 的 CREDIT 常量）。
+    #      rights，单一来源——同编辑器 About 的 CREDIT 常量；「AGPL-3.0」即许可
+    #      全文链接，target=_blank + localhost LICENSE.txt → 55_lic.js 弹层拦截
+    #      渲染，满足官方附加条款 3(iii)）。
     WELCOME = os.path.join(DST, 'index.html')
+    # 每步 =（可接受的旧串元组, 新串, 描述）：旧串含「上一版补丁态」形态——仅本地
+    # 干跑（不重拷产物直接重跑）会遇到，一并列入使任意入口重跑收敛到同一结果
     wsteps = [
-        ('<p id="idx-about-appname">${t.appname}</p>',
+        (('<p id="idx-about-appname">${t.appname}</p>',),
          '<p id="idx-about-appname">Pure Office</p>', 'appname'),
-        ('<div id="idx-about-cut-logo" class="${t.logocls}">',
+        (('<div id="idx-about-cut-logo" class="${t.logocls}">',),
          '<div id="idx-about-cut-logo" class="${t.logocls}" style="display:none">', 'logo'),
-        ('<p id="idx-about-version"><span l10n>${i}</span> ${t.version}</p>',
+        (('<p id="idx-about-version"><span l10n>${i}</span> ${t.version}</p>',),
          '<p id="idx-about-version">${t.version}</p>', '版本行 label'),
-        ('<a class="ver-site link about-field" target="popup" href="${t.link}">${t.site}</a>',
-         '<a class="ver-site link about-field" target="_blank" href="' + LIC_URL + '">' + LIC_TEXT + '</a>', '官网行→许可'),
-        ('<div class="ver-copyright about-field">${t.rights}</div>',
+        (('<div class="ver-copyright about-field">${t.rights}</div>',
+          '<div class="ver-copyright about-field">' + CREDIT_TEXT + '</div>'),
          '<div class="ver-copyright about-field">' + CREDIT + '</div>', '版权行'),
     ]
+    # 整行删除步（不在 wsteps 里——它没有「新串」，幂等/探测用下方的目标串判定）
+    del_line = '<a class="ver-site link about-field" target="popup" href="${t.link}">${t.site}</a>'
     wpatched = 0
     if os.path.isfile(WELCOME):
         with open(WELCOME, 'r', encoding='utf-8') as f:
             s = f.read()
-        for old, new, desc in wsteps:
-            # 幂等：old 已不在且 new 已在 → 已生效跳过；命中 → 替换计数
-            if old in s:
-                n = s.count(old)
-                s = s.replace(old, new)
+        for olds, new, desc in wsteps:
+            # 幂等：new 已在 → 已生效跳过；否则按各旧串形态逐个替换（含上一版补丁态）
+            if new in s:
+                continue
+            for old in olds:
+                if old in s:
+                    n = s.count(old)
+                    s = s.replace(old, new)
+                    wpatched += n
+                    print('  about品牌: 欢迎页 %s ×%d' % (desc, n))
+        # 删官网行：两态都要能判定已生效——① 未补丁态：行还在 → 删；
+        # ② 上一版补丁态（行已被换成许可链接，见下 del_prev）→ 一并删（升级路径）
+        del_prev = ('<a class="ver-site link about-field" target="_blank" href="' + LIC_URL
+                    + '">许可信息：GNU AGPL v3.0</a>')
+        del_done = False
+        for dead in (del_line, del_prev):
+            if dead in s:
+                n = s.count(dead)
+                s = s.replace(dead, '')
                 wpatched += n
-                print('  about品牌: 欢迎页 %s ×%d' % (desc, n))
+                del_done = True
+                print('  about品牌: 欢迎页 删官网/许可行 ×%d' % n)
         if wpatched:
             with open(WELCOME, 'w', encoding='utf-8') as f:
                 f.write(s)
-        # 结构性探测：5 步应全部「已替换 or 已生效」，否则 loginpage 结构变了
-        missing = [d for (o, _nw, d) in wsteps if (o not in s) and (_nw not in s)]
+        # 结构性探测：各步应全部「已替换 or 已生效」，否则 loginpage 结构变了
+        missing = ([d for (olds, nw, d) in wsteps
+                    if nw not in s and all(o not in s for o in olds)]
+                   + ([] if del_done or (del_line not in s and del_prev not in s)
+                      else ['官网行(删)']))
         if missing:
             raise SystemExit('欢迎页 About 品牌 patch 未命中: %s ——请检查 loginpage 结构' % ','.join(missing))
     else:
