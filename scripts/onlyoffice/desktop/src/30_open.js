@@ -627,3 +627,44 @@
       }
     } catch (nix) {}
 
+    // ---- 3.9 文件菜单「新建」：desktop:// 导航 → 桥命令（2026-09-11）----
+    // 现象：文件菜单 →「新建」→ **整页白屏**（真机 1.6:33363 实证）。日志链：
+    //   outer pass-through: desktop://create.new → Web error → PAGE_END desktop://create.new
+    // 根因：官方桌面语义里「新建」= window.open(config.createUrl, '_blank')
+    //   （word LeftMenu.js:592 onCreateNew；cell/slide/pdf 同款写法），而
+    //   createUrl='desktop://create.new'（本文件 3.x config 段所设）是**交给 CEF 原生层
+    //   的自定义协议**——我们的 WebView 当普通 URL 去导航 → 加载失败 → 白屏。
+    //   官方 web 档走不到这里：create:new 先被 native 分支拦下（Desktop.js:681-687），
+    //   本壳 native 已删（web 语义）→ Desktop.process('create:new') 返回 false → 落进
+    //   window.open 分支。
+    // 修法：包一层 window.open，**仅对 desktop:// 协议短路**——转成壳层命令
+    //   execCommand('create:new', '<type>')（ArkTS onTabCommand 既有通路，与欢迎页新建
+    //   卡片同源 → openNewFile → openNewTabEntry 开新 tab），返回 null 阻止导航
+    //   （官方调用点已判空：`if (newDocumentPage) newDocumentPage.focus()`，故 null 安全）。
+    //   其余 URL 一律透传（帮助/模板/外链不受影响）。类型判据与官方同：SSE=cell /
+    //   PE=slide / 其余=word。本段不依赖任何官方对象（覆写的是全局 window.open），
+    //   故同步执行、不轮询。
+    (function _hookCreateNew() {
+      try {
+        var _pp = (window.location || {}).pathname || '';
+        if (_pp.indexOf('/main/index.html') < 0) { return; }
+        if (window.__lsoOpenPatched) { return; }
+        window.__lsoOpenPatched = true;
+        var _oopen = window.open;
+        window.open = function (url) {
+          if (String(url || '').indexOf('desktop://') === 0) {
+            try {
+              var _t = window.SSE ? 'cell' : window.PE ? 'slide' : 'word';
+              var _r = (window.AscNative && window.AscNative._call)
+                ? String(window.AscNative._call('execCommand', ['create:new', _t]) || '')
+                : 'NO_BRIDGE';
+              console.error('LSO_CREATE_NEW url=' + url + ' type=' + _t + ' ret=' + _r);
+            } catch (e) { console.error('LSO_CREATE_NEW_ERR ' + String(e)); }
+            return null;
+          }
+          return _oopen.apply(window, arguments);
+        };
+        console.error('LSO_CREATENEW_HOOKED');
+      } catch (e) { console.error('LSO_CREATENEW_HOOK_ERR ' + String(e)); }
+    })();
+

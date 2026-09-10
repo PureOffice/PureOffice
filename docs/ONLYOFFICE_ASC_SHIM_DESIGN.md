@@ -37,7 +37,7 @@ ascshim 注入在 `<head>` 最早处——这带来一个后果：**官方对象
 | `09_fonts` | CJK/系统字体字节装填（首帧方块修复） | `AscFonts.g_font_files` / `g_fonts_streams` / `FontStream`（sdkjs min） | 中文首帧方块 | `FONT_WARM_FILLED` |
 | `10_engine` | Gateway 踢闸（serverId / images 引擎闸门）+ 字体流取证 | `Common.Gateway` 及其事件 | 文档加载卡住 | `LSO_GW_ONBIN_HOOKED` |
 | `20_bridge` | AscDesktopEditor 装配（方法表 / 字体注册表 / LocalStartOpen 派发） | `window.desktop`、`__fonts_files` 契约 | 文档打不开 | `LSO_FB64_OVERRIDDEN`、`ASC_FOUND` |
-| `30_open` | DI 打开链（loadConfig 补发 / CDocInfo / 权限 / 直调 Main） | 各 editor 的 `ApplicationController` / `Main` | 打不开或空模型 | `LSO_INIT_ALL_OK` |
+| `30_open` | DI 打开链（loadConfig 补发 / CDocInfo / 权限 / 直调 Main）+ **新建入口**（`desktop://` 导航 → 桥命令） | 各 editor 的 `ApplicationController` / `Main`；全局 `window.open` | 打不开 / 空模型 / 点「新建」白屏 | `LSO_INIT_ALL_OK`、`LSO_CREATE_NEW` |
 | `40_save` | 保存 / 关闭 / 文件菜单档位适配 | sdkjs 保存链、`Gateway.requestClose` | 存不了 / 另存为不可用 | `LSO_SAVE_HOOKED` |
 | `44_modalguard` | 壳层事件防护（native 缺失导致 handler 抛错 → Backbone 中断） | `Common.NotificationCenter` | 弹窗空白 / 主题只切一半 | `LSO_EVT_GUARD_HOOKED` |
 | `45_print` | 打印链（`asc_Print` 覆写→元文件流）+ 打印机注入 + 快速打印 | sdkjs `asc_Print` / `asc_nativeGetPDF` | 打印按钮无反应 | `LSO_PRINT_HOOKED` |
