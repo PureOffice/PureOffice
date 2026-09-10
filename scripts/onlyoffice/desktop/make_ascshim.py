@@ -77,8 +77,12 @@ SRC_DIR = os.path.join(HERE, 'src')
 # 00_theme 必须在首位：RendererProcessVariable.theme 必须早于官方 desktopinit 内联段
 # （index.html 同步一次性消费——误放 AscNative 等待之后= 注入执行≠生效，2026-09-08 教训）
 # 55_lic 之后追加 57_about（欢迎页 About 入口的 app:version 补发；仅欢迎页 URL 生效）
-# 45_print 紧跟 40_save（同为编辑器页序列化链，顺序仅为可读性——二者无依赖）
-PARTS = ['00_theme.js', '09_fonts.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '45_print.js', '50_init.js', '55_lic.js', '57_about.js']
+# 44_modalguard 紧跟 40_save（同为壳层语义补丁）：modal:* 事件的 Desktop.js handler
+#   依赖 native（本壳无）抛错会中断 Window.show() 的 render → 弹窗空白（详见该文件注释）
+# 45_print 紧跟其后（编辑器页序列化链，顺序仅为可读性——与前面各段无依赖）
+# 注意：00_boot.js 的 `(function() {` 是**故意不闭合**的「外层头」（其后各段都在它内部），
+#   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
+PARTS = ['00_theme.js', '09_fonts.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '44_modalguard.js', '45_print.js', '50_init.js', '55_lic.js', '57_about.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 
