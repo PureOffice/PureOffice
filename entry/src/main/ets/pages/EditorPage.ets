@@ -1,13 +1,13 @@
-import { BusinessError } from '@kit.BasicServicesKit';
+import { BusinessError, print } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
 import { resourceManager } from '@kit.LocalizationKit';
-import { fileIo as fs, picker } from '@kit.CoreFileKit';
+import { fileIo as fs, picker, fileUri } from '@kit.CoreFileKit';
 import { x2tConvertSync } from '../common/x2t';
 import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
 import { Smoke } from '../common/smoke';
 import { getLaunchOptions, setWindowCloseHandler } from '../entryability/EntryAbility';
-import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, u8ToStr } from '../common/bytes';
+import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, x2tXmlFont, u8ToStr } from '../common/bytes';
 import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } from '../common/recents';
 import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
 import { DocTabHost, DocTabCtx, DocTabPair } from './DocTabHost';
@@ -23,6 +23,36 @@ interface CloseGuardDefer {
 
 /** ArkTS 侧调试开关：false=仅落 web_console.txt 文件（默认）；true=另 hilog 双写 */
 const ARK_DEBUG: boolean = false;
+/**
+ * 打印字体表（x2t bin2pdf 的 m_sFontDir 内容）——2026-09-10。
+ *
+ * 为什么不用 /system/fonts：x2t 选字体是**打分制**（FontManager→CFontList::GetByParams，
+ * 名字/粗斜体/charset 加权取 penalty 最小者）。设备 /system/fonts 有 205 个字体，
+ * 当文档声明的字体名（Arial/Calibri/Tahoma…）一个都匹配不上时，**粗体位**成为决胜项
+ * → 声明 Arial 的粗体文本被 NotoSansBengaliUI-Bold 命中，而该字体无拉丁/西里尔字形
+ * → PDF 文字乱码（2026-09-10 真机实证：pptx 预览乱码，PDF 内嵌字体为 Bengali）。
+ * 改为只用随包字体：回退集里全是含拉丁+西里尔+中文的字体（Liberation = Arial/
+ * Times/Courier 的度量兼容替身）。字体本体来自 rawfile/onlyoffice/fonts。
+ *
+ * 解包时机：aboutToAppear 后台解包一次（~10MB 写入）；首次打印若尚未就绪则同步补。
+ */
+const PRINT_FONT_FILES: string[] = [
+  'LiberationSans-Regular.ttf', 'LiberationSans-Bold.ttf',
+  'LiberationSans-Italic.ttf', 'LiberationSans-BoldItalic.ttf',
+  'LiberationSerif-Regular.ttf', 'LiberationSerif-Bold.ttf',
+  'LiberationSerif-Italic.ttf', 'LiberationSerif-BoldItalic.ttf',
+  'LiberationMono-Regular.ttf', 'LiberationMono-Bold.ttf',
+  'HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf'
+];
+/**
+ * 字体前 32B 的 XOR 密钥（构建期 pre_xor_font 加密态，SDK 假设服务器字体已
+ * guidOdttf 预加密）。x2t 解析 TTF 头需要明文 → 解包时必须还原。
+ * 与 09_fonts.js 的 GUID、build_editors_ohos.FONT_GUID_ODTTF 同源。
+ */
+const FONT_GUID_ODTTF: number[] = [
+  0xA0, 0x66, 0xD6, 0x20, 0x14, 0x96, 0x47, 0xFA,
+  0x95, 0x69, 0xB8, 0x50, 0xB0, 0x41, 0x49, 0x48
+];
 /**
  * 自动验收 = ability 启动参数控制（2026-09-05 用户建议：不写死代码，避免重新编译切换）：
  *   hdc XXX shell aa start -a EntryAbility -b app.fuqidian.pureoffice \
@@ -58,6 +88,12 @@ struct EditorPage {
   private ascNative: AscNativeBridge | undefined = undefined;
   private hostFilesDir: string = '';
   private webLogPath: string = '';
+  /** UIAbilityContext（aboutToAppear 取一次；@ohos.print 等需 context 的 API 用） */
+  private abilityCtx: common.UIAbilityContext | undefined = undefined;
+  /** 打印字体目录（沙箱内解包路径，x2t bin2pdf 的 m_sFontDir；见 PRINT_FONT_FILES） */
+  private printFontDir: string = '';
+  /** 打印字体是否已就绪（.ready 标记已见/本次已解包成功） */
+  private printFontsReady: boolean = false;
   /** M7 诊断直达配额：onPageEnd 时打开样本（welcome 完成后才触发，避开加载竞争） */
   private m7DirectQueued: boolean = false;
   /** 资源版本自愈 flush 一次守卫（onInstanceReady 周期内）——升级自愈只跑一次 */
@@ -211,6 +247,12 @@ struct EditorPage {
       // 2026-09-08 真机发现 SAVE_AS_WRITE 落盘的是 doct bin 流，必修）。不同格式导出
       // 走「下载为」（暂未支持，菜单已隐藏——2026-09-08 用户决策）。
       return this.saveAsBin(ctx, param);
+    }
+    if (cmd === 'print:bin') {
+      // 打印链（2026-09-10）：45_print.js 覆写 asc_Print 后发来的**元文件指令流**
+      // （引擎 CDocumentRenderer 产物，非 PDF 文件格式）→ x2t bin2pdf 转真 PDF
+      // → @ohos.print 调起系统打印。
+      return this.printBin(ctx, param);
     }
     if (cmd === 'go:folder') {
       // 官方桌面"返回"（FileMenu 返回到文档列表）→ tab 化语义：激活主页 tab（doc 实例
@@ -537,6 +579,276 @@ struct EditorPage {
    * 序列化当前模型 → DOCY;v10）→ 本方法：写 per-tab in.<id>.bin → x2t doct_bin2docx →
    * save.<id>.<ext>（zip 头校验）→ 回写当前源文件（ctx.state.savePath）。
    */
+  /**
+   * 打印：引擎元文件流 → x2t bin2pdf → 系统打印（2026-09-10）。
+   *
+   * 入参 = 45_print.js 覆写 asc_Print 后发来的 base64——内容是**元文件绘图指令流**
+   * （引擎 CDocumentRenderer 产物），不是 PDF 文件格式。转换靠 x2t 的 bin2pdf
+   * （NExtractTools::bin2pdf，纯 C++ 的 NSOnlineOfficeBinToPdf，不依赖
+   * doctrenderer/V8）：方向判定看扩展名——源 .bin → AVS_OFFICESTUDIO_FILE_CANVAS_PDF、
+   * 目标 .pdf → TCD_BIN2PDF。
+   */
+  private printBin(ctx: DocTabCtx, b64: string): string {
+    // 字体表必须就绪再转（未就绪则本次同步解包，~10MB 一次性写入）
+    const fontDir = this.ensurePrintFonts() ? this.printFontDir : '';
+    try {
+      if (b64.length === 0) {
+        this.arkLog('PRINT_BIN_EMPTY');
+        return 'false';
+      }
+      const ab = b64ToBuf(b64);
+      const inP = this.printDir(ctx) + '/in.bin';
+      const outP = this.printOutPath(ctx);
+      if (!writeFileBuf(inP, ab)) {
+        this.arkLog('PRINT_BIN_WRITE_ERR ' + inP);
+        return 'false';
+      }
+      const rc = x2tConvertSync(x2tXmlFont(inP, outP, fontDir));
+      this.arkLog('PRINT_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
+      if (rc !== 0) {
+        promptAction.showToast({ message: '打印失败：文档转换出错', duration: 3000 });
+        return 'false';
+      }
+      const outBuf = readFileBuf(outP);
+      if (outBuf === null) {
+        this.arkLog('PRINT_PDF_MISSING ' + outP);
+        return 'false';
+      }
+      // %PDF- 魔数校验（元文件流若被误当 PDF 会直接从这里暴露）
+      const mk = new Uint8Array(outBuf.slice(0, 5));
+      const pdfOk = mk[0] === 0x25 && mk[1] === 0x50 && mk[2] === 0x44 && mk[3] === 0x46;
+      this.arkLog('PRINT_PDF size=' + outBuf.byteLength + (pdfOk ? ' pdfok' : ' PDFBAD'));
+      if (!pdfOk) {
+        promptAction.showToast({ message: '打印失败：PDF 生成异常', duration: 3000 });
+        return 'false';
+      }
+      this.printPdf(ctx, outP);
+      return 'true';
+    } catch (e) {
+      this.arkLog('PRINT_BIN_ERR ' + String(e));
+      return 'false';
+    }
+  }
+
+  /**
+   * 打印字体就绪（幂等）：rawfile/onlyoffice/fonts → 沙箱 printFontDir，供 x2t
+   * bin2pdf 建字体表（缘由见 PRINT_FONT_FILES）。标记文件 .ready 存在即视为完成，
+   * 避免每次启动重复写 ~10MB。返回是否可用。
+   */
+  private ensurePrintFonts(): boolean {
+    if (this.printFontsReady) {
+      return true;
+    }
+    const dir = this.printFontDir;
+    const rm = this.resourceManager;
+    if (dir.length === 0 || rm === undefined) {
+      return false;
+    }
+    // 注意：fs.accessSync 是**返回 boolean** 而非抛异常（2026-09-10 实测——
+    // 不能写成 try{ accessSync() }catch{}，那样"不存在"会被当成已就绪直接返回）
+    let hasFlag = false;
+    try {
+      hasFlag = fs.accessSync(dir + '/.ready');
+    } catch (e) {
+      hasFlag = false;
+    }
+    if (hasFlag) {
+      this.printFontsReady = true;
+      return true;
+    }
+    try {
+      fs.mkdirSync(dir);
+    } catch (e) {
+      // 目录已存在
+    }
+    let ok = 0;
+    for (let i = 0; i < PRINT_FONT_FILES.length; i++) {
+      const name = PRINT_FONT_FILES[i];
+      try {
+        const u8 = rm.getRawFileContentSync('onlyoffice/fonts/' + name) as Uint8Array;
+        // pre_xor_font 只加密前 32B（TTF 头）—— 正是 x2t 解析所需，必须先还原
+        const n = Math.min(32, u8.length);
+        for (let k = 0; k < n; k++) {
+          u8[k] = u8[k] ^ FONT_GUID_ODTTF[k % 16];
+        }
+        if (!writeFileBuf(dir + '/' + name, u8)) {
+          this.arkLog('PRINT_FONT_WRITE_ERR ' + name);
+          continue;
+        }
+        // 大字体（最大 5.5MB）单次 writeSync 可能截断 → 按落盘尺寸复核
+        let sz = -1;
+        try {
+          sz = fs.statSync(dir + '/' + name).size;
+        } catch (e) {
+          sz = -1;
+        }
+        if (sz === u8.length) {
+          ok++;
+        } else {
+          this.arkLog('PRINT_FONT_SIZE_ERR ' + name + ' ' + sz + '/' + u8.length);
+        }
+      } catch (e) {
+        this.arkLog('PRINT_FONT_ERR ' + name + ' ' + String(e));
+      }
+    }
+    this.printFontsReady = ok === PRINT_FONT_FILES.length;
+    if (this.printFontsReady) {
+      writeFileBuf(dir + '/.ready', new ArrayBuffer(0));
+    }
+    this.arkLog('PRINT_FONTS_EXTRACT ' + ok + '/' + PRINT_FONT_FILES.length);
+    return this.printFontsReady;
+  }
+
+  /** 调起系统打印（@ohos.print）：文件路径 + context；任务终态回调里清理临时文件。
+   *  注意：终态事件（succeed/fail/cancel）只在系统走完打印流程时到达——**用户直接关掉
+   *  打印界面不一定触发任何事件**（2026-09-11 真机实测：关闭打印框后无 CANCEL 日志、
+   *  工作目录原样保留）。故清理不能只依赖这里，启动 sweepPrintFiles 才是兜底路径
+   *  （幂等，重复清无副作用）。 */
+  private printPdf(ctx: DocTabCtx, pdfPath: string): void {
+    const c = this.abilityCtx;
+    if (c === undefined) {
+      this.arkLog('PRINT_NO_CTX');
+      return;
+    }
+    // 传给系统打印服务的必须是 FileUri（file://<bundle>/<sandbox>）而非裸沙箱路径——
+    // 打印服务是独立进程，裸路径在它的视图里不存在（2026-09-10 真机实证：
+    // HwPrintSpooler "loadPdf failed: 1 / No such file or directory"）。
+    // fileUri.getUriFromPath 即官方为「跨进程访问应用沙箱文件」提供的转换。
+    let src = pdfPath;
+    try {
+      src = fileUri.getUriFromPath(pdfPath);
+    } catch (ue) {
+      this.arkLog('PRINT_URI_ERR ' + String(ue));
+    }
+    this.arkLog('PRINT_URI ' + src);
+    print.print([src], c)
+      .then((task: print.PrintTask) => {
+        this.arkLog('PRINT_TASK_START ' + pdfPath);
+        // 临时 PDF 须活到任务终态（系统打印服务异步读文件）；缺纸/离线（block）
+        // 时保留文件——此时删了任务就废了。
+        task.on('succeed', () => {
+          this.arkLog('PRINT_TASK_SUCCEED');
+          this.cleanupPrintFiles(ctx);
+        });
+        task.on('fail', () => {
+          this.arkLog('PRINT_TASK_FAIL');
+          this.cleanupPrintFiles(ctx);
+        });
+        task.on('cancel', () => {
+          this.arkLog('PRINT_TASK_CANCEL');
+          this.cleanupPrintFiles(ctx);
+        });
+        task.on('block', () => {
+          this.arkLog('PRINT_TASK_BLOCK');
+        });
+      })
+      .catch((e: BusinessError) => {
+        // 201 = 缺 ohos.permission.PRINT 声明；其余 = 系统打印服务不可用
+        this.arkLog('PRINT_TASK_ERR ' + e.code + ' ' + e.message);
+        promptAction.showToast({ message: '无法调起系统打印', duration: 3000 });
+        this.cleanupPrintFiles(ctx);
+      });
+  }
+
+  /**
+   * 打印工作目录（per-tab）：<filesDir>/print/<tabId>/。
+   * 用目录而非 tabPath 的文件名后缀，是为了让输出 PDF 的文件名**保持文档名**
+   * ——系统打印服务的「另存为 pdf」以传入文件名作保存框默认名（2026-09-10 真机：
+   * 原 tabPath 命名让保存框显示 print-out.2，内部临时名暴露给用户）。
+   * 目录隔离同时保住多文档互不踩。
+   */
+  private printDir(ctx: DocTabCtx): string {
+    const dir = this.hostFilesDir + '/print/' + ctx.id;
+    // 父目录必须显式建：mkdirSync 无递归语义，父不存在时建子目录直接抛错
+    // （2026-09-11 真机实证：print/2/in.bin 写入失败，异常被下面的 catch 吞成静默）
+    try {
+      fs.mkdirSync(this.hostFilesDir + '/print');
+    } catch (e) {
+      // 已存在
+    }
+    try {
+      fs.mkdirSync(dir);
+    } catch (e) {
+      // 已存在
+    }
+    return dir;
+  }
+
+  /** 输出 PDF 路径：print/<tabId>/<文档名>.pdf（文档名为空时回落 doc.pdf）。
+   *  ctx.state.name 是含扩展名的文档名（保存链的同一事实源：savePath = filesDir + '/' + name），
+   *  新建未保存的文档也有值（defaultDocName）。 */
+  private printOutPath(ctx: DocTabCtx): string {
+    const src = ctx.state.name.length > 0 ? ctx.state.name : 'doc';
+    const dot = src.lastIndexOf('.');
+    const stem = dot > 0 ? src.substring(0, dot) : src;
+    const safe = stem.replace(/[\\/:*?"<>|]/g, '_');
+    return this.printDir(ctx) + '/' + (safe.length > 0 ? safe : 'doc') + '.pdf';
+  }
+
+  /** 启动清扫：删沙箱里的打印残留（崩溃/强杀时任务终态回调未跑；幂等）。
+   *  两级都扫：新的 print/<tabId>/ 工作目录 + 旧版平铺的 print-in. 与 print-out. 前缀文件。 */
+  private sweepPrintFiles(): void {
+    const root = this.hostFilesDir + '/print';
+    try {
+      const ids = fs.listFileSync(root);
+      for (const id of ids) {
+        const dir = root + '/' + id;
+        try {
+          const names = fs.listFileSync(dir);
+          for (const n of names) {
+            try {
+              fs.unlinkSync(dir + '/' + n);
+            } catch (e) {
+              // 占用中/已删——忽略
+            }
+          }
+          fs.rmdirSync(dir);
+        } catch (e) {
+          // 非目录或已删——忽略
+        }
+      }
+      try {
+        fs.rmdirSync(root);
+      } catch (e) {
+        // 非空/已删——忽略
+      }
+    } catch (e) {
+      // 无 print 目录（首次运行）——非致命
+    }
+    try {
+      const names = fs.listFileSync(this.hostFilesDir);
+      for (const n of names) {
+        if (n.startsWith('print-in.') || n.startsWith('print-out.')) {
+          try {
+            fs.unlinkSync(this.hostFilesDir + '/' + n);
+          } catch (e) {
+            // 占用中/已删——忽略
+          }
+        }
+      }
+    } catch (e) {
+      // 目录不可读等——非致命
+    }
+  }
+
+  /** 删除该 tab 的打印工作目录（幂等；调用点只在打印任务终态） */
+  private cleanupPrintFiles(ctx: DocTabCtx): void {
+    const dir = this.hostFilesDir + '/print/' + ctx.id;
+    try {
+      const names = fs.listFileSync(dir);
+      for (const n of names) {
+        try {
+          fs.unlinkSync(dir + '/' + n);
+        } catch (e) {
+          // 占用中/已删——忽略
+        }
+      }
+      fs.rmdirSync(dir);
+    } catch (e) {
+      // 目录不存在/非空——残留由下次启动 sweepPrintFiles 兜底
+    }
+  }
+
   private saveBinRaw(ctx: DocTabCtx, b64: string, userSaved: boolean = true): string {
     try {
       if (b64.length === 0) {
@@ -832,9 +1144,19 @@ struct EditorPage {
 
   aboutToAppear(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
+    this.abilityCtx = ctx;
     this.resourceManager = ctx.resourceManager;
     this.hostFilesDir = ctx.filesDir;
     this.webLogPath = ctx.filesDir + '/web_console.txt';
+    this.printFontDir = ctx.filesDir + '/printfonts';
+    // 打印临时文件启动清扫（上次进程崩溃/强杀时任务终态回调未跑，文件会残留
+    // 在沙箱；按前缀扫一遍删除。正常关闭路径已在任务终态/tab 关闭时清过）
+    this.sweepPrintFiles();
+    // 打印字体后台解包（~10MB 一次性；放启动后让位首屏。首次打印若仍未就绪
+    // 由 ensurePrintFonts 同步补——正确性不依赖本调用）
+    setTimeout(() => {
+      this.ensurePrintFonts();
+    }, 3000);
     // 系统三键 ✕ 关闭守卫（2026-09-10，WPS 同款正路）：EntryAbility 里
     // windowStageClose 恒拦（return true=不关窗）→ 本回调 = 与返回键同链的
     // requestBackExit（未保存逐个弹框→全处置完 terminateSelf；取消=窗口保留）。
@@ -1299,6 +1621,8 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
         return;
       }
       const wasFocus = this.focusTab === idx;
+      // 打印临时文件**不在此清**：任务可能在系统打印框里排队未终态（printPdf 注释：
+      // 文件须活到任务终态）。残留由任务终态回调 / 启动 sweepPrintFiles 兜底。
       const arr = this.docTabs.slice();
       arr.splice(idx, 1);
       this.docTabs = arr;

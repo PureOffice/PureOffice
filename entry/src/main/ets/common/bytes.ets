@@ -115,3 +115,15 @@ export function writeFileBuf(path: string, data: ArrayBuffer | Uint8Array): bool
 export function x2tXml(from: string, to: string): string {
   return `<Convert><m_sFileFrom>${from}</m_sFileFrom><m_sFileTo>${to}</m_sFileTo></Convert>`;
 }
+
+/**
+ * 带字体目录的 x2t XML（打印链 bin→pdf 专用）。
+ * 缘由：x2t 的 bin2pdf（NExtractTools::bin2pdf）内部 createApplicationFonts 在
+ * m_sFontDir 为空时回落 Initialize()——只找 /usr/share/fonts（OHOS 无此目录）
+ * → 字体表空 → PDF 里文字缺字形。显式给目录走 InitializeFromFolder。
+ * fontDir 为空时退化为无该字段（与 x2tXml 同形）。
+ */
+export function x2tXmlFont(from: string, to: string, fontDir: string): string {
+  const f = fontDir.length > 0 ? `<m_sFontDir>${fontDir}</m_sFontDir>` : '';
+  return `<Convert><m_sFileFrom>${from}</m_sFileFrom><m_sFileTo>${to}</m_sFileTo>${f}</Convert>`;
+}

@@ -22,7 +22,10 @@
       }
     ],
     "requestPermissions": [
-      { "name": "ohos.permission.INTERNET" }
+      { "name": "ohos.permission.INTERNET" },
+      // 系统打印（@ohos.print）：availableLevel=normal + grantMode=system_grant
+      // → 声明即授予，无需运行时申请（SDK PermissionDefinitions.json 实测）
+      { "name": "ohos.permission.PRINT" }
     ]
   }
 }

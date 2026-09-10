@@ -210,11 +210,11 @@
                 //    恒隐藏（FileMenu.js:427/:429 的 !isDesktopApp 为假），「另存为」
                 //    恒显示（:430 公式）——download 位留 true（canSaveToFile 等
                 //    连带依赖；c6a6324 曾靠 download:false 隐藏下载为，今被档位替代）。
-                //  print:false —— canPrint=permissions.print!==false（Main.js:1735）→
-                //    false：文件菜单「打印/打印预览」两项全隐（FileMenu.js:433/:434），
-                //    B 架构无打印（引擎 asc_Print 需 C++ 落地/doctrenderer V8 缺失，
-                //    2026-09-08 用户决策）。
-                permissions: {edit: true, download: true, print: false}
+                //  print:true —— canPrint=permissions.print!==false（Main.js:1735）
+                //    → 工具栏打印按钮显示（Toolbar.js:3407-3408）+ 文件菜单打印项
+                //    显示（FileMenu.js:435-436）。落地链=45_print.js 覆写 asc_Print
+                //    → x2t bin2pdf → @ohos.print 系统打印（2026-09-10）。
+                permissions: {edit: true, download: true, print: true}
               }
             };
             var _k = ('' + _cfg.document.key + Math.random().toString(16).substring(2)).replace(/[^0-9a-f]/g, '');
@@ -367,6 +367,24 @@
                       console.error('LSO_PERM_DISPATCH_NOSUPPORT');
                     }
                   } catch (de) { console.error('LSO_PERM_DISPATCH_ERR ' + String(de)); }
+                  // 打印档位（2026-09-10）：onEditorPermissions 内部按
+                  // canPreviewPrint = canPrint && !isMac && isDesktopApp
+                  // （Main.js:1735）算出 true——本壳 targetApp='desktop'。
+                  // 置 false 走官方「不预览直印」分支（macOS 同款）：
+                  //   LeftMenu.clickToolbarPrint → canPreviewPrint ? 打印面板
+                  //   : clickMenuFileItem('print') → api.asc_Print
+                  // 理由：官方打印面板的打印机列表需壳层经 printer:config 事件
+                  // 注入（Desktop.js:204-221，在 if(!!native) 内），而编辑器页已
+                  // delete window.AscDesktopEditor → 面板下拉恒空、打印按钮恒灰。
+                  // 系统打印框自己带打印机列表，故不需要该面板。
+                  // canQuickPrint 同理置 false（静默快速打印语义——系统打印框必弹，
+                  // 不成立）。**必须写在 try/catch 之外**：onEditorPermissions 在离线
+                  // 环境会中途抛错（LSO_PERM_DISPATCH_ERR execCommand——官方内部对
+                  // undefined 的 sdk 取方法，2026-09-10 真机实证），写在 call() 之后就
+                  // 会被跳过；而 canPrint/canPreviewPrint 的赋值在抛错之前已完成，
+                  // 故此处覆写既必要又有效。
+                  _m.appOptions.canPreviewPrint = false;
+                  _m.appOptions.canQuickPrint = false;
                   _m.api.asc_getEditorPermissions();
                   console.error('LSO_DIOPEN_OK url=' + _di2.get_Url() + ' perms=' + (typeof _m.permissions));
                 }

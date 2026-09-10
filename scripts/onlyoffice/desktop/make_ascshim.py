@@ -77,7 +77,8 @@ SRC_DIR = os.path.join(HERE, 'src')
 # 00_theme 必须在首位：RendererProcessVariable.theme 必须早于官方 desktopinit 内联段
 # （index.html 同步一次性消费——误放 AscNative 等待之后= 注入执行≠生效，2026-09-08 教训）
 # 55_lic 之后追加 57_about（欢迎页 About 入口的 app:version 补发；仅欢迎页 URL 生效）
-PARTS = ['00_theme.js', '09_fonts.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js', '55_lic.js', '57_about.js']
+# 45_print 紧跟 40_save（同为编辑器页序列化链，顺序仅为可读性——二者无依赖）
+PARTS = ['00_theme.js', '09_fonts.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '45_print.js', '50_init.js', '55_lic.js', '57_about.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 
