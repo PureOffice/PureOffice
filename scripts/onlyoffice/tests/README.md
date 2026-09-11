@@ -8,7 +8,7 @@
 ## 1. 自动层用法
 
 ```bash
-# 全量（约 4 分钟，10 个 case）
+# 全量（约 7 分钟，19 个 case；每个 case 命中终态标签即结束，不必等满超时）
 OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/tests/regression.sh
 
 # 单 case / 列清单 / 采基线（加 case 前用）
@@ -31,6 +31,7 @@ OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --record --case <id>
 | 字体装填 | `font-cjk` / `font-symbol` | 每个在册字体必须有 `FONT_WARM_FILLED id=<文件>`（缺流=渲染期静默回退，见 §4） |
 | 字体映射 | 同上两 case | `FONT_PICK`（请求名 → 命中行）：仿宋/楷体不得被宋体截胡、Wingdings/Symbol 必落 OpenSymbol |
 | 插件/AI 链 | `plug-ai-on` / `plug-ai-gated` | 装配→run→AI tab→Chatbot 全链打点；门控态反向断言（默认不点） |
+| 格式扩展 | `open-doc` / `open-xls` / `open-ppt` / `open-rtf` / `open-txt` / `open-csv`、`save-rtf` / `save-csv` / `save-doc` | 新格式打开链（样本名 + x2t 转换 + 各族就绪标签）+ 原地保存 + 不可原地保存格式的提示拦截（`save-doc` 反向断言 `SAVE_BIN_BACK`/`SAVE_BIN_URI` 必须不出现） |
 
 **盲区（自动层判不了）**：**像素级**渲染结果（字形画出来是粗是细、布局是否错位——判据只到
 "字体选中且字节在"这一层）、系统 UI 内的操作（picker/打印框/软键盘）、窗口与手势行为。→ §3。
@@ -41,7 +42,8 @@ OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --record --case <id>
 
 | 项 | 步骤 | 看什么 |
 |---|---|---|
-| 打开本地文件 | 欢迎页「打开」→ 系统选择器 | 选 docx/xlsx/pptx 各一，能进编辑器 |
+| 打开本地文件 | 欢迎页「打开」→ 系统选择器 | 选 docx/xlsx/pptx 各一，能进编辑器；9 种支持后缀的文件可见、不支持后缀（如 exe/odt）不出现 |
+| 打开方式（文件管理器） | 文件管理器长按文件 → 打开方式 | 候选列表出现 Pure Office；docx 选中直接进编辑器；odt 选中弹「暂不支持该格式：<名>」（不支持格式的唯一可达入口） |
 | 另存为 / 导出 | 编辑页左下「导出」 | 系统保存框弹出、文件名带出、落盘可打开 |
 | 打印 | 工具栏打印按钮（保存图标旁） | 系统打印界面弹出（无打印机＝"未发现打印机"也算通） |
 
@@ -55,7 +57,7 @@ OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --record --case <id>
 | PPT 放映全屏 | pptx 放映 → 退出 | PC 沉浸最大化 / Pad 收起 tab 条；退出后窗口状态精确还原 |
 | 主题 / 语言 | 设置→主题、欢迎页语言 | 切换即时生效、重启后保留（主题默认经典浅色） |
 | 新建三格式 | 欢迎页三卡片 | 空白文档干净打开（无范文残留） |
-| recents | 打开文件后回欢迎页 | 列表出现该文件、重启后仍在 |
+| recents | （面板已隐藏，2026-09-05 用户决策砍掉「最近使用」入口） | 暂不可测；`recents.ets` 与打开链代码保留，待持久文件位置机制恢复 |
 
 ### 3.3 目视类（判据是"画对了"）
 
@@ -63,6 +65,8 @@ OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --record --case <id>
   `fonts-symbol-test.docx`（Symbol/Wingdings 混合段）——打开截图逐行核对
 - **CJK 回归**：任一中文文档，确认无方块、无静默变宋体
 - **布局**：三格式的工具栏/菜单/右侧栏完整（cell/pptx 首开较慢，GUI 懒建）
+- **格式扩展**：`sample.doc`/`sample.xls`/`sample.ppt`/`sample.rtf`/`sample.txt`/`sample.csv` 逐个打开核对渲染；
+  `.doc/.xls/.ppt/.txt` 保存须弹「格式不支持保存」→ 确认后系统保存框默认名换新后缀（`.docx/.xlsx/.pptx/.docx`）
 
 ## 4. 加 case 的规矩
 

@@ -28,3 +28,16 @@ font-symbol|m7accept=1;m7file=fonts-sym-single.docx|60|PROF_SNAP|FONT_WARM_FILLE
 # —— 插件/AI 链（m7ai 门控双向：开着能点、默认不点——后者防回归弹出聊天窗遮挡截图）——
 plug-ai-on|m7accept=1;m7ai=1;m7file=sample.docx|120|PLUG_AI_CHAT|PLUG_TAB_CLICKED,PLUG_AI_TOGGLE_CLICKED,PLUG_AI_TAB_CLICKED,PLUG_AI_CHAT_CLICKED|PLUG_AI_CHAT_ERR|AI 插件链全通（装配→run→AI tab→Chatbot 窗口）
 plug-ai-gated|m7accept=1;m7file=sample.docx|120|PLUG_AI_CHAT_GATED|PLUG_AI_TOGGLE_GATED,PLUG_AI_TAB_GATED,PLUG_AI_CHAT_GATED|PLUG_AI_CHAT_CLICKED,PLUG_AI_TOGGLE_CLICKED|默认态门控：只记 GATED 不点击（防聊天窗弹出）
+# —— 格式扩展（2026-09-11）：旧 Office 二进制 + 轻量文本 ——
+#   打开判据三项 = 样本名（带 " len=" 后缀——否则 sample.doc 会前缀命中 sample.docx）+ x2t 转换成功 + 各族就绪标签
+#   结束判据统一 PROF_SNAP：实采显示它最晚出现，用它做终态不会截断保存链标签
+open-doc|m7accept=1;m7file=sample.doc|60|PROF_SNAP|M7_DIRECT_OPEN sample.doc len=,OPEN_X2T rc=0x0,LSO_OPEN_DOCUMENT_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|doc 打开（旧二进制转 word 族 doct_bin）
+open-xls|m7accept=1;m7file=sample.xls|120|PROF_SNAP|M7_DIRECT_OPEN sample.xls len=,OPEN_X2T rc=0x0,LSO_DIOPEN_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|xls 打开（cell 族）
+open-ppt|m7accept=1;m7file=sample.ppt|120|PROF_SNAP|M7_DIRECT_OPEN sample.ppt len=,OPEN_X2T rc=0x0,LSO_DIOPEN_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|ppt 打开（slide 族）
+open-rtf|m7accept=1;m7file=sample.rtf|60|PROF_SNAP|M7_DIRECT_OPEN sample.rtf len=,OPEN_X2T rc=0x0,LSO_OPEN_DOCUMENT_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|rtf 打开（word）
+open-txt|m7accept=1;m7file=sample.txt|60|PROF_SNAP|M7_DIRECT_OPEN sample.txt len=,OPEN_X2T rc=0x0,LSO_OPEN_DOCUMENT_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|txt 打开（word）
+open-csv|m7accept=1;m7file=sample.csv|120|PROF_SNAP|M7_DIRECT_OPEN sample.csv len=,OPEN_X2T rc=0x0,LSO_DIOPEN_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|csv 打开（cell，编码+分隔符参数）
+#   保存：rtf/csv 可原地回写；doc 不可 → 必须出现格式提示且禁止回写源文件（反向断言 SAVE_BIN_BACK）
+save-rtf|m7accept=1;m7file=sample.rtf;m7auto=1|120|PROF_SNAP|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|rtf 原地保存（rtf 头校验通过）
+save-csv|m7accept=1;m7file=sample.csv;m7auto=1|120|PROF_SNAP|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|csv 原地保存（非空校验通过）
+save-doc|m7accept=1;m7file=sample.doc;m7auto=1|90|PROF_SNAP|M7_DIRECT_OPEN sample.doc len=,SAVE_BIN_X2T,FMT_DIALOG_ON|SAVE_BIN_BACK,SAVE_BIN_URI|doc 保存被格式提示拦下（禁止回写原 doc）
