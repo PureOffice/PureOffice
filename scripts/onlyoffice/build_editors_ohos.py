@@ -70,7 +70,7 @@ CJK_FONTS_DIR = os.environ.get('OHOS_CJK_FONTS_DIR',
                                '/apps/harmony/sdk/default/hms/previewer/resources/fonts')
 # 顺序必须 R,I,B,BI（ascshim __fonts_files 注入数组与 FONT_INFOS 的 indexI/indexB 下标一致）
 # 下标 12 = HarmonyOS_Sans_SC.ttf（黑体/无衬线 CJK；无独立 Bold/Italic 文件：
-# R/I/B/BI 共用 regular，加粗/倾斜由引擎模拟——与 Symbol/Wingdings 全下标 0 同约定）
+# R/I/B/BI 共用 regular，加粗/倾斜由引擎模拟——与 OpenSymbol 行（全下标 16）同约定）
 # 下标 13 = NotoSerifCJK-SC.ttf（宋体/衬线 CJK —— 2026-09-05 宋体修复：真宋体，
 #   用户选「宋体」渲染成无衬线黑体的根因=宋体族行全映射下标 12；见 FONT_INFOS）
 # 曾试用 NotoSansCJK_SC-Regular.otf（CFF）：引擎 wasm libfont 为精简 freetype，
@@ -87,7 +87,15 @@ FONT_FILES = ['LiberationSans-Regular.ttf', 'LiberationSans-Italic.ttf',
               # 下标 14/15 = 仿宋/楷体（2026-09-07 字体扩充：Fandol 字体集，CTAN
               # fandol v0.3，GPL + GPL font exception——随包分发合规）。来源/转换
               # 见 FONT_SUBSETS 注释（CFF→glyf 同宋体链）。
-              'FandolFang.ttf', 'FandolKai.ttf']
+              'FandolFang.ttf', 'FandolKai.ttf',
+              # 下标 16 = 符号字体（2026-09-11）。依据：引擎 libfont/map.js 的
+              # ChangeGlyphsMap 把 Symbol/Wingdings 的码位**映射到 OpenSymbol 的
+              # 私用区**（MapDst = 0xE12C/0xE442/0xE441/0xE25F/0xE46F/0xE330/0x2751/
+              # 0xE43A/0xE439/0xE469）——即这两个符号字体须由**名为 OpenSymbol 的
+              # 字体**承载；此前两行 indexR 指向 Liberation Sans（无 PUA/数学符号
+              # 字形）⇒ Symbol 文本缺字形、Wingdings 文本全灭。来源见 FONT_SRC
+              # 注释，MPL-2.0 可随包分发。
+              'OpenSymbol.ttf']
 # 字体文件来源目录：Liberation → SYSTEM_FONTS_DIR；CJK → templates_src/fonts
 # （CJK 源为 HarmonyOS SDK previewer 字体经转换/子集化的**静态 glyf TTF**。
 # 踩坑记录（2026-09-05，勿回退）：
@@ -115,6 +123,14 @@ FONT_SRC_BY_FILE['HarmonyOS_Sans_SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyo
 FONT_SRC_BY_FILE['NotoSerifCJK-SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
 FONT_SRC_BY_FILE['FandolFang.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
 FONT_SRC_BY_FILE['FandolKai.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
+# OpenSymbol（LibreOffice 符号字体；许可 MPL-2.0 含部分 Apache-2.0，版权 Sun
+# Microsystems/Google/LibreOffice 贡献者）——静态 glyf TTF、1066 字形、无 VF/CFF，
+# 引擎可直接打开。复现（构建机）：
+#   apt-get download fonts-opensymbol && dpkg-deb -x fonts-opensymbol*.deb /tmp/osym
+#   cp /tmp/osym/x/usr/share/fonts/truetype/libreoffice/opens___.ttf \
+#      scripts/onlyoffice/templates_src/fonts/OpenSymbol.ttf
+# 改名理由：文件名/注册行名/face 内部名三者一致（渲染槽按 face 名回查注册表）。
+FONT_SRC_BY_FILE['OpenSymbol.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
 
 # —— 系统字体（2026-09-07 v2 终版：多机交集方针，设备直读 /system/fonts）——
 # 用户方针：**1.4 与 1.8 都可用**（各自/交集）——实测两机清单：1.4=260 款（含
@@ -133,8 +149,9 @@ FONT_SRC_BY_FILE['FandolKai.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 
 #   一律 ENOENT——2026-09-07 实测是「目标机清单差异」而非权限——wine 普通应用
 #   进程可读（wineohos freetype.c ReadFontDir 佐证）→ native 返回前 XOR
 #   FONT_GUID_ODTTF 前 32B（= pre_xor_font 加密态）→ 页面 xorDecode 还原装填。
-# 下标 = len(FONT_FILES) 起（16 起；Fandol 保留 14/15——仿宋/楷体不在交集，
-#   系统桥不提供与它们同名能力，Fandol 为跨机一致来源）。新增交集字体时追加
+# 下标 = len(FONT_FILES) 起（现为 17 起；Fandol 占 14/15——仿宋/楷体不在交集，
+#   系统桥不提供与它们同名能力，Fandol 为跨机一致来源；OpenSymbol 占 16——包内
+#   符号字体，非系统行，故系统行起点由 16 顺延至 17）。新增交集字体时追加
 #   SYSTEM_FONT_FILES + INFOS 行（face 名行）+ 本注释更新 face 名。
 SYSTEM_FONT_FILES = ['HYQiHeiL3.ttf',
                      'NotoSansBengaliUI-Regular.ttf',
@@ -182,8 +199,21 @@ FONT_INFOS = [
     ["Liberation Sans", 0, 0, 1, 0, 2, 0, 3, 0],
     ["Times New Roman", 4, 0, 5, 0, 6, 0, 7, 0],
     ["Courier New", 8, 0, 9, 0, 10, 0, 11, 0],
-    ["Symbol", 0, 0, 0, 0, 0, 0, 0, 0],
-    ["Wingdings", 0, 0, 0, 0, 0, 0, 0, 0],
+    # 符号字体（2026-09-11）：**只注册 OpenSymbol 行，不要注册 Symbol/Wingdings 行**。
+    # 机制（map.js 源码实证）：
+    #   ① ChangeGlyphsMap[name] 的替换条目要求 entry.Name === objDst.Name，而
+    #      objDst.Name = GetFontFileWeb(name).m_wsFontName = **选中行的行名**——
+    #      只有"实际选中 OpenSymbol 行"时码位映射（MapSrc→MapDst）才生效；
+    #   ② 官方 FD_Ascii_Font_Like_Names[1] = ["OpenSymbol"]，且 FD_Ascii_Font_Like_Main
+    #      把 Symbol/Wingdings 也标为类 1 → CheckLikeFonts('OpenSymbol','Wingdings')
+    #      = true（GetPenalty 记 700，优于其他任何候选）；
+    #   ③ 若表里存在与请求精确同名的 Symbol/Wingdings 行，精确匹配抢先命中，
+    #      行名即请求名 → 映射不生效。真机实测该形态：字符按原码位渲染，
+    #      Wingdings 键位（v w Ø …）因 OpenSymbol 无拉丁字母而整体变方块。
+    # 故**删两行**、让请求经相似类 1 落到 OpenSymbol 行 → GetReplaceGlyph 走
+    # MapSrc/MapDst（0x76→U+E441 等 10 组）、Symbol 的 0xB7/0xA8→●/◆ 亦生效；
+    # 未列入 MapSrc 的字符（如 ∀∂∑√α）原样用 OpenSymbol 渲染——该字体自带这些字形。
+    ["OpenSymbol", 16, 0, 16, 0, 16, 0, 16, 0],
     # HarmonyOS Sans SC：引擎 CJK fallback 的实际请求名（字符缺字形时
     # GetFontIndex 按此名选字体）。此前本表只有文件名 HarmonyOS_Sans_SC.ttf
     # （FONT_FILES）而没有同名条目 → 候选列表此项不在 → GetFontIndex 无精确
@@ -234,14 +264,14 @@ FONT_INFOS = [
     ["KaiTi", 15, 0, 15, 0, 15, 0, 15, 0],
     ["楷体_GB2312", 15, 0, 15, 0, 15, 0, 15, 0],
     ["kaiti.ttf", 15, 0, 15, 0, 15, 0, 15, 0],
-    # 系统字体行（2026-09-07 v2 终版：多机交集）。下标 = len(FONT_FILES) 起（16 起）。
+    # 系统字体行（2026-09-07 v2 终版：多机交集）。下标 = len(FONT_FILES) 起（17 起）。
     # 约定：**face 名真身行**（= face 内部 name，见 SYSTEM_FONT_FILES 注释实测值）
     # + 中文别名行（单一族、无重名——dict 后写覆盖坑已避）。『仿宋/楷体』中文名
     # 已注册到 Fandol（14/15，跨机一致）——系统行严禁再注册同名。
-    ["HYQiHei L3", 16, 0, 16, 0, 16, 0, 16, 0],
-    ["汉仪旗黑", 16, 0, 16, 0, 16, 0, 16, 0],
-    ["Noto Sans Bengali UI", 17, 0, 17, 0, 17, 0, 17, 0],
-    ["Noto Sans Devanagari UI", 18, 0, 18, 0, 18, 0, 18, 0],
+    ["HYQiHei L3", 17, 0, 17, 0, 17, 0, 17, 0],
+    ["汉仪旗黑", 17, 0, 17, 0, 17, 0, 17, 0],
+    ["Noto Sans Bengali UI", 18, 0, 18, 0, 18, 0, 18, 0],
+    ["Noto Sans Devanagari UI", 19, 0, 19, 0, 19, 0, 19, 0],
 ]
 
 # —— 字符范围回退表（引擎 libfont/character.js CFontByCharacter.init 消费的第三张
@@ -250,9 +280,9 @@ FONT_INFOS = [
 # FONT_INFOS[infoRowIndex][0] 字族 —— 2026-09-05 中文方块最后根因：
 # 此前只注入 __fonts_files/__fonts_infos，缺这张表 → Ranges 空 → 任何 CJK 字符
 # 回退失败 → 全部渲染为方块（引擎源代码 libfont/character.js:74 init 直接 return）。
-# infoRowIndex 一律取 FONT_INFOS 中「宋体」行（=13 行号；行号是 FONT_INFOS 数组
-# 下标，恰与真宋体文件下标 13 一致——回退到宋体=中文常用字回退到衬线，同官方
-# Windows 语义；勿把行号与 indexR 混为一谈）：
+# infoRowIndex 一律取 FONT_INFOS 中「宋体」行（= FONT_INFOS_ROWS["宋体"]，按**行名**
+# 动态取；行号是 FONT_INFOS 数组下标、与文件 indexR 无关——增删字体行会使其位移，
+# 故**禁止硬编码**。回退到宋体=中文常用字回退到衬线，同官方 Windows 语义）：
 FONT_INFOS_ROWS = {row[0]: i for i, row in enumerate(FONT_INFOS)}
 CJK_ROW = FONT_INFOS_ROWS["宋体"]
 # 段清单：CJK 部首/符号+假名（2E80-30FF）、CJK 核心表意（4E00-9FFF）、

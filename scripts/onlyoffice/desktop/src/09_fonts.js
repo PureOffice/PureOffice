@@ -22,8 +22,13 @@
   //   回退（__fonts_ranges 的 CJK 目标=宋体行）⇒ 仿宋/楷体整 run 显示为宋体。
   //   装填缺失是**持续存在**的，与保存无关。代价=每文档页多 12.4MB 预取
   //   （参照旗黑 21MB 已装填）。
+  // + 符号字体（2026-09-11）：OpenSymbol 承载 Symbol/Wingdings（引擎 libfont/map.js
+  //   的 ChangeGlyphsMap 把这两个符号字体的码位映射到该字体私用区）——同样必须在
+  //   装填清单内，否则渲染期无流、映射后仍取不到字形（与仿宋/楷体同一失效模式）。
+  //   字体仅 204KB，装填代价可忽略。
   var IDS = ['HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf',
              'FandolFang.ttf', 'FandolKai.ttf',
+             'OpenSymbol.ttf',
              'HYQiHeiL3.ttf',
              'NotoSansBengaliUI-Regular.ttf',
              'NotoSansDevanagariUI-Regular.ttf'];
