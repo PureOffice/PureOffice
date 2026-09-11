@@ -9,6 +9,29 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
  */
 let launchOptions: Record<string, string> = {};
 
+export function getLaunchOptions(): Record<string, string> {
+  return launchOptions;
+}
+
+// —— 「打开方式」入口 uri（want.uri）——
+// 文件管理器/其他应用把文档交给我们打开时携带（module.json5 已声明 viewData skill，
+// 否则系统不会把本应用列入候选）。冷启动时 EditorPage 尚未创建（handler 未注册），
+// uri 先存下由首帧后 takeLaunchUri 取走；热启动（应用已运行）时 handler 已注册，
+// 直接送达页面——两条路都不丢事件。
+let launchUri = '';
+let wantUriHandler: ((uri: string) => void) | null = null;
+
+export function setWantUriHandler(h: ((uri: string) => void) | null): void {
+  wantUriHandler = h;
+}
+
+/** 读取并清空启动 uri（take 语义：同一 uri 只消费一次，避免重复打开） */
+export function takeLaunchUri(): string {
+  const u = launchUri;
+  launchUri = '';
+  return u;
+}
+
 function collect(want: Want): void {
   try {
     const p = (want.parameters ?? {}) as Record<string, string>;
@@ -22,10 +45,18 @@ function collect(want: Want): void {
   } catch (e) {
     launchOptions = {};
   }
-}
-
-export function getLaunchOptions(): Record<string, string> {
-  return launchOptions;
+  try {
+    const u = typeof want.uri === 'string' ? want.uri : '';
+    if (u.length > 0) {
+      hilog.info(0x0000, 'OfficeWant', 'want.uri=' + u);
+      launchUri = u;
+      if (wantUriHandler !== null) {
+        wantUriHandler(u);
+      }
+    }
+  } catch (e) {
+    // uri 解析失败不影响启动
+  }
 }
 
 // —— 系统三键 ✕ 关闭守卫桥（2026-09-10，WPS 同款正路）——

@@ -6,7 +6,7 @@ import { fileIo as fs, picker, fileUri } from '@kit.CoreFileKit';
 import { x2tConvertSync } from '../common/x2t';
 import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
 import { Smoke } from '../common/smoke';
-import { getLaunchOptions, setWindowCloseHandler } from '../entryability/EntryAbility';
+import { getLaunchOptions, setWindowCloseHandler, setWantUriHandler, takeLaunchUri } from '../entryability/EntryAbility';
 import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, x2tXmlFont, u8ToStr } from '../common/bytes';
 import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } from '../common/recents';
 import { specOf, pickerSuffixes, editorAppOf, needsSaveAsPrompt, checkSaveOut } from '../common/formats';
@@ -97,6 +97,11 @@ struct EditorPage {
   private printFontsReady: boolean = false;
   /** M7 诊断直达配额：onPageEnd 时打开样本（welcome 完成后才触发，避开加载竞争） */
   private m7DirectQueued: boolean = false;
+  /** 「打开方式」待处理 uri（文件管理器交付；welcome 就绪后消费——与 m7 直达同理，
+   *  避开 welcome 加载竞争）。空串=无待办 */
+  private pendingWantUri: string = '';
+  /** welcome 实例是否已首次加载完成（消费 pendingWantUri 的门槛） */
+  private homeReady: boolean = false;
   /** 资源版本自愈 flush 一次守卫（onInstanceReady 周期内）——升级自愈只跑一次 */
   private cacheFlushed: boolean = false;
   // —— P1b（2026-09-08）：「保存目标」等文档身份字段已全部下沉 per-tab 的
@@ -426,10 +431,9 @@ struct EditorPage {
   }
 
   /**
-   * M7 打开真实文件：系统文件选择器（DocumentViewPicker）→ 选中 docx/xlsx/pptx
-   * → 字节交 convertAndOpen（写入沙箱 <name> + x2t + 编辑器导航）。
-   * 选择器授权 uri 仅临时可读 —— 字节读入内存即固化为沙箱文件，此后与源文件无关联
-   * （保存回写沙箱；"导出"经系统保存对话框写用户位置）。
+   * 打开本地文件（系统文件选择器）：可打开格式由 formats 表派生进 fileSuffixFilters
+   * ——选择器按后缀**硬过滤**（非白名单后缀不出现在列表里），故此处选不到不支持格式；
+   * 选中后交 handleLocalUri 统一处理（与「打开方式」同一条处理链）。
    */
   private async openLocalFile(): Promise<void> {
     try {
@@ -444,14 +448,26 @@ struct EditorPage {
         this.arkLog('OPEN_LOCAL_CANCEL');
         return;
       }
-      const uri = uris[0];
-      // 选择器授权 uri 仅临时可读：读入内存即固化（后续 convertAndOpen 写沙箱）
+      this.handleLocalUri(uris[0]);
+    } catch (e) {
+      this.arkLog('OPEN_LOCAL_ERR ' + String(e));
+    }
+  }
+
+  /**
+   * 本地文件 uri 统一处理（两个来源共用：系统选择器、「打开方式」want.uri）：
+   * 授权 uri 仅临时可读——读入内存即固化（openNewTabEntry 写沙箱，此后与源文件无
+   * 关联）；后缀不在 formats 表 → 显式提示（不得静默：从文件管理器交付的文件必须
+   * 得到明确回应——picker 硬过滤挡不住这条路，它是用户拿到不支持格式的唯一入口）。
+   */
+  private handleLocalUri(uri: string): void {
+    try {
       const ab = readFileBuf(uri);
       if (ab === null) {
         this.arkLog('OPEN_LOCAL_READERR uri=' + uri);
         return;
       }
-      // 文件名/扩展名：uri 尾段（Picker uri 通常带编码文件名；统计型 uri 兜底 docx）
+      // 文件名/扩展名：uri 尾段（Picker/文件管理器 uri 通常带编码文件名）
       const label = decodeURIComponent(uri.substring(uri.lastIndexOf('/') + 1));
       let ext = '';
       const dot = label.lastIndexOf('.');
@@ -465,11 +481,22 @@ struct EditorPage {
         return;
       }
       this.arkLog('OPEN_LOCAL_OK label=' + label + ' uri=' + uri + ' size=' + ab.byteLength);
-      // userUri=系统选择器真实位置——保存目标=用户原文件（覆盖式保存，2026-09-05）
+      // userUri=真实位置（选择器/文件管理器授权 uri）——保存目标=用户原文件（覆盖式保存）
       this.openNewTabEntry(ab, ext, label, true, false, uri);
     } catch (e) {
       this.arkLog('OPEN_LOCAL_ERR ' + String(e));
     }
+  }
+
+  /** 「打开方式」待办 uri 消费（welcome 就绪门槛；幂等——无待办则无操作） */
+  private consumeWantUri(): void {
+    if (this.pendingWantUri.length === 0) {
+      return;
+    }
+    const u = this.pendingWantUri;
+    this.pendingWantUri = '';
+    this.arkLog('WANT_URI_CONSUME ' + u);
+    this.handleLocalUri(u);
   }
 
   /** open:recent → 沙箱文件 x2t 转换 + 编辑器导航（转换器按输入扩展名自动选择，.bin 输出） */
@@ -1232,6 +1259,23 @@ struct EditorPage {
     setWindowCloseHandler((): void => {
       this.requestBackExit();
     });
+    // 「打开方式」（文件管理器/其他应用交付文档）：热启动经 handler 送达、冷启动取
+    // 启动 uri（take=只消费一次，避免重复打开）。两条路都先排队，welcome 就绪后经
+    // consumeWantUri 进打开链——与 m7 直达同门槛，避开 welcome 加载竞争。
+    setWantUriHandler((u: string): void => {
+      this.pendingWantUri = u;
+      if (this.homeReady) {
+        this.consumeWantUri();
+      }
+    });
+    const launchWantUri = takeLaunchUri();
+    if (launchWantUri.length > 0) {
+      this.pendingWantUri = launchWantUri;
+      // welcome 异常（加载失败/卡死）时兜底：超时直接消费，用户操作不被静默吞掉
+      setTimeout((): void => {
+        this.consumeWantUri();
+      }, 10000);
+    }
     // 自动验收开关（ability 启动参数 → Smoke；见 smoke.ets / EntryAbility）：无参数 = 产品态
     Smoke.fromParams(getLaunchOptions());
     this.m7Target = Smoke.target;
@@ -1387,17 +1431,22 @@ struct EditorPage {
   /** onPageEnd（每实例首次到达）：M7 直达（仅 home）+ 页面级错误采集（每实例幂等） */
   private onPageEndCB(ctx: DocTabCtx): void {
     const cu = ctx.controller.getUrl();
-    // M7 诊断直达：welcome（首页）完成加载后触发样本打开（避开加载竞争；仅 home）
-    if (ctx.kind === 'home' && this.m7DirectQueued && cu.indexOf('/main/index.html') < 0) {
-      this.m7DirectQueued = false;
-      try {
-        const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/smoke/samples/' + this.m7Target) as Uint8Array;
-        const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
-        const ext = this.m7Target.substring(this.m7Target.lastIndexOf('.') + 1).toLowerCase();
-        this.arkLog('M7_DIRECT_OPEN ' + this.m7Target + ' len=' + ab.byteLength);
-        this.openNewTabEntry(ab, ext, this.m7Target, true, false);
-      } catch (e) {
-        this.arkLog('M7_DIRECT_ERR ' + String(e));
+    // M7 诊断直达：welcome（首页）完成加载后触发样本打开（避开加载竞争；仅 home）。
+    // 「打开方式」待办 uri 同点消费（同一门槛：welcome 就绪）
+    if (ctx.kind === 'home' && cu.indexOf('/main/index.html') < 0) {
+      this.homeReady = true;
+      this.consumeWantUri();
+      if (this.m7DirectQueued) {
+        this.m7DirectQueued = false;
+        try {
+          const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/smoke/samples/' + this.m7Target) as Uint8Array;
+          const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+          const ext = this.m7Target.substring(this.m7Target.lastIndexOf('.') + 1).toLowerCase();
+          this.arkLog('M7_DIRECT_OPEN ' + this.m7Target + ' len=' + ab.byteLength);
+          this.openNewTabEntry(ab, ext, this.m7Target, true, false);
+        } catch (e) {
+          this.arkLog('M7_DIRECT_ERR ' + String(e));
+        }
       }
     }
     // 页面级错误采集（onerror/unhandledrejection 是最直接证据；JS 内幂等 __ooh_installed）
@@ -1866,7 +1915,8 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     let sent = 0;
     for (let i = 0; i < this.docTabs.length; i++) {
       const c = this.docTabs[i].ctx;
-      if (c.kind === 'doc' && c.state.ext === 'pptx' && c.attached) {
+      const cSpec = specOf(c.state.ext);
+      if (c.kind === 'doc' && cSpec !== null && cSpec.family === 'slide' && c.attached) {
         sent++;
         c.js('(function(){try{if(window.editor&&window.editor.EndDemonstration){'
           + 'window.editor.EndDemonstration();console.error("LSO_END_DEMO ok");}'

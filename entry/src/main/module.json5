@@ -18,7 +18,23 @@
         "startWindowIcon": "$media:app_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
-        "skills": [ { "entities": ["entity.system.home"], "actions": ["action.system.home"] } ]
+        "skills": [
+          { "entities": ["entity.system.home"], "actions": ["action.system.home"] },
+          // 「打开方式」候选注册：文件管理器/其他应用交付文档时发 viewData 隐式 want，
+          // 系统按 skills 匹配候选应用——不声明则本应用不出现在列表里（用户选不到）。
+          // entities 留空（不声明）：声明 entity 等于要求 want 必须带该 entity，而文件
+          // 管理器发的 want 不带——声明了反而匹配不上（对照 cn.wps.mobileoffice.hap
+          // 的可用声明：entities 空 + type */* + utd general.entity）。
+          // type */* + utd general.entity（UTD 根类型）= 接收一切文件；linkFeature
+          // FileOpen = 文件管理器「打开方式」的入选标记（对照 com.huawei.hmos.files
+          // 与 LinysBrowser_NEXT 的可用声明）。格式是否支持由 EditorPage 按 formats
+          // 表判定（不支持=显式提示，见 handleLocalUri）
+          {
+            "actions": ["ohos.want.action.viewData"],
+            "entities": [],
+            "uris": [ { "scheme": "file", "type": "*/*", "utd": "general.entity", "linkFeature": "FileOpen", "maxFileSupported": 1 } ]
+          }
+        ]
       }
     ],
     "requestPermissions": [
