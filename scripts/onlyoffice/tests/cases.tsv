@@ -41,3 +41,6 @@ open-csv|m7accept=1;m7file=sample.csv|120|PROF_SNAP|M7_DIRECT_OPEN sample.csv le
 save-rtf|m7accept=1;m7file=sample.rtf;m7auto=1|120|PROF_SNAP|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|rtf 原地保存（rtf 头校验通过）
 save-csv|m7accept=1;m7file=sample.csv;m7auto=1|120|PROF_SNAP|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|csv 原地保存（非空校验通过）
 save-doc|m7accept=1;m7file=sample.doc;m7auto=1|90|PROF_SNAP|M7_DIRECT_OPEN sample.doc len=,SAVE_BIN_X2T,FMT_DIALOG_ON|SAVE_BIN_BACK,SAVE_BIN_URI|doc 保存被格式提示拦下（禁止回写原 doc）
+#   autosave（userFlag=0，m7autosave）走的是「不弹提示」的静默分支——数据安全不变量：
+#   源 .doc 永不被 docx 字节覆盖（SAVE_BIN_URI 必须不出现）；沙箱工作副本仍更新（SAVE_BIN_BACK）
+save-doc-auto|m7accept=1;m7file=sample.doc;m7auto=1;m7autosave=1|90|SAVE_BIN_BACK|M7_DIRECT_OPEN sample.doc len=,M7AUTO_DIRECT_SAVE len=,SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_URI,FMT_DIALOG_ON,SAVE_BIN_EMPTY,SAVE_BIN_ERR|autosave 不得回写不能原地保存的格式（仅沙箱工作副本）

@@ -18,17 +18,18 @@ export function getLaunchOptions(): Record<string, string> {
 // 否则系统不会把本应用列入候选）。冷启动时 EditorPage 尚未创建（handler 未注册），
 // uri 先存下由首帧后 takeLaunchUri 取走；热启动（应用已运行）时 handler 已注册，
 // 直接送达页面——两条路都不丢事件。
-let launchUri = '';
+let launchUri: string | null = null;
 let wantUriHandler: ((uri: string) => void) | null = null;
 
 export function setWantUriHandler(h: ((uri: string) => void) | null): void {
   wantUriHandler = h;
 }
 
-/** 读取并清空启动 uri（take 语义：同一 uri 只消费一次，避免重复打开） */
-export function takeLaunchUri(): string {
+/** 取走启动 uri（take 语义：同一 uri 只消费一次；无待办返回 null）。
+ *  首帧前连点两次「打开方式」= 以后一次为准（打开用户最新点的那份文件） */
+export function takeLaunchUri(): string | null {
   const u = launchUri;
-  launchUri = '';
+  launchUri = null;
   return u;
 }
 
@@ -49,9 +50,10 @@ function collect(want: Want): void {
     const u = typeof want.uri === 'string' ? want.uri : '';
     if (u.length > 0) {
       hilog.info(0x0000, 'OfficeWant', 'want.uri=' + u);
-      launchUri = u;
       if (wantUriHandler !== null) {
-        wantUriHandler(u);
+        wantUriHandler(u); // 页面已就绪：直达（不写暂存位——否则会被二次 take 重复打开）
+      } else {
+        launchUri = u; // 首帧前：暂存，由 takeLaunchUri 取走
       }
     }
   } catch (e) {

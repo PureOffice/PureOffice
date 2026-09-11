@@ -8,7 +8,7 @@
 ## 1. 自动层用法
 
 ```bash
-# 全量（约 7 分钟，19 个 case；每个 case 命中终态标签即结束，不必等满超时）
+# 全量（约 7 分钟，20 个 case；每个 case 命中终态标签即结束，不必等满超时）
 OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/tests/regression.sh
 
 # 单 case / 列清单 / 采基线（加 case 前用）
@@ -31,7 +31,7 @@ OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --record --case <id>
 | 字体装填 | `font-cjk` / `font-symbol` | 每个在册字体必须有 `FONT_WARM_FILLED id=<文件>`（缺流=渲染期静默回退，见 §4） |
 | 字体映射 | 同上两 case | `FONT_PICK`（请求名 → 命中行）：仿宋/楷体不得被宋体截胡、Wingdings/Symbol 必落 OpenSymbol |
 | 插件/AI 链 | `plug-ai-on` / `plug-ai-gated` | 装配→run→AI tab→Chatbot 全链打点；门控态反向断言（默认不点） |
-| 格式扩展 | `open-doc` / `open-xls` / `open-ppt` / `open-rtf` / `open-txt` / `open-csv`、`save-rtf` / `save-csv` / `save-doc` | 新格式打开链（样本名 + x2t 转换 + 各族就绪标签）+ 原地保存 + 不可原地保存格式的提示拦截（`save-doc` 反向断言 `SAVE_BIN_BACK`/`SAVE_BIN_URI` 必须不出现） |
+| 格式扩展 | `open-doc` / `open-xls` / `open-ppt` / `open-rtf` / `open-txt` / `open-csv`、`save-rtf` / `save-csv` / `save-doc` / `save-doc-auto` | 新格式打开链（样本名 + x2t 转换 + 各族就绪标签）+ 原地保存 + 不可原地保存格式的提示拦截（`save-doc` 反向断言 `SAVE_BIN_BACK`/`SAVE_BIN_URI` 必须不出现；`save-doc-auto` = autosave 语义 userFlag=0，断言 `SAVE_BIN_URI` 不出现而沙箱工作副本照更新——「源文件永不被异格式字节覆盖」不变量，与 userSaved 解耦） |
 
 **盲区（自动层判不了）**：**像素级**渲染结果（字形画出来是粗是细、布局是否错位——判据只到
 "字体选中且字节在"这一层）、系统 UI 内的操作（picker/打印框/软键盘）、窗口与手势行为。→ §3。

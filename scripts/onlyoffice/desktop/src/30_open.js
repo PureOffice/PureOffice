@@ -34,8 +34,11 @@
               return _ap2.asc_nativeGetFileData();
             });
             if (_nb2 && _nb2.byteLength) {
-              var _rr = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_nb2)]));
-              console.error('M7AUTO_DIRECT_SAVE len=' + _nb2.byteLength + ' ret=' + _rr);
+              // m7autosave=1 → userFlag=0（autosave 语义；引擎 _autoSave 走的就是这条）：
+              // 用于回归「autosave 不得回写不能原地保存的格式源文件」这条数据安全不变量
+              var _uf = /[?&]m7autosave=1(&|$)/.test(window.location.search) ? 0 : 1;
+              var _rr = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_nb2), _uf]));
+              console.error('M7AUTO_DIRECT_SAVE len=' + _nb2.byteLength + ' user=' + _uf + ' ret=' + _rr);
             } else {
               console.error('M7AUTO_DIRECT_EMPTY');
             }

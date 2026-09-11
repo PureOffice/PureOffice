@@ -100,7 +100,7 @@ struct EditorPage {
   /** 「打开方式」待处理 uri（文件管理器交付；welcome 就绪后消费——与 m7 直达同理，
    *  避开 welcome 加载竞争）。空串=无待办 */
   private pendingWantUri: string = '';
-  /** welcome 实例是否已首次加载完成（消费 pendingWantUri 的门槛） */
+  /** welcome 实例是否已首次加载完成（消费待办 uri 的门槛） */
   private homeReady: boolean = false;
   /** 资源版本自愈 flush 一次守卫（onInstanceReady 周期内）——升级自愈只跑一次 */
   private cacheFlushed: boolean = false;
@@ -226,7 +226,10 @@ struct EditorPage {
         + (Smoke.key.length > 0 ? '&m7key=' + encodeURIComponent(Smoke.key) : '')
         // AI 插件自动点击门控（2026-09-11）：默认**不**拼 m7ai → prof-snap 不切 AI tab、
         // 不点 Chatbot（否则聊天窗弹出遮挡常规验收截图）；需验 AI 插件链时显式 m7ai=1
-        + (Smoke.ai ? '&m7ai=1' : '');
+        + (Smoke.ai ? '&m7ai=1' : '')
+        // autosave 语义保存（userFlag=0）验收门控：仅显式 m7autosave=1 时拼——
+        // 产品路径的保存恒为用户保存（见 30_open.js m7autosave 段）
+        + (Smoke.autosave ? '&m7autosave=1' : '');
     }
     return url;
   }
@@ -334,7 +337,10 @@ struct EditorPage {
     return 'true';
   }
 
-  /** 另存为命令体（per-tab：临时文件带 ctx 后缀——多文档隔离） */
+  /** 另存为命令体（per-tab：临时文件带 ctx 后缀——多文档隔离）。
+   *  目标后缀/格式对/产物校验与 saveBinRaw 同源查 formats 表：源扩展名直接当产物后缀
+   *  是死路——x2t 无 bin→doc/.xls/.ppt/.txt 通路，csv 的 TCD_XLST_BIN2CSV 又缺 switch
+   *  case（方向判定失败 → 命令返回 false，用户点「另存为」无任何反应）。 */
   private saveAsBin(ctx: DocTabCtx, param: string): string {
     try {
       const abS = b64ToBuf(param);
@@ -342,25 +348,44 @@ struct EditorPage {
         this.arkLog('SAVE_AS_B64_BAD len=' + param.length);
         return 'false';
       }
-      const extA = ctx.state.ext.length > 0 ? ctx.state.ext : 'docx';
+      const srcExt = ctx.state.ext.length > 0 ? ctx.state.ext : 'docx';
+      const specA = specOf(srcExt);
+      const extA = specA !== null ? specA.saveExt : 'docx';
+      const checkA = specA !== null ? specA.check : 'zip';
       const inA = ctx.tabPath('saveas-in.bin');
       const outA = ctx.tabPath('saveas-out.' + extA);
       if (!writeFileBuf(inA, abS)) {
         this.arkLog('SAVE_AS_WRITE_ERR ' + inA);
         return 'false';
       }
-      const rcA = x2tConvertSync(x2tXml(inA, outA));
+      // 同 saveBinRaw：先删产物槽，防 x2t 未写出新产物时读回上一次的旧文件
+      try {
+        fs.unlinkSync(outA);
+      } catch (e) {
+        // 不存在=首次另存为的正常情形
+      }
+      const rcA = x2tConvertSync((specA !== null && specA.saveFrom > 0)
+        ? x2tXml(inA, outA, specA.saveFrom, specA.saveTo)
+        : x2tXml(inA, outA));
       this.arkLog('SAVE_AS_X2T rc=0x' + (rcA >>> 0).toString(16) + ' tab=' + ctx.id);
       if (rcA !== 0) {
         this.arkLog('SAVE_AS_X2T_FAIL');
         return 'false';
       }
-      const docxBuf = readFileBuf(outA);
-      if (docxBuf === null) {
+      const outBufA = readFileBuf(outA);
+      if (outBufA === null) {
         this.arkLog('SAVE_AS_SUBMISS ' + outA);
         return 'false';
       }
-      this.doSaveAs(ctx, docxBuf);
+      const badA = checkSaveOut(new Uint8Array(outBufA), checkA);
+      this.arkLog('SAVE_AS_OUT size=' + outBufA.byteLength + ' check=' + checkA
+        + (badA === null ? ' ok' : ' BAD:' + badA));
+      if (badA !== null) {
+        return 'false';
+      }
+      // forceExt：系统保存框默认名与后缀按表定（.doc tab 另存 → sample.docx，
+      // 不传会拿源扩展名当目标名 → 名实不符）
+      this.doSaveAs(ctx, outBufA, extA);
       return 'true';
     } catch (e) {
       this.arkLog('SAVE_AS_ERR ' + String(e));
@@ -461,14 +486,20 @@ struct EditorPage {
    * 得到明确回应——picker 硬过滤挡不住这条路，它是用户拿到不支持格式的唯一入口）。
    */
   private handleLocalUri(uri: string): void {
+    let label = uri.substring(uri.lastIndexOf('/') + 1);
     try {
-      const ab = readFileBuf(uri);
-      if (ab === null) {
-        this.arkLog('OPEN_LOCAL_READERR uri=' + uri);
-        return;
+      // **先判后缀再读字节**：文件管理器「打开方式」候选含一切文件（skill 声明
+      // type:*/*），先 readFileBuf 会把几百 MB 的视频/压缩包整个读进内存才拦
+      try {
+        label = decodeURIComponent(label);
+      } catch (de) {
+        // uri 尾段编码异常：按原样判后缀（不值得因此整体失败）
       }
-      // 文件名/扩展名：uri 尾段（Picker/文件管理器 uri 通常带编码文件名）
-      const label = decodeURIComponent(uri.substring(uri.lastIndexOf('/') + 1));
+      // 文件名清洗：decodeURIComponent 会把 %2F 还原成 '/'，而 name 直接参与
+      // `hostFilesDir + '/' + name` 拼路径——带分隔符的名字可越出工作副本目录
+      //（沙箱内自伤：覆盖 recents.json/web_console.txt 等同级文件）。
+      // 与 printOutPath 同款清洗；此处就地改，后续 ctx.state.name 即已净化
+      label = label.replace(/[\\/]/g, '_');
       let ext = '';
       const dot = label.lastIndexOf('.');
       if (dot > -1) {
@@ -480,11 +511,20 @@ struct EditorPage {
         this.showFormatNotice('暂不支持该格式：' + label);
         return;
       }
+      const ab = readFileBuf(uri);
+      if (ab === null) {
+        // 读失败（授权过期/文件已删/目录 uri）：同样要出口——本入口无前置过滤，
+        // 静默会让用户以为「点了没反应」
+        this.arkLog('OPEN_LOCAL_READERR uri=' + uri);
+        this.showFormatNotice('无法打开：' + label);
+        return;
+      }
       this.arkLog('OPEN_LOCAL_OK label=' + label + ' uri=' + uri + ' size=' + ab.byteLength);
       // userUri=真实位置（选择器/文件管理器授权 uri）——保存目标=用户原文件（覆盖式保存）
       this.openNewTabEntry(ab, ext, label, true, false, uri);
     } catch (e) {
       this.arkLog('OPEN_LOCAL_ERR ' + String(e));
+      this.showFormatNotice('无法打开：' + label);
     }
   }
 
@@ -497,6 +537,15 @@ struct EditorPage {
     this.pendingWantUri = '';
     this.arkLog('WANT_URI_CONSUME ' + u);
     this.handleLocalUri(u);
+  }
+
+  /** 待办 uri 兜底：welcome 异常（加载失败/卡死）时超时直接消费——用户点了
+   *  「打开方式」不能永远无反应（正常轮次 onPageEnd 先到，本定时器空转一次；
+   *  重复挂载无害：consumeWantUri 幂等） */
+  private armWantUriFallback(): void {
+    setTimeout((): void => {
+      this.consumeWantUri();
+    }, 10000);
   }
 
   /** open:recent → 沙箱文件 x2t 转换 + 编辑器导航（转换器按输入扩展名自动选择，.bin 输出） */
@@ -934,6 +983,13 @@ struct EditorPage {
         this.arkLog('SAVE_BIN_WRITE_ERR ' + inP);
         return 'false';
       }
+      // 先删产物槽：x2t 返 0 却没写出新产物时（罕见），下方读回的是**上一次保存**
+      // 的旧文件——会通过校验并被当成新内容写盘（静默落旧数据）
+      try {
+        fs.unlinkSync(outP);
+      } catch (e) {
+        // 不存在=首次保存的正常情形
+      }
       // x2t doct_bin2docx（checker 以文件头 DOCY 内容识别，.bin 后缀无碍；POC 保存链实证）。
       // saveFrom ≠ 0 的格式要显式给出格式对（方向表与转换器 switch 不一致，见 formats.ets）
       const rc = x2tConvertSync((srcSpec !== null && srcSpec.saveFrom > 0)
@@ -992,13 +1048,20 @@ struct EditorPage {
         return 'true';
       }
       if (ctx.state.name.length > 0) {
-        if (ctx.state.saveTarget === 'uri' && ctx.state.savePath.length > 0) {
+        // 「不能原地保存」的格式永不回写源文件——**与 userSaved 无关**：autosave
+        // 走同一约束，否则 .doc 会被 docx 字节原地覆盖（名实不符）。用户保存路径
+        // 已在上方提示分支转另存为；autosave 此处仅同步沙箱工作副本（静默）
+        let uriFailed = false;
+        if (!needsSaveAsPrompt(ctx.state.ext)
+          && ctx.state.saveTarget === 'uri' && ctx.state.savePath.length > 0) {
           // 已另存为：覆写真实位置（用户数据=savePath uri）
           const okUri = writeFileBuf(ctx.state.savePath, outBuf);
           this.arkLog('SAVE_BIN_URI ok=' + okUri + ' uri=' + ctx.state.savePath + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
           if (!okUri) {
+            // 原位置不可写（授权过期/只读交付 uri）：**不中断**——继续写沙箱工作副本
+            // 保住本次编辑，末尾显式告知另存出口（静默失败=用户以为已保存）
             this.arkLog('SAVE_BIN_URI_ERR ' + ctx.state.savePath);
-            return 'false';
+            uriFailed = true;
           }
         }
         // 引擎工作副本同步（打开/另存为后重开链以最新内容起步；不参与 recents/用户
@@ -1009,6 +1072,10 @@ struct EditorPage {
           return 'false';
         }
         this.arkLog('SAVE_BIN_BACK src=' + srcP + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
+        if (uriFailed) {
+          this.showFormatNotice('原文件不可写（授权已过期或只读），内容已留在应用内；'
+            + '请用「文件 → 另存为」保存到其他位置');
+        }
         // 保存成功 = 文件身份成立（官方桌面语义：保存后的文件进「最近使用」；
         // 新建在打开链已禁 recents（openNewTabEntry addRecent=false）——用户保存即补录；
         // appendRecent 同名去旧置顶，已打开文件的保存同样刷新置顶。
@@ -1266,15 +1333,15 @@ struct EditorPage {
       this.pendingWantUri = u;
       if (this.homeReady) {
         this.consumeWantUri();
+      } else {
+        // 热启动与冷启动对称兜底：welcome 卡死时同样不能静默吞掉用户操作
+        this.armWantUriFallback();
       }
     });
     const launchWantUri = takeLaunchUri();
-    if (launchWantUri.length > 0) {
+    if (launchWantUri !== null && launchWantUri.length > 0) {
       this.pendingWantUri = launchWantUri;
-      // welcome 异常（加载失败/卡死）时兜底：超时直接消费，用户操作不被静默吞掉
-      setTimeout((): void => {
-        this.consumeWantUri();
-      }, 10000);
+      this.armWantUriFallback();
     }
     // 自动验收开关（ability 启动参数 → Smoke；见 smoke.ets / EntryAbility）：无参数 = 产品态
     Smoke.fromParams(getLaunchOptions());
@@ -1484,8 +1551,10 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
    * then：窗口级退出队列继续回调（undefined=tab 级关闭）；proceed=false=用户取消
    */
   private requestCloseDoc(ctx: DocTabCtx, then?: (proceed: boolean) => void): void {
-    if (this.guardBusy || this.closeGuardDefer !== null) {
-      // 查询/弹框/保存在途：不叠新询问（弹框模态应在 UI 层挡住；防御路径=日志留证）
+    if (this.guardBusy || this.closeGuardDefer !== null || this.fmtDialogOn) {
+      // 查询/弹框/保存在途（含格式提示框）：不叠新询问（弹框模态应在 UI 层挡住；
+      // 防御路径=日志留证）。fmtDialogOn 必须挡：提示框在途放行关闭会留「幽灵另存」
+      // ——fmtDialogCtx 指向已移除实例，用户点「继续」照样弹系统框并落盘
       this.arkLog('CLOSE_GUARD_BUSY tab=' + ctx.id);
       return;
     }
@@ -1697,8 +1766,8 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
    * true 只挡不叠（弹框层自己消费返回键）。p0On 探针态由 onBackPress 先行放行。
    */
   private requestBackExit(): boolean {
-    if (this.closeGuardDefer !== null || this.guardBusy) {
-      return true; // 有在途守卫流程：弹框 layer 自己消费，本层只挡默认退出
+    if (this.closeGuardDefer !== null || this.guardBusy || this.fmtDialogOn) {
+      return true; // 有在途守卫流程/格式提示框：弹框 layer 自己消费，本层只挡默认退出
     }
     const docCtxs: DocTabCtx[] = [];
     for (let i = 0; i < this.docTabs.length; i++) {
@@ -2037,18 +2106,30 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
             .fontSize(14).fontColor('#5A6572').textAlign(TextAlign.Center)
             .margin({ top: 12 })
           Row({ space: 12 }) {
-            Button('取消')
-              .layoutWeight(1)
-              .backgroundColor('#F7F7F7').fontColor('#2B3B4D')
-              .onClick(() => {
-                this.fmtDialogAction('cancel');
-              })
-            Button('继续')
-              .layoutWeight(1)
-              .backgroundColor('#0064E7').fontColor(Color.White)
-              .onClick(() => {
-                this.fmtDialogAction('ok');
-              })
+            if (this.fmtDialogCtx === null) {
+              // 告知层（无保存上下文）：单按钮——此语境下「继续」无任何可执行的后续，
+              // 双按钮只会让人以为点错了还能挽救（设计文档 §7 单按钮语义）
+              Button('知道了')
+                .layoutWeight(1)
+                .backgroundColor('#0064E7').fontColor(Color.White)
+                .onClick(() => {
+                  this.fmtDialogAction('ok');
+                })
+            } else {
+              // 保存确认层：有后续动作（转另存），保留取消/继续二选一
+              Button('取消')
+                .layoutWeight(1)
+                .backgroundColor('#F7F7F7').fontColor('#2B3B4D')
+                .onClick(() => {
+                  this.fmtDialogAction('cancel');
+                })
+              Button('继续')
+                .layoutWeight(1)
+                .backgroundColor('#0064E7').fontColor(Color.White)
+                .onClick(() => {
+                  this.fmtDialogAction('ok');
+                })
+            }
           }
           .width('100%')
           .margin({ top: 20 })
@@ -2080,8 +2161,23 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     this.fmtDialogOut = null;
     this.fmtDialogText = '';
     if (ctx === null) {
-      // 告知层（不支持格式）无保存上下文：关闭即可，无落盘动作
+      // 告知层（不支持格式 / 保存链异常）无保存上下文：关闭即可，无落盘动作。
+      // 但 defer 在途时必须消费——本层会出现在守卫「保存」链中途（如源文件不可写），
+      // 不消费则 defer 永久残留 → requestBackExit 恒拦，tab 关不掉、返回键与系统 ✕
+      // 全无响应。取 ok=false：这类告知都意味着内容没落到用户文件，关 tab 会连带
+      // 掐断提示里指的那条出口（另存为）。
       this.arkLog('FMT_DIALOG_CTX_NULL act=' + act);
+      const d = this.closeGuardDefer;
+      if (d !== null) {
+        this.clearCloseGuard(d.ctx, false);
+      }
+      return;
+    }
+    // tab 已被移除（守卫竞态/兜底）：绝不为已关闭的文档落盘——否则用户会在
+    // 「已经关掉」的文档之外凭空得到一份另存文件（且标题刷新找不到 ctx）
+    if (this.findCtx(ctx.id) === null) {
+      this.arkLog('FMT_DIALOG_CTX_GONE tab=' + ctx.id + ' act=' + act);
+      this.clearCloseGuard(ctx, false);
       return;
     }
     if (act !== 'ok' || out === null) {

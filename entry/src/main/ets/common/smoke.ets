@@ -26,6 +26,10 @@ export class Smoke {
   /** AI 插件自动点击门控（m7ai=1）：prof-snap 的点击类动作（切 AI tab / 点 Chatbot）
    *  会弹出聊天窗遮挡常规验收截图，故默认关；需验 AI 插件链时显式开启。 */
   static ai: boolean = false;
+  /** 保存链验收语义门控（m7autosave=1）：save:bin 以 userFlag=0（autosave）发送——用于
+   *  回归「autosave 不得回写不能原地保存的格式源文件」这条数据安全不变量（见 30_open.js
+   *  m7autosave 段；产品路径 userFlag 恒 1） */
+  static autosave: boolean = false;
 
   protected static readonly DEFAULT_SAMPLE = 'sample.docx';
   /** 白名单后缀（m7file 只允许验收样本；dev-only 参数，防路径越界）——
@@ -42,6 +46,7 @@ export class Smoke {
     Smoke.target = '';
     Smoke.key = '';
     Smoke.ai = false;
+    Smoke.autosave = false;
     if (params['m7args'] !== undefined) {
       // 复合载体（; 与 = 拆解；值无空格——aa start 参数值空格会断键）
       const merged: Record<string, string> = {};
@@ -58,6 +63,7 @@ export class Smoke {
     }
     Smoke.key = String(params['m7key'] ?? '');
     Smoke.ai = String(params['m7ai'] ?? '') === '1';
+    Smoke.autosave = String(params['m7autosave'] ?? '') === '1';
     const f = String(params['m7file'] ?? Smoke.DEFAULT_SAMPLE);
     // 仅接受 "名.白名单后缀" 文件名（rawfile 路径 <onlyoffice>/<f> 与沙箱 <filesDir>/<f> 拼接处）
     const dot = f.lastIndexOf('.');

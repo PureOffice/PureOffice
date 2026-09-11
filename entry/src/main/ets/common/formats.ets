@@ -49,7 +49,10 @@ export interface FormatSpec {
    *  否则转换方向判定失败（CSV 被特判成 NEED_PARAMS，真机实测 0x80041359）；
    *  而 .csv 扩展名不会自动填分隔符，无 BOM 的 UTF-8 也测不出编码
    *  （getEncodingByContent 只认 BOM，无 BOM 返回 -1）。
-   *  46 = codePage 65001(UTF-8)，4 = TCSVD_COMMA。 */
+   *  46 = codePage 65001(UTF-8)，4 = TCSVD_COMMA。
+   *  固定值取舍：无 BOM 的 GBK CSV（Excel 中文导出常见）会按 UTF-8 解出乱码，
+   *  分号/制表符分隔的会整行挤在一列——x2t 侧无从自动判定（同 getEncodingByContent
+   *  只认 BOM），壳层嗅探留待后续；此处取中文环境最常见形态（UTF-8 + 逗号）。 */
   openExtra: string;
   /** 保存链显式格式对（[源, 目标]，0 = 不需要——x2t 按目标扩展名走方向表）。
    *  保存链的源是内部二进制（doct_bin/xlst_bin/pptt_bin），不是原文件格式。
