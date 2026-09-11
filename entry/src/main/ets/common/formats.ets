@@ -51,20 +51,30 @@ export interface FormatSpec {
    *  （getEncodingByContent 只认 BOM，无 BOM 返回 -1）。
    *  46 = codePage 65001(UTF-8)，4 = TCSVD_COMMA。 */
   openExtra: string;
+  /** 保存链显式格式对（[源, 目标]，0 = 不需要——x2t 按目标扩展名走方向表）。
+   *  保存链的源是内部二进制（doct_bin/xlst_bin/pptt_bin），不是原文件格式。
+   *  csv 需要：方向表把「xlst_bin→.csv」判为 TCD_XLST_BIN2CSV，而
+   *  fromInputParams 的 switch 缺这个 case（落 default 返 CONVERT_PARAMS，
+   *  真机实测 0x80041358）；显式给「CANVAS_SPREADSHEET → CSV」后走
+   *  fromXlstBin 的 xlst_bin2csv 分支（该分支存在、无需额外参数）。
+   *  与 openBinTo 同理必须成对下发。 */
+  saveFrom: number;
+  saveTo: number;
 }
 
 /** 可打开格式表（新增格式 = 此处加一行 + 备样本 + 回归 case） */
 const FORMATS: FormatSpec[] = [
-  { ext: 'docx', family: 'word', fileType: 'docx', recentType: 0x41, saveExt: 'docx', check: 'zip', openBinTo: 0, openExtra: '' },
-  { ext: 'doc', family: 'word', fileType: 'docx', recentType: 0x42, saveExt: 'docx', check: 'zip', openBinTo: 0x2001, openExtra: '' },
-  { ext: 'rtf', family: 'word', fileType: 'docx', recentType: 0x44, saveExt: 'rtf', check: 'rtf', openBinTo: 0, openExtra: '' },
-  { ext: 'txt', family: 'word', fileType: 'docx', recentType: 0x45, saveExt: 'docx', check: 'zip', openBinTo: 0, openExtra: '' },
-  { ext: 'xlsx', family: 'cell', fileType: 'xlsx', recentType: 0x101, saveExt: 'xlsx', check: 'zip', openBinTo: 0, openExtra: '' },
-  { ext: 'xls', family: 'cell', fileType: 'xlsx', recentType: 0x102, saveExt: 'xlsx', check: 'zip', openBinTo: 0, openExtra: '' },
+  { ext: 'docx', family: 'word', fileType: 'docx', recentType: 0x41, saveExt: 'docx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
+  { ext: 'doc', family: 'word', fileType: 'docx', recentType: 0x42, saveExt: 'docx', check: 'zip', openBinTo: 0x2001, saveFrom: 0, saveTo: 0, openExtra: '' },
+  { ext: 'rtf', family: 'word', fileType: 'docx', recentType: 0x44, saveExt: 'rtf', check: 'rtf', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
+  { ext: 'txt', family: 'word', fileType: 'docx', recentType: 0x45, saveExt: 'docx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
+  { ext: 'xlsx', family: 'cell', fileType: 'xlsx', recentType: 0x101, saveExt: 'xlsx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
+  { ext: 'xls', family: 'cell', fileType: 'xlsx', recentType: 0x102, saveExt: 'xlsx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
   { ext: 'csv', family: 'cell', fileType: 'xlsx', recentType: 0x104, saveExt: 'csv', check: 'size', openBinTo: 0x2002,
+    saveFrom: 0x2002, saveTo: 0x104,
     openExtra: '<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding><m_nCsvDelimiter>4</m_nCsvDelimiter>' },
-  { ext: 'pptx', family: 'slide', fileType: 'pptx', recentType: 0x81, saveExt: 'pptx', check: 'zip', openBinTo: 0, openExtra: '' },
-  { ext: 'ppt', family: 'slide', fileType: 'pptx', recentType: 0x82, saveExt: 'pptx', check: 'zip', openBinTo: 0, openExtra: '' }
+  { ext: 'pptx', family: 'slide', fileType: 'pptx', recentType: 0x81, saveExt: 'pptx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
+  { ext: 'ppt', family: 'slide', fileType: 'pptx', recentType: 0x82, saveExt: 'pptx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' }
 ];
 
 /** 扩展名（可带点/大小写）→ 格式规格；未支持返回 null（唯一判定入口） */

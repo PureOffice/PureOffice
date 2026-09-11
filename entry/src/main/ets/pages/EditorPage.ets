@@ -516,15 +516,26 @@ struct EditorPage {
    * → 用户选位置/文件名 → 字节落盘（uri 写）→ 身份演进（'none'→'uri'）→ recents 补录
    * → tab 标题刷新（docTitles 平行数组——@State 元素级可观察）。取消 → 不动。
    */
-  private async doSaveAs(ctx: DocTabCtx, outBuf: ArrayBuffer): Promise<void> {
+  private async doSaveAs(ctx: DocTabCtx, outBuf: ArrayBuffer, forceExt?: string): Promise<void> {
     try {
       const aCtx = getContext(this) as common.UIAbilityContext;
       const dvp = new picker.DocumentViewPicker(aCtx);
       const opts = new picker.DocumentSaveOptions();
-      // 默认名：已保存文档=当前名；新建=语言包中文未命名（defaultDocName——
-      // 2026-09-08 补：doSaveAs 兜底名原写死 Unnamed.，与 openNewFile 语言包驱动对齐）
-      const defName = ctx.state.name.length > 0 ? ctx.state.name : this.defaultDocName(ctx.state.ext);
+      // 目标后缀：forceExt 优先（不能原地保存的格式：.doc → .docx），否则同格式
+      const targetExt = (forceExt !== undefined && forceExt.length > 0) ? forceExt : ctx.state.ext;
+      // 默认名：已保存文档=当前名**换目标后缀**（.doc → .docx）——原名直接带上会把
+      // docx 字节写成 .doc 名；新建=语言包中文未命名（defaultDocName）
+      let defName = '';
+      if (ctx.state.name.length > 0) {
+        const dn = ctx.state.name.lastIndexOf('.');
+        defName = (dn > 0 ? ctx.state.name.substring(0, dn) : ctx.state.name) + '.' + targetExt;
+      } else {
+        defName = this.defaultDocName(targetExt);
+      }
       opts.newFileNames = [defName];
+      // 后缀限定（DocumentSaveOptions.fileSuffixChoices，**不是** SelectOptions 的
+      // fileSuffixFilters——字段名不同）：防用户手改扩展名产生「名实不符」文件
+      opts.fileSuffixChoices = ['.' + targetExt];
       const uris = await dvp.save(opts);
       if (!uris || uris.length === 0) {
         this.arkLog('SAVE_AS_CANCEL tab=' + ctx.id);
@@ -553,7 +564,7 @@ struct EditorPage {
         const dot = base.lastIndexOf('.');
         if (dot > 0) {
           const e2 = base.substring(dot + 1).toLowerCase();
-          if (e2 === 'docx' || e2 === 'xlsx' || e2 === 'pptx') {
+          if (specOf(e2) !== null) {
             ctx.state.ext = e2;
           }
         }
@@ -571,8 +582,8 @@ struct EditorPage {
         }
       }
       if (ctx.state.name.length > 0) {
-        const typeNum = ctx.state.ext === 'xlsx' ? RECENT_TYPE_XLSX
-          : ctx.state.ext === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
+        const specA = specOf(ctx.state.ext);
+        const typeNum = specA !== null ? specA.recentType : RECENT_TYPE_DOCX;
         // path=真实保存位置（uri）；重开走 readFileBuf(uri)（picker 授权持久）
         if (appendRecent(this.hostFilesDir, ctx.state.name, uri, typeNum)) {
           this.arkLog('RECENTS_APPEND_SAVEAS name=' + ctx.state.name + ' path=' + uri);
@@ -884,32 +895,37 @@ struct EditorPage {
         return 'false';
       }
       const ab = b64ToBuf(b64);
-      // M7 三格式：目标后缀决定 x2t 转换器（doct_bin2docx / xlst_bin2xlsx / pptt_bin2pptx）
-      const extU = ctx.state.ext.length > 0 ? ctx.state.ext : 'docx';
+      // 目标后缀取自 formats 表：不能原地保存的格式（doc/xls/ppt/txt）saveExt 指向
+      // 家族代表名（.doc → .docx）——x2t 无 bin→doc 通路（见 formats.ets 表头注释）
+      const srcExt = ctx.state.ext.length > 0 ? ctx.state.ext : 'docx';
+      const srcSpec = specOf(srcExt);
+      const extU = srcSpec !== null ? srcSpec.saveExt : 'docx';
+      const outCheck = srcSpec !== null ? srcSpec.check : 'zip';
       const inP = ctx.tabPath('in.bin');
       const outP = ctx.tabPath('save.' + extU);
       if (!writeFileBuf(inP, ab)) {
         this.arkLog('SAVE_BIN_WRITE_ERR ' + inP);
         return 'false';
       }
-      // x2t doct_bin2docx（checker 以文件头 DOCY 内容识别，.bin 后缀无碍；POC 保存链实证）
-      const rc = x2tConvertSync(x2tXml(inP, outP));
+      // x2t doct_bin2docx（checker 以文件头 DOCY 内容识别，.bin 后缀无碍；POC 保存链实证）。
+      // saveFrom ≠ 0 的格式要显式给出格式对（方向表与转换器 switch 不一致，见 formats.ets）
+      const rc = x2tConvertSync((srcSpec !== null && srcSpec.saveFrom > 0)
+        ? x2tXml(inP, outP, srcSpec.saveFrom, srcSpec.saveTo)
+        : x2tXml(inP, outP));
       this.arkLog('SAVE_BIN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
       if (rc !== 0) {
         return 'false';
       }
-      // zip 头校验 0x50 0x4b（校验比 exist 更严：x2t 产物必须是合法 ZIP）
+      // 产物校验按表分派（zip/rtf/size）——原硬编码 ZIP 头会把 rtf/csv 误判为坏产物
       const outBuf = readFileBuf(outP);
       if (outBuf === null) {
         this.arkLog('SAVE_BIN_SUBMISS ' + outP);
         return 'false';
       }
-      const mk = new Uint8Array(outBuf.slice(0, 2));
-      const zipOk = mk[0] === 0x50 && mk[1] === 0x4b;
-      this.arkLog('SAVE_BIN_OUT size=' + outBuf.byteLength + ' mk=0x'
-        + mk[0].toString(16).padStart(2, '0') + mk[1].toString(16).padStart(2, '0')
-        + (zipOk ? ' zipok' : ' ZIPBAD'));
-      if (!zipOk) {
+      const bad = checkSaveOut(new Uint8Array(outBuf), outCheck);
+      this.arkLog('SAVE_BIN_OUT size=' + outBuf.byteLength + ' check=' + outCheck
+        + (bad === null ? ' ok' : ' BAD:' + bad));
+      if (bad !== null) {
         return 'false';
       }
       // 新文件首次保存 = 另存为（官方桌面语义：无文件身份 → 弹系统保存对话框选位置；
@@ -952,8 +968,8 @@ struct EditorPage {
         // appendRecent 同名去旧置顶，已打开文件的保存同样刷新置顶。
         // 仅用户保存补录（自动保存/autosave 不打扰列表——2026-09-05 用户实测后修正）。
         if (userSaved) {
-          const saveType = ctx.state.ext === 'xlsx' ? RECENT_TYPE_XLSX
-            : ctx.state.ext === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
+          const specR = specOf(ctx.state.ext);
+          const saveType = specR !== null ? specR.recentType : RECENT_TYPE_DOCX;
           // recents.path：真实位置优先（uri），否则沙箱（打开链/兼容）
           const recentPath = ctx.state.saveTarget === 'uri' ? ctx.state.savePath : srcP;
           if (appendRecent(this.hostFilesDir, ctx.state.name, recentPath, saveType)) {
@@ -1059,7 +1075,8 @@ struct EditorPage {
         }
         // recents 真数据（仅打开 addRecent=true 写入；新建不写）——path=保存目标真实路径
         if (addRecent) {
-          const typeNum = extU === 'xlsx' ? RECENT_TYPE_XLSX : extU === 'pptx' ? RECENT_TYPE_PPTX : RECENT_TYPE_DOCX;
+          const specN = specOf(extU);
+          const typeNum = specN !== null ? specN.recentType : RECENT_TYPE_DOCX;
           if (appendRecent(this.hostFilesDir, name, ctx.state.savePath, typeNum)) {
             this.arkLog('RECENTS_APPEND name=' + name + ' type=0x' + typeNum.toString(16));
           } else {
