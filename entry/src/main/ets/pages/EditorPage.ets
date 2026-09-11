@@ -265,7 +265,7 @@ struct EditorPage {
       // 新建首次保存（saveTarget='none'）saveBinRaw 内已另起 doSaveAs（异步系统框）
       // 并置 awaitingSaveAs——本处不得消费（框取消=不关；成功由 doSaveAs 尾消费）。
       if (this.closeGuardDefer !== null && this.closeGuardDefer.ctx === ctx
-        && !this.closeGuardDefer.awaitingSaveAs) {
+        && !this.closeGuardDefer.awaitingSaveAs && !this.fmtDialogOn) {
         this.clearCloseGuard(ctx, r === 'true');
       }
       return r;
@@ -933,6 +933,25 @@ struct EditorPage {
       // doSaveAs（async：dvp.save → uri 落盘 + 沙箱同步 + recents + 复位 isNewUnsaved）。
       // 对话框异步期间先回 'true'（保存受理）；取消=未保存（isNewUnsaved 仍 true，
       // 下次保存再弹）。
+      // 不能原地保存的格式（doc/xls/ppt/txt）：产物已生成但不落盘——先弹提示，
+      // 确认后走 doSaveAs（强制 saveExt）。禁止回写：savePath 指向源 .doc，覆盖
+      // 会把 docx 字节写进 .doc 文件（名实不符）。新建（saveTarget='none'）本就走
+      // 另存为，不需此提示。
+      if (userSaved && ctx.state.saveTarget !== 'none' && needsSaveAsPrompt(ctx.state.ext)) {
+        this.fmtDialogCtx = ctx;
+        this.fmtDialogOut = outBuf;
+        this.fmtDialogText = '「.' + ctx.state.ext + '」格式不支持保存，将以「.'
+          + extU + '」格式另存。';
+        this.fmtDialogOn = true;
+        // 守卫「保存」在途：复用 awaitingSaveAs 语义（本段不消费 defer，成功由
+        // doSaveAs 尾消费 / 取消走 fmtDialogAction 的 clearCloseGuard）
+        if (this.closeGuardDefer !== null && this.closeGuardDefer.ctx === ctx) {
+          this.closeGuardDefer.awaitingSaveAs = true;
+        }
+        this.arkLog('FMT_DIALOG_ON ext=' + ctx.state.ext + ' to=' + extU + ' tab=' + ctx.id);
+        // 对话框异步期间先回 'true'（保存受理）——与 doSaveAs 同一模式
+        return 'true';
+      }
       // v2 保存决策（单一事实源 saveTarget，per-tab）：
       if (userSaved && ctx.state.saveTarget === 'none') {
         // 新建无身份 + 用户保存 → 弹另存为（async：dvp.save → uri 落盘 → 'none'→'uri'）
@@ -1562,7 +1581,7 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     // 超时兜底：页面 save:bin 链断/引擎卡（awaitingSaveAs 在途=系统另存为框，不在此列）
     setTimeout(() => {
       if (this.closeGuardDefer !== null && this.closeGuardDefer.ctx === ctx
-        && !this.closeGuardDefer.awaitingSaveAs) {
+        && !this.closeGuardDefer.awaitingSaveAs && !this.fmtDialogOn) {
         this.arkLog('CLOSE_GUARD_SAVE_TIMEOUT tab=' + ctx.id);
         this.clearCloseGuard(ctx, false);
       }
@@ -2005,12 +2024,27 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
       return;
     }
     const ctx = this.fmtDialogCtx;
+    const out = this.fmtDialogOut;
     this.fmtDialogOn = false;
     this.fmtDialogCtx = null;
     this.fmtDialogOut = null;
     this.fmtDialogText = '';
-    this.arkLog('FMT_DIALOG_ACTION act=' + act
-      + (ctx !== null ? ' ext=' + ctx.state.ext + ' tab=' + ctx.id : ''));
+    if (ctx === null) {
+      // 告知层（不支持格式）无保存上下文：关闭即可，无落盘动作
+      this.arkLog('FMT_DIALOG_CTX_NULL act=' + act);
+      return;
+    }
+    if (act !== 'ok' || out === null) {
+      // 取消/蒙层：数据未落盘（同另存为取消语义——守卫在途则不关）
+      this.arkLog('FMT_DIALOG_CANCEL ext=' + ctx.state.ext + ' tab=' + ctx.id);
+      ctx.state.saveAborted = true;
+      this.clearCloseGuard(ctx, false);
+      return;
+    }
+    const spec = specOf(ctx.state.ext);
+    const targetExt = spec !== null ? spec.saveExt : 'docx';
+    this.arkLog('FMT_DIALOG_CONFIRM ext=' + ctx.state.ext + ' to=' + targetExt + ' tab=' + ctx.id);
+    this.doSaveAs(ctx, out, targetExt);
   }
 
   /** 不支持格式的告知层（复用格式覆盖层 UI；文案由调用方给定） */
