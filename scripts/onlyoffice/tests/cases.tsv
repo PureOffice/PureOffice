@@ -1,0 +1,30 @@
+# ONLYOFFICE 鸿蒙回归 case 清单（regression.sh 的输入；改这里 = 扩回归面）
+#
+# 字段（竖线 | 分隔，共 7 列；说明列内禁用竖线）：
+#   id | m7args | 超时秒 | 结束判据 | 必须出现 | 禁止出现 | 说明
+#
+# 标签语义（判据取自设备日志 web_console.txt，行格式 T<ts> [tabId] [web] :line LABEL payload）：
+#   结束判据：出现即认为该 case 跑完（省时间，不必等满超时）
+#   必须出现/禁止出现：逗号分隔的**子串**（grep -F 固定匹配，可带参数如 "id=OpenSymbol.ttf"）
+#   空 = 该项不判
+#
+# 加 case 的规矩：先在设备上跑一次真实流程（regression.sh --record），从 out/<id>.log
+# 里核对标签再填进来——不要凭想象写标签名（写错的判据 = 假 FAIL 或假 PASS）。
+#
+# —— 打开链（三格式）——
+open-word|m7accept=1;m7file=sample.docx|60|PROF_SNAP|LSO_OPEN_DOCUMENT_OK,FONT_WARM_FILLED|FONT_WARM_PF_GIVEUP,LSO_LOAD_ERR|docx 打开+渲染+字体装填
+open-cell|m7accept=1;m7file=sample.xlsx|180|PROF_SNAP|LSO_DIOPEN_OK,FONT_WARM_FILLED|FONT_WARM_PF_GIVEUP|cell 打开（DI 链，GUI 懒建较慢：超时给足）
+open-slide|m7accept=1;m7file=sample.pptx|180|PROF_SNAP|LSO_KICK_SERVERID,FONT_WARM_FILLED|FONT_WARM_PF_GIVEUP|slide 打开（DI 链 + 双闸门踢闸）
+# —— 保存链（m7auto：模型就绪→序列化→x2t→回写源文件）——
+save-word|m7accept=1;m7file=sample.docx;m7auto=1|120|SAVE_BIN_BACK|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|docx 自动编辑+保存+回写
+save-cell|m7accept=1;m7file=sample.xlsx;m7auto=1|240|SAVE_BIN_BACK|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|xlsx 自动编辑+保存+回写
+save-slide|m7accept=1;m7file=sample.pptx;m7auto=1|240|SAVE_BIN_BACK|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|pptx 自动编辑+保存+回写
+# —— 字体链（两道互补：装填=字节在不在，映射=选没选对行）——
+#   装填式：IDS 清单内任一字体无流 = 渲染期静默回退（仿宋/楷体故障形态），逐个断言在册字体
+#   映射式：FONT_PICK = 官方 GetFontFileWeb 回调（09_fontpick.js 探针，仅 m7auto 态装钩子），
+#     抓"请求被错误行截胡"（Symbol/Wingdings 曾命中同名行 → 码位映射不触发 → 符号变方块）
+font-cjk|m7accept=1;m7file=fonts-test.docx|60|PROF_SNAP|FONT_WARM_FILLED id=HarmonyOS_Sans_SC.ttf,FONT_WARM_FILLED id=NotoSerifCJK-SC.ttf,FONT_WARM_FILLED id=FandolFang.ttf,FONT_WARM_FILLED id=FandolKai.ttf,FontPicker: 仿宋 => 仿宋,FontPicker: 楷体 => 楷体,FontPicker: 宋体 => SimSun,FontPicker: 黑体 => SimHei,FontBySymbol: 26126 => 宋体|FONT_WARM_NOFILE,FONT_WARM_PF_GIVEUP,FontPicker: 仿宋 => SimSun,FontPicker: 楷体 => SimSun|CJK 字体：装填 + 请求名命中行（仿宋/楷体不得被宋体截胡）
+font-symbol|m7accept=1;m7file=fonts-sym-single.docx|60|PROF_SNAP|FONT_WARM_FILLED id=OpenSymbol.ttf,FontPicker: Wingdings => OpenSymbol,FontPicker: Symbol => OpenSymbol|FONT_WARM_NOFILE,FontPicker: Wingdings => Wingdings,FontPicker: Symbol => Symbol|符号字体：装填 + Wingdings/Symbol 经相似类落 OpenSymbol（不得被同名行截胡）
+# —— 插件/AI 链（m7ai 门控双向：开着能点、默认不点——后者防回归弹出聊天窗遮挡截图）——
+plug-ai-on|m7accept=1;m7ai=1;m7file=sample.docx|120|PLUG_AI_CHAT|PLUG_TAB_CLICKED,PLUG_AI_TOGGLE_CLICKED,PLUG_AI_TAB_CLICKED,PLUG_AI_CHAT_CLICKED|PLUG_AI_CHAT_ERR|AI 插件链全通（装配→run→AI tab→Chatbot 窗口）
+plug-ai-gated|m7accept=1;m7file=sample.docx|120|PLUG_AI_CHAT_GATED|PLUG_AI_TOGGLE_GATED,PLUG_AI_TAB_GATED,PLUG_AI_CHAT_GATED|PLUG_AI_CHAT_CLICKED,PLUG_AI_TOGGLE_CLICKED|默认态门控：只记 GATED 不点击（防聊天窗弹出）

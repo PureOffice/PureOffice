@@ -83,9 +83,11 @@ SRC_DIR = os.path.join(HERE, 'src')
 #   中断 Backbone 的同步 trigger → 后续 handler 被跳过（弹窗空白 / 主题只切一半；
 #   2026-09-11 扩展，详见该文件注释）
 # 45_print 紧跟其后（编辑器页序列化链，顺序仅为可读性——与前面各段无依赖）
+# 09_fontpick 紧贴 09_fonts（同为字体域；它是 smoke 专用映射探针，须在 00_boot 之前
+#   的**独立段**里尽早装钩子——见该文件注释）
 # 注意：00_boot.js 的 `(function() {` 是**故意不闭合**的「外层头」（其后各段都在它内部），
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
-PARTS = ['00_theme.js', '09_fonts.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '44_modalguard.js', '45_print.js', '50_init.js', '55_lic.js', '57_about.js']
+PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '44_modalguard.js', '45_print.js', '50_init.js', '55_lic.js', '57_about.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 

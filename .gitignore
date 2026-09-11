@@ -39,6 +39,9 @@ entry/src/main/resources/rawfile/onlyoffice/version.json
 entry/src/main/resources/rawfile/onlyoffice/ascshim.js
 entry/src/main/resources/rawfile/onlyoffice/index.html
 # 样本（sample.*）是测试资产，保留跟踪；document.json/editor.html/document.docx 已退役删除
+# 回归测试产物（tests/regression.sh 每次跑出来的日志/截图/汇总，按 runid 分目录——诊断用，勿跟踪；
+# case 清单 cases.tsv 是源，保留跟踪）
+scripts/onlyoffice/tests/out/
 # native 构建产物/工具链拷贝
 entry/libs/
 entry/.cxx/
