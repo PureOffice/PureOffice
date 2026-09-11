@@ -22,6 +22,9 @@ export class Smoke {
   static target: string = '';
   /** AI 联网验证密钥（m7key 启动参数；仅注入态使用，不落盘不进 git） */
   static key: string = '';
+  /** AI 插件自动点击门控（m7ai=1）：prof-snap 的点击类动作（切 AI tab / 点 Chatbot）
+   *  会弹出聊天窗遮挡常规验收截图，故默认关；需验 AI 插件链时显式开启。 */
+  static ai: boolean = false;
 
   protected static readonly DEFAULT_SAMPLE = 'sample.docx';
   /** 白名单后缀（m7file 只允许三类样本；dev-only 参数，防路径越界） */
@@ -35,6 +38,7 @@ export class Smoke {
   static fromParams(params: Record<string, string>): void {
     Smoke.target = '';
     Smoke.key = '';
+    Smoke.ai = false;
     if (params['m7args'] !== undefined) {
       // 复合载体（; 与 = 拆解；值无空格——aa start 参数值空格会断键）
       const merged: Record<string, string> = {};
@@ -50,6 +54,7 @@ export class Smoke {
       return;
     }
     Smoke.key = String(params['m7key'] ?? '');
+    Smoke.ai = String(params['m7ai'] ?? '') === '1';
     const f = String(params['m7file'] ?? Smoke.DEFAULT_SAMPLE);
     // 仅接受 "名.白名单后缀" 文件名（rawfile 路径 <onlyoffice>/<f> 与沙箱 <filesDir>/<f> 拼接处）
     const dot = f.lastIndexOf('.');

@@ -10,6 +10,11 @@
 // 文档就绪判据以官方 asc_onDocumentContentReady 为准（见 ascshim 同门标准）。
 // ===========================================================================
 (function() {
+  // AI 插件自动点击门控（2026-09-11）：下列点击动作默认不执行——它们会展开插件
+  // 菜单/AI 面板并弹出聊天窗口（chat.html），遮挡常规验收（字体/打开/保存/打印等）
+  // 的截图。需验 AI 插件链时由 EditorPage 在页面 URL 拼 m7ai=1 显式开启。
+  // 取证类日志（DOM/结构快照）不受影响，仅"点击"这一动作受门控。
+  var LSO_M7AI = /[?&]m7ai=1/.test(window.location.search || '');
   // AI 插件 iframe 的 contentDocument（同源；background 分支隐藏 iframe 名
   // iframe_<guid>，sdkjs show():1145 创建）——JSON.parse 化后由探针使用
   function _ifcDoc() {
@@ -394,9 +399,11 @@
                       for (var _j = 0; _j < _dd.children.length; _j++) { _txt.push(String(_dd.children[_j].textContent || '').replace(/\s+/g, ' ').slice(0, 40)); }
                       console.error('PLUG_MENU_FULL ' + _txt.join('|'));
                       // 菜单内 AI 行的开关（.plugin-toggle：Switcher——点击即 asc_pluginRun）
+                      // 受 m7ai 门控：默认不点（点了会启用插件→AI 面板→聊天窗遮挡截图）
                       var _tg = _dd.querySelector('.plugin-toggle');
-                      if (_tg) { _tg.click(); console.error('PLUG_AI_TOGGLE_CLICKED'); }
-                      else console.error('PLUG_AI_TOGGLE_NF');
+                      if (!_tg) console.error('PLUG_AI_TOGGLE_NF');
+                      else if (LSO_M7AI) { _tg.click(); console.error('PLUG_AI_TOGGLE_CLICKED'); }
+                      else console.error('PLUG_AI_TOGGLE_GATED');
                       // run 后现场（sdkjs 侧）：pluginsMap/runnedPluginsMap/iframe/run 门判定
                       setTimeout(function() {
                         try {
@@ -463,8 +470,10 @@
                               if (String(_la2[_kt].textContent || '').trim() === 'AI') { _ai2 = _la2[_kt]; break; }
                             }
                           } catch (ekt) {}
-                          if (_ai2) { _ai2.click(); console.error('PLUG_AI_TAB_CLICKED'); }
-                          else console.error('PLUG_AI_TAB_NF');
+                          // 受 m7ai 门控：默认不切 AI tab（切了会展开 AI 面板）
+                          if (!_ai2) console.error('PLUG_AI_TAB_NF');
+                          else if (LSO_M7AI) { _ai2.click(); console.error('PLUG_AI_TAB_CLICKED'); }
+                          else console.error('PLUG_AI_TAB_GATED');
                           // iframe 内部取证（同源可访问 contentDocument）：AI 页是否
                           // 初始化（Asc.plugin 对象 / PluginWindow/executeMethod 框架面 /
                           // 工具栏按钮注册数——框架面齐不齐即 Chatbot 可点的前置）
@@ -590,11 +599,15 @@
                                   }
                                 } catch (eb2) {}
                               }
-                              if (_chatBtn) {
+                              // 受 m7ai 门控：Chatbot 点击会经 chatWindowShow 弹出聊天窗口
+                              // （chat.html），默认不点——常规验收截图不再被遮挡
+                              if (!_chatBtn) {
+                                console.error('PLUG_AI_CHAT_BTN_NF panel=' + !!_panel);
+                              } else if (LSO_M7AI) {
                                 _chatBtn.click();
                                 console.error('PLUG_AI_CHAT_CLICKED');
                               } else {
-                                console.error('PLUG_AI_CHAT_BTN_NF panel=' + !!_panel);
+                                console.error('PLUG_AI_CHAT_GATED');
                               }
                               // 4s 后查插件窗口 DOM（sdkjs ShowWindow → asc_onPluginWindowShow →
                               // Plugins.js onPluginWindowShow(1178) → Common.Views.PluginDlg：

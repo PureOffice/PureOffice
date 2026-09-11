@@ -197,7 +197,10 @@ struct EditorPage {
       url = url + '&m7auto=1'
         // AI 联网验证 key 走页面 URL 传递（2026-09-08：启动参数链路在 1.4 上不可达
         // ——见 smoke.ets m7args 头注；URL 是 Web 侧已知可靠通道）
-        + (Smoke.key.length > 0 ? '&m7key=' + encodeURIComponent(Smoke.key) : '');
+        + (Smoke.key.length > 0 ? '&m7key=' + encodeURIComponent(Smoke.key) : '')
+        // AI 插件自动点击门控（2026-09-11）：默认**不**拼 m7ai → prof-snap 不切 AI tab、
+        // 不点 Chatbot（否则聊天窗弹出遮挡常规验收截图）；需验 AI 插件链时显式 m7ai=1
+        + (Smoke.ai ? '&m7ai=1' : '');
     }
     return url;
   }
