@@ -17,7 +17,13 @@
   //   systemfonts/ 前缀由 rawfileLoader→NAPI native 读（ArkTS fileIo 系统路径
   //   ENOENT，native 与 wine 同权）；native 返回前已 XOR 加密态（同 pre_xor_font
   //   前 32B），本处 xorDecode 统一还原——装填链零分支。
+  // + 仿宋/楷体（2026-09-11）：Fandol 两字体此前漏在本清单外，只能走引擎按需链——
+  //   该链在本环境拿不到字体字节（rawfile 不在其搜路径），渲染期无流 ⇒ 缺字形
+  //   回退（__fonts_ranges 的 CJK 目标=宋体行）⇒ 仿宋/楷体整 run 显示为宋体。
+  //   装填缺失是**持续存在**的，与保存无关。代价=每文档页多 12.4MB 预取
+  //   （参照旗黑 21MB 已装填）。
   var IDS = ['HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf',
+             'FandolFang.ttf', 'FandolKai.ttf',
              'HYQiHeiL3.ttf',
              'NotoSansBengaliUI-Regular.ttf',
              'NotoSansDevanagariUI-Regular.ttf'];
