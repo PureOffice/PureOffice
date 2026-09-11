@@ -1,6 +1,6 @@
 # ONLYOFFICE DesktopEditors 移植到鸿蒙 —— 功能支持矩阵
 
-> 版本：2026-09-06（AI 插件接入 + 插件链真机验收后）
+> 版本：2026-09-12（文件格式扩展：打开 9 种格式 + 文件管理器「打开方式」接入后）
 > 基座：官方 sdkjs（v9.4.0，`--desktop` 构建，min+common 双清单经官方 loadSdk 自加载）
 >       + 官方 web-apps（grunt 产物）+ 官方 loginpage（桌面版欢迎页）+
 >       ArkTS 壳（ArkWeb + native x2t 转换 + 文件沙箱）。
@@ -11,12 +11,14 @@
 
 | 能力 | 状态 | 说明 |
 |---|---|---|
-| 官方欢迎页（recents 面板 + 新建卡片） | ✅ | loginpage 官方产物；recents = 真数据（`LocalFileRecents` 返回沙箱 `recents.json`，打开过即入列） |
-| 打开本地文件（系统选择器） | ✅ | `open:folder`（loginpage「Open local file」官方命令）→ ArkTS `DocumentViewPicker.select`（docx/xlsx/pptx 过滤）→ 拷贝沙箱 → 现有 x2t 打开链；欢迎页左下「打开」FAB 即点即用 |
-| 打开 docx/xlsx/pptx | ✅ | recents → 沙箱源文件 → x2t（源后缀分派 docx2doct_bin/xlsx2xlst_bin/pptx2pptt_bin）→ 官方 `openDocumentFromBinary` → 引擎渲染（word 走官方 loadDocument；cell/slide 走 DI 链+Gateway 踢闸，2026-09-05 三格式全链复核） |
+| 官方欢迎页（新建卡片；recents 面板已隐藏） | ✅ | loginpage 官方产物；**「最近使用」面板自 2026-09-05 起隐藏**（B 架构文件位置为 picker 授权 uri、授权会回收 → 路径语义不成立）；`recents.ets` 与打开链代码保留，待持久文件位置机制恢复 |
+| 打开本地文件（系统选择器） | ✅ | `open:folder`（loginpage「Open local file」官方命令）→ ArkTS `DocumentViewPicker.select`（9 种后缀过滤，由 `formats.ets` 派生）→ 拷贝沙箱 → x2t 打开链；选择器按后缀**硬过滤**（非白名单后缀不出现，实测 exe/odt 不可见） |
+| 打开方式（文件管理器交付） | ✅ | `module.json5` 声明 `viewData` skill（`scheme=file` + `utd=general.entity` + `linkFeature=FileOpen`）→ 文件管理器「打开方式」候选出现 Pure Office → `want.uri` → `handleLocalUri` 与 picker 共用处理链；不支持格式弹「暂不支持该格式：&lt;名&gt;」（2026-09-12 真机 1.6：docx 进编辑器 / odt 被拦） |
+| 打开 9 种格式（docx·xlsx·pptx + doc·xls·ppt·rtf·txt·csv） | ✅ | 沙箱源文件 → x2t 按源后缀分派 → 官方 `openDocumentFromBinary` → 引擎渲染（word 走官方 loadDocument；cell/slide 走 DI 链+Gateway 踢闸）。旧二进制（doc/xls/ppt）与 csv 需**显式下发格式对/编码分隔符参数**（x2t 方向表与转换 switch 缺 case，详见 `formats.ets` 与 KEYPOINTS）；2026-09-12 真机 9/9 通过 |
 | 编辑（文本/表格等） | ✅ | 官方编辑器全套 UI（工具栏/右侧栏/状态栏/缩放/分页） |
-| 保存（Ctrl+S / 自动保存） | ✅ | `asc_Save` 官方桌面协议骨架 → `asc_nativeGetFileData`（BinaryFileWriter → DOCY;v10）→ x2t 按目标后缀自动选 `doct_bin2docx`/`xlst_bin2xlsx`/`pptt_bin2pptx` → save.&lt;ext&gt; + 回写源文件；编辑内容进入 `word/document.xml`（真机核验） |
+| 保存（Ctrl+S / 自动保存） | ✅ | `asc_Save` 官方桌面协议骨架 → `asc_nativeGetFileData`（BinaryFileWriter → DOCY/XLSY/PPTY;v10）→ x2t 按**目标后缀**自动选转换器 → save.&lt;ext&gt; + 回写源文件；编辑内容进入 `word/document.xml`（真机核验）。目标后缀由 `formats.ets` 的 `saveExt` 决定：旧二进制与 txt 存为 OOXML、rtf/csv 原地保存；不可原地保存的格式弹「格式不支持保存」→ 确认后转另存为（2026-09-12） |
 | 导出 / 另存为 | ✅ | 编辑页左下「导出」按钮 → 自动触发官方保存 → 系统保存对话框（`DocumentViewPicker.save`）→ 写用户选定位置 |
+| 打印（系统打印） | ✅ | 工具栏打印按钮 / 文件菜单「打印」→ 页面元文件流（`Save_End` 真实长度截断）→ x2t `bin2pdf`（随包字体目录）→ `@ohos.print` 调起系统打印界面（选打印机或"打印为 PDF"）；临时文件启动时清扫（2026-09-11 真机三格式全通） |
 | 分享 | 降级 | SDK 无 ShareKit（@ohos.share 缺失）—— 登记 P1：SDK 升级后接 `systemShare` |
 | 新建空白 docx | ✅ | create:new（word）→ 官方空文档（`word/document/editor.js` getEmpty + bSerFormat 补丁） |
 | 缩放/状态栏/多视图 | ✅ | 官方 UI 原生实现（100% 起点，Factor 1.0 语义） |
@@ -33,7 +35,7 @@
 | `isSupportMacroses` | false | 宏入口隐藏 | 宏引擎（V8 附加）未自带 |
 | `isSupportPlugins` | true（2026-09-06 提真，#73） | 插件菜单/系统显示 | web 语义插件运行时（sdkjs plugins.js）+ plugins.json server 链；插件无签名校验（本地链，仅随包官方插件） |
 | `isSupportNetworkFunctionality` | false | 在线功能入口隐藏 | 纯本地链 |
-| `IsSupportNativePrint` / `IsFilePrinting` | false | 打印入口禁用 | PDF 渲染器（doctrenderer）未接入 |
+| `IsSupportNativePrint` / `IsFilePrinting` | false（桥面保持） | 官方打印面板链路不启用 | 打印已由自建链实现（元文件流 → x2t bin2pdf → `@ohos.print`，见 §1「打印」行）——这两项保持 false 是官方语义分割，不影响用户可见的打印功能 |
 | `IsSupportMedia` | false | 媒体/录音隐藏 | |
 | `IsSignaturesSupport` / `IsProtectionSupport` | false | 签名/保护入口隐藏 | |
 | `isBlockchainSupport` | false | 区块链存证隐藏 | |
