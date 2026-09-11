@@ -96,9 +96,10 @@
           try {
             if (window.sdk && window.sdk.command && window.AscNative && window.AscNative._call) {
               var _fd2 = String(window.AscNative._call('getFilesDir', []) || '');
-              // 扩展名取末段（文件名可含多点）
-              var _ext2 = (_m7f.match(/\.([a-z0-9]+)$/i) || [])[1] || 'docx';
-              var _type2 = _ext2 === 'xlsx' ? 0x101 : _ext2 === 'pptx' ? 0x81 : 0x41;
+              // type 由壳层给定（EditorPage 按 formats 表推导并拼 m7type=<hex>）——
+              // 页面不再自持第二份格式表；无参数（旧 URL）兜底 docx 仅供兼容
+              var _tq2 = String(window.location.search).match(/[?&]m7type=([0-9a-fA-F]+)/);
+              var _type2 = _tq2 ? parseInt(_tq2[1], 16) : 0x41;
               window.sdk.command('open:recent', JSON.stringify({
                 id: 99, name: _m7f, path: _fd2 + '/' + _m7f, type: _type2
               }));

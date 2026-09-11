@@ -33,19 +33,38 @@ export interface FormatSpec {
   saveExt: string;
   /** 保存产物校验方式：'zip' = PK 头 / 'rtf' = {\rtf 头 / 'size' = 仅非空 */
   check: string;
+  /** 打开链显式目标格式（CANVAS_* 内部二进制枚举，OfficeFileFormats.h:151）；
+   *  0 = 不需要，x2t 按输入扩展名走方向表。doc/csv 非 0——x2t 的方向表把
+   *  「.doc→.bin」判为 TCD_DOC2DOCT_BIN、「.csv→.bin」判为 TCD_CSV2XLST_BIN，
+   *  而 fromInputParams 的 switch 缺这两个 case（落到 default 即
+   *  CONVERT_PARAMS，真机实测 0x80041358），其余格式的 TCD_*2*_BIN case 齐全。
+   *  显式给出格式对后 x2t 不再查方向表，改走 fromDocument/fromSpreadsheet
+   *  「先落 OOXML 目录、再出内部二进制」的通路——该通路对 CANVAS_* 目标有
+   *  docx_dir2doct_bin / xlsx_dir2xlst_bin 分派。必须与 recentType 成对下发：
+   *  只给 From 会让 x2t 的格式判定整体失败（getConversionDirection 返回
+   *  TCD_ERROR），比不传更糟。 */
+  openBinTo: number;
+  /** 打开链附加 x2t 参数（XML 片段，空串 = 无）。CSV 必须给：x2t 的
+   *  processDownloadFile 对 CSV/TSV/SCSV 源要求编码与分隔符**二者都非空**，
+   *  否则转换方向判定失败（CSV 被特判成 NEED_PARAMS，真机实测 0x80041359）；
+   *  而 .csv 扩展名不会自动填分隔符，无 BOM 的 UTF-8 也测不出编码
+   *  （getEncodingByContent 只认 BOM，无 BOM 返回 -1）。
+   *  46 = codePage 65001(UTF-8)，4 = TCSVD_COMMA。 */
+  openExtra: string;
 }
 
 /** 可打开格式表（新增格式 = 此处加一行 + 备样本 + 回归 case） */
 const FORMATS: FormatSpec[] = [
-  { ext: 'docx', family: 'word', fileType: 'docx', recentType: 0x41, saveExt: 'docx', check: 'zip' },
-  { ext: 'doc', family: 'word', fileType: 'docx', recentType: 0x42, saveExt: 'docx', check: 'zip' },
-  { ext: 'rtf', family: 'word', fileType: 'docx', recentType: 0x44, saveExt: 'rtf', check: 'rtf' },
-  { ext: 'txt', family: 'word', fileType: 'docx', recentType: 0x45, saveExt: 'docx', check: 'zip' },
-  { ext: 'xlsx', family: 'cell', fileType: 'xlsx', recentType: 0x101, saveExt: 'xlsx', check: 'zip' },
-  { ext: 'xls', family: 'cell', fileType: 'xlsx', recentType: 0x102, saveExt: 'xlsx', check: 'zip' },
-  { ext: 'csv', family: 'cell', fileType: 'xlsx', recentType: 0x104, saveExt: 'csv', check: 'size' },
-  { ext: 'pptx', family: 'slide', fileType: 'pptx', recentType: 0x81, saveExt: 'pptx', check: 'zip' },
-  { ext: 'ppt', family: 'slide', fileType: 'pptx', recentType: 0x82, saveExt: 'pptx', check: 'zip' }
+  { ext: 'docx', family: 'word', fileType: 'docx', recentType: 0x41, saveExt: 'docx', check: 'zip', openBinTo: 0, openExtra: '' },
+  { ext: 'doc', family: 'word', fileType: 'docx', recentType: 0x42, saveExt: 'docx', check: 'zip', openBinTo: 0x2001, openExtra: '' },
+  { ext: 'rtf', family: 'word', fileType: 'docx', recentType: 0x44, saveExt: 'rtf', check: 'rtf', openBinTo: 0, openExtra: '' },
+  { ext: 'txt', family: 'word', fileType: 'docx', recentType: 0x45, saveExt: 'docx', check: 'zip', openBinTo: 0, openExtra: '' },
+  { ext: 'xlsx', family: 'cell', fileType: 'xlsx', recentType: 0x101, saveExt: 'xlsx', check: 'zip', openBinTo: 0, openExtra: '' },
+  { ext: 'xls', family: 'cell', fileType: 'xlsx', recentType: 0x102, saveExt: 'xlsx', check: 'zip', openBinTo: 0, openExtra: '' },
+  { ext: 'csv', family: 'cell', fileType: 'xlsx', recentType: 0x104, saveExt: 'csv', check: 'size', openBinTo: 0x2002,
+    openExtra: '<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding><m_nCsvDelimiter>4</m_nCsvDelimiter>' },
+  { ext: 'pptx', family: 'slide', fileType: 'pptx', recentType: 0x81, saveExt: 'pptx', check: 'zip', openBinTo: 0, openExtra: '' },
+  { ext: 'ppt', family: 'slide', fileType: 'pptx', recentType: 0x82, saveExt: 'pptx', check: 'zip', openBinTo: 0, openExtra: '' }
 ];
 
 /** 扩展名（可带点/大小写）→ 格式规格；未支持返回 null（唯一判定入口） */

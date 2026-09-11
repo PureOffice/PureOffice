@@ -111,9 +111,21 @@ export function writeFileBuf(path: string, data: ArrayBuffer | Uint8Array): bool
   }
 }
 
-/** x2t 转换参数 XML 拼装（打开/保存链共用；路径为沙箱绝对路径） */
-export function x2tXml(from: string, to: string): string {
-  return `<Convert><m_sFileFrom>${from}</m_sFileFrom><m_sFileTo>${to}</m_sFileTo></Convert>`;
+/**
+ * x2t 转换参数 XML 拼装（打开/保存链共用；路径为沙箱绝对路径）。
+ * formatFrom/formatTo 成对给时写入显式格式（官方 XML 参数 m_nFormatFrom/
+ * m_nFormatTo，x2t 侧取十进制整数）——此时 x2t 不再按扩展名查方向表，直接用
+ * 给定格式判定转换方向；不给（或 formatTo <= 0）则维持纯扩展名判定。
+ * extra 为附加参数 XML 片段（调用方按格式给定，语义见 formats.ets 的 openExtra）。
+ */
+export function x2tXml(from: string, to: string, formatFrom?: number, formatTo?: number,
+  extra?: string): string {
+  const e = extra !== undefined ? extra : '';
+  if (formatFrom === undefined || formatTo === undefined || formatTo <= 0) {
+    return `<Convert><m_sFileFrom>${from}</m_sFileFrom><m_sFileTo>${to}</m_sFileTo>${e}</Convert>`;
+  }
+  return `<Convert><m_sFileFrom>${from}</m_sFileFrom><m_sFileTo>${to}</m_sFileTo>` +
+    `<m_nFormatFrom>${formatFrom}</m_nFormatFrom><m_nFormatTo>${formatTo}</m_nFormatTo>${e}</Convert>`;
 }
 
 /**

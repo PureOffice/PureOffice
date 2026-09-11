@@ -164,6 +164,12 @@ struct EditorPage {
   private guardDialogCtx: DocTabCtx | null = null;
   private guardDialogThen: ((proceed: boolean) => void) | undefined = undefined;
 
+  /** 格式提示覆盖层（不支持格式的告知 / 不能原地保存的格式另存确认；与守卫框互斥） */
+  @State fmtDialogOn: boolean = false;
+  @State fmtDialogText: string = '';
+  private fmtDialogCtx: DocTabCtx | null = null;
+  private fmtDialogOut: ArrayBuffer | null = null;
+
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
    *  lang=zh-CN：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
    *  未传时回退英文——2026-09-05 用户目标「默认中文」） */
@@ -172,7 +178,17 @@ struct EditorPage {
       + '&lang=zh-CN'
       // 注：zoom=1.2 只在文档页（editorUrl）拼——2026-09-05 用户：主界面不放大，
       // 文档页面才放大（LSO_PAGE_ZOOM 由 ascshim 00_boot 按参数设 html CSS zoom）
-      + (this.m7Target.length > 0 ? '&m7open=' + encodeURIComponent(this.m7Target) : '');
+      + (this.m7Target.length > 0 ? '&m7open=' + encodeURIComponent(this.m7Target) : '')
+      // m7type = 样本的 FileFormat 枚举（30_open.js 3.55b 用它填 recents type——
+      // 页面侧不再自持第二份格式表）
+      + (this.m7Target.length > 0 ? this.m7SampleType() : '');
+  }
+
+  /** m7 样本的 FileFormat 枚举（'&m7type=<hex>'；表查不到兜底 docx） */
+  private m7SampleType(): string {
+    const dot = this.m7Target.lastIndexOf('.');
+    const spec = dot > 0 ? specOf(this.m7Target.substring(dot + 1)) : null;
+    return '&m7type=' + (spec !== null ? spec.recentType : 0x41).toString(16);
   }
 
   /**
@@ -183,10 +199,14 @@ struct EditorPage {
    * 到 openDocument 前链；引擎模型初始化依赖 B 架构运行时序，本阶段以顶层页打开（后续 M4+ 返回 iframe 结构）。
    */
   private editorUrl(type: string, title: string, sidVal?: number): string {
-    const app = type === 'xlsx' ? 'spreadsheeteditor'
-      : type === 'pptx' ? 'presentationeditor' : 'documenteditor';
+    // type = 源扩展名或家族代表名——页面与引擎只认家族（doct_bin 签名 DOCY/XLSY/
+    // PPTY），.doc/.rtf 等一律按 word 家族打开；查不到（防御）按 word 兜底
+    const specU = specOf(type);
+    const family = specU !== null ? specU.family : 'word';
+    const fileType = specU !== null ? specU.fileType : 'docx';
+    const app = editorAppOf(family);
     let url = 'http://localhost/onlyoffice/webapps/apps/' + app + '/main/index.html?v=' + this.pageVer
-      + '&fileType=' + type + '&isDesktop=false&docType=' + type + '&lang=zh-CN&title=' + encodeURIComponent(title)
+      + '&fileType=' + fileType + '&isDesktop=false&docType=' + fileType + '&lang=zh-CN&title=' + encodeURIComponent(title)
       // sid=实例唯一化（2026-09-05 修复「关闭文档后再新建显示旧内容」：相同 URL 的
       // 二次导航 ArkWeb 复用引擎实例——页面事件照常（LSO_OPEN_DOCUMENT_OK 收到新模板
       // 字节 len=1086）但旧文档模型残留（真机实锤：新建「未命名的文档」显示 demo-cn 7 页
@@ -417,7 +437,8 @@ struct EditorPage {
       const dvp = new picker.DocumentViewPicker(ctx);
       const opts = new picker.DocumentSelectOptions();
       opts.maxSelectNumber = 1;
-      opts.fileSuffixFilters = ['.docx', '.xlsx', '.pptx'];
+      // 可打开格式由 formats 表派生（新增格式自动进入选择器过滤）
+      opts.fileSuffixFilters = pickerSuffixes();
       const uris = await dvp.select(opts);
       if (uris.length === 0) {
         this.arkLog('OPEN_LOCAL_CANCEL');
@@ -437,8 +458,10 @@ struct EditorPage {
       if (dot > -1) {
         ext = label.substring(dot + 1).toLowerCase();
       }
-      if (ext !== 'docx' && ext !== 'xlsx' && ext !== 'pptx') {
+      if (specOf(ext) === null) {
+        // 未支持格式：显式提示（不再静默 return——用户须知道发生了什么）
         this.arkLog('OPEN_LOCAL_EXTBAD label=' + label + ' ext=' + ext);
+        this.showFormatNotice('暂不支持该格式：' + label);
         return;
       }
       this.arkLog('OPEN_LOCAL_OK label=' + label + ' uri=' + uri + ' size=' + ab.byteLength);
@@ -455,31 +478,25 @@ struct EditorPage {
       const o = JSON.parse(param) as Record<string, Object>;
       const path = String(o['path'] ?? '');
       const name = String(o['name'] ?? '');
-      const typeNum = Number(o['type'] ?? 0);
-      let ext = '';
-      if (typeNum === RECENT_TYPE_XLSX) {
-        ext = 'xlsx';
-      } else if (typeNum === RECENT_TYPE_PPTX) {
-        ext = 'pptx';
-      } else {
-        ext = 'docx';
-      }
-      // 扩展名兜底（recents 模型缺 type 时从文件名后缀采信白名单）
-      if (name.length > 0) {
-        const i = name.lastIndexOf('.');
-        if (i > 0) {
-          const sfx = name.substring(i + 1);
-          if (sfx === 'xlsx' || sfx === 'pptx' || sfx === 'docx') {
-            ext = sfx;
-          }
-        }
-      }
       if (path.length === 0) {
         this.arkLog('OPEN_RECENT_NOPATH ' + param);
         return 'false';
       }
       // 文件名以 path 尾部为准（loginpage recents 的 name 字段可能被截断/缺失）
       const base = path.substring(path.lastIndexOf('/') + 1);
+      const label = base.length > 0 ? base : name;
+      // 源格式以**文件名后缀**为准（recents.type 是展示枚举、非格式判据）；后缀缺失
+      // 或不支持 → 显式提示（不得兜底 docx：静默按 docx 打开 = 静默错误）
+      let ext = '';
+      const i = label.lastIndexOf('.');
+      if (i > 0) {
+        ext = label.substring(i + 1).toLowerCase();
+      }
+      if (ext.length === 0 || specOf(ext) === null) {
+        this.arkLog('OPEN_RECENT_EXTBAD label=' + label + ' ext=' + ext);
+        this.showFormatNotice('暂不支持该格式：' + label);
+        return 'false';
+      }
       // 读源文件字节
       const ab = readFileBuf(path);
       if (ab === null) {
@@ -1006,8 +1023,12 @@ struct EditorPage {
         this.arkLog('OPEN_TMP_WRITE_ERR ' + inP);
         return 'false';
       }
-      // x2t 按输入扩展名自动选 *2doct_bin 转换器；.bin 输出后缀已实机验证（POC 打开链 v10）
-      const rc = x2tConvertSync(x2tXml(inP, outP));
+      // x2t 按输入扩展名自动选 *2doct_bin 转换器；.bin 输出后缀已实机验证（POC 打开链 v10）。
+      // openBinTo ≠ 0 的格式要显式给出格式对（方向表与转换器 switch 不一致，见 formats.ets）
+      const specOpen = specOf(extU);
+      const rc = x2tConvertSync((specOpen !== null && specOpen.openBinTo > 0)
+        ? x2tXml(inP, outP, specOpen.recentType, specOpen.openBinTo, specOpen.openExtra)
+        : x2tXml(inP, outP));
       this.arkLog('OPEN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ') tab=' + ctx.id);
       if (rc !== 0) {
         this.arkLog('OPEN_X2T_FAIL ext=' + extU);
@@ -1915,7 +1936,73 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           // 吞掉卡片内点击（不穿透蒙层取消）
         })
       }
+      // —— 格式提示覆盖层（不支持格式告知 / 不能原地保存的格式另存确认）——
+      if (this.fmtDialogOn) {
+        Column()
+          .width('100%').height('100%')
+          .backgroundColor('rgba(0,0,0,0.35)')
+          .onClick(() => {
+            this.fmtDialogAction('cancel');
+          })
+        Column({ space: 4 }) {
+          Text('格式提示')
+            .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
+          Text(this.fmtDialogText)
+            .fontSize(14).fontColor('#5A6572').textAlign(TextAlign.Center)
+            .margin({ top: 12 })
+          Row({ space: 12 }) {
+            Button('取消')
+              .layoutWeight(1)
+              .backgroundColor('#F7F7F7').fontColor('#2B3B4D')
+              .onClick(() => {
+                this.fmtDialogAction('cancel');
+              })
+            Button('继续')
+              .layoutWeight(1)
+              .backgroundColor('#0064E7').fontColor(Color.White)
+              .onClick(() => {
+                this.fmtDialogAction('ok');
+              })
+          }
+          .width('100%')
+          .margin({ top: 20 })
+        }
+        .padding(24)
+        .width(420)
+        .backgroundColor(Color.White)
+        .borderRadius(12)
+        .onClick(() => {
+          // 吞掉卡片内点击（不穿透蒙层取消）
+        })
+      }
     }
+  }
+
+  /**
+   * 格式提示动作（自绘层唯一出口）：ok=继续 / cancel 或蒙层=关闭。
+   * 用途两类：① 不支持格式的告知；② 不能原地保存的格式在保存时的「提示 → 另存」
+   * 确认（另存分支见 saveBinRaw 的 needsSaveAsPrompt 段）。
+   */
+  private fmtDialogAction(act: string): void {
+    if (!this.fmtDialogOn) {
+      return;
+    }
+    const ctx = this.fmtDialogCtx;
+    this.fmtDialogOn = false;
+    this.fmtDialogCtx = null;
+    this.fmtDialogOut = null;
+    this.fmtDialogText = '';
+    this.arkLog('FMT_DIALOG_ACTION act=' + act
+      + (ctx !== null ? ' ext=' + ctx.state.ext + ' tab=' + ctx.id : ''));
+  }
+
+  /** 不支持格式的告知层（复用格式覆盖层 UI；文案由调用方给定） */
+  private showFormatNotice(text: string): void {
+    this.fmtDialogCtx = null;
+    this.fmtDialogOut = null;
+    this.fmtDialogText = text;
+    this.fmtDialogOn = true;
+    this.arkLog('FMT_NOTICE ' + text);
   }
 
   /** 守卫弹框三按钮/蒙层动作分发（自绘层唯一出口；同版三回调语义：

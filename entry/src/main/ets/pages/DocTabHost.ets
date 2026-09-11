@@ -3,6 +3,7 @@ import { BuilderNode, NodeController, UIContext } from '@kit.ArkUI';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { loadRaw } from '../common/rawfileLoader';
 import { resourceManager } from '@kit.LocalizationKit';
+import { specOf } from '../common/formats';
 
 /**
  * PC（2in1/pc）tab 条高度=37（用户 2026-09-09 拍板：与 setWindowDecorHeight
@@ -149,11 +150,13 @@ export class DocTabPair {
  * pptx 紫近似——与官方 colors-table 各 app 主色呼应）。
  */
 function accentColor(state: DocTabState): string {
-  const e = state.ext;
-  if (e === 'xlsx') {
+  // 按族取色（新增格式自动归族——.xls 与 .xlsx 同色、.doc 与 .docx 同色）
+  const spec = specOf(state.ext);
+  const family = spec !== null ? spec.family : 'word';
+  if (family === 'cell') {
     return '#3E8D5F';
   }
-  if (e === 'pptx') {
+  if (family === 'slide') {
     return '#8E5EB8';
   }
   return '#4B71A5';

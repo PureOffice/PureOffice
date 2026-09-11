@@ -1,5 +1,6 @@
 import { resourceManager } from '@kit.LocalizationKit';
 import { u8ToStr } from './bytes';
+import { pickerSuffixes } from './formats';
 
 /**
  * 自动验收（smoke）工具 —— 与产品路径隔离（2026-09-05 用户要求：smoke 代码内聚，
@@ -27,8 +28,10 @@ export class Smoke {
   static ai: boolean = false;
 
   protected static readonly DEFAULT_SAMPLE = 'sample.docx';
-  /** 白名单后缀（m7file 只允许三类样本；dev-only 参数，防路径越界） */
-  protected static readonly EXT_WHITELIST = ['docx', 'xlsx', 'pptx'];
+  /** 白名单后缀（m7file 只允许验收样本；dev-only 参数，防路径越界）——
+   *  与 formats 表同源（新增可打开格式自动放行其样本名） */
+  protected static readonly EXT_WHITELIST: string[] =
+    pickerSuffixes().map((s: string) => s.substring(1));
 
   /** 从 ability 启动参数解析（EntryAbility.getLaunchOptions）；无参数/非法值 = 产品态
    * 参数载体：aa start 的 --ps 只能可靠携带**一个**参数对（实测多 --ps 只有第一个
