@@ -1,0 +1,3 @@
+Pure Office 纯文本样本
+Line 2: regression sample for .txt import.
+第三行：中文内容（验证 txt 导入编码）。

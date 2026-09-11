@@ -9,6 +9,7 @@ import { Smoke } from '../common/smoke';
 import { getLaunchOptions, setWindowCloseHandler } from '../entryability/EntryAbility';
 import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, x2tXmlFont, u8ToStr } from '../common/bytes';
 import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } from '../common/recents';
+import { specOf, pickerSuffixes, editorAppOf, needsSaveAsPrompt, checkSaveOut } from '../common/formats';
 import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
 import { DocTabHost, DocTabCtx, DocTabPair } from './DocTabHost';
 
@@ -1239,7 +1240,13 @@ struct EditorPage {
     if (!this.resourceManager || this.m7Target.length === 0) {
       return;
     }
-    for (const name of ['sample.docx', 'sample.xlsx', 'sample.pptx', 'm7-open-test.docx']) {
+    // 清单 = formats 表派生（每种可打开格式一个 sample.<ext>）+ 专用样本——新增格式
+    // 自动带上样本（原硬编码四文件清单在扩格式后会静默漏拷：m7open 走沙箱路径读不到）
+    const names: string[] = ['m7-open-test.docx'];
+    for (const suf of pickerSuffixes()) {
+      names.push('sample' + suf);
+    }
+    for (const name of names) {
       try {
         const raw = this.resourceManager.getRawFileContentSync('onlyoffice/smoke/samples/' + name) as Uint8Array;
         const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;

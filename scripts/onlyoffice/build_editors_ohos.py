@@ -627,6 +627,12 @@ def install_smoke():
         # 其它类型（*.py/*.log 等本机工具件）不进包
     n = sum(len(fs) for _, _, fs in os.walk(SMOKE_DST))
     print('  smoke 脚本 → %s (%d files)' % (SMOKE_DST, n))
+    # 格式扩展样本存在性断言：缺失 = 回归 case 必失败，构建期拦下
+    # （依据：docs/superpowers/specs/2026-09-11-file-format-expansion-design.md §9.1）
+    for name in ('sample.doc', 'sample.xls', 'sample.ppt',
+                 'sample.rtf', 'sample.txt', 'sample.csv'):
+        if not os.path.isfile(os.path.join(SMOKE_DST, 'samples', name)):
+            raise SystemExit('smoke 样本缺失：samples/%s（格式扩展回归依赖）' % name)
 
 
 def install_licenses():
