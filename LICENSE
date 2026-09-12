@@ -729,17 +729,20 @@ Street, Riga, LV-1050, Latvia, European Union.
 
 ================================================================================
 
-               本仓库（Pure Office）的授权与修改版声明
+        Licensing and Modification Notice for This Repository
 
-  本仓库是 ONLYOFFICE DesktopEditors 的 HarmonyOS NEXT 移植工程。除
-third_party/ 目录下的上游组件外，本仓库自有部分——ArkTS 应用壳、ascshim 页面
-注入层、构建与打包脚本、文档——由本仓库作者以 GNU Affero General Public
-License v3.0 授权发布，条款与本文件正文（含上方 Additional Terms）一致。
+  This repository is the "Pure Office" project: a HarmonyOS NEXT port of
+ONLYOFFICE DesktopEditors. Apart from the upstream components under
+third_party/, all original code in this repository — the ArkTS application
+shell, the ascshim runtime injection layer, build and packaging scripts, and
+documentation — is licensed by the authors of this repository under the GNU
+Affero General Public License v3.0, on the terms of the text above (including
+the Additional Terms).
 
-  修改版声明（依上方 Additional Terms 第 2 条）：
-  本发行版是 Ascensio System SIA 开发的 ONLYOFFICE DesktopEditors 的修改版，
-并非原始版本。修改起始日期：2026-09-02。修改内容清单（含对上游子模块的修改
-与补丁路径）见 docs/NOTICE。
+  Modification notice (pursuant to Additional Terms § 2):
+  This distribution is a MODIFIED VERSION of ONLYOFFICE DesktopEditors,
+developed by Ascensio System SIA; it is not the original version.
+Modification date: from 2026-09-02. See NOTICE for details.
 
-  第三方组件与字体：third_party/ 下各子模块的版权与许可见各自目录内的 LICENSE
-文件；随发行物分发的第三方字体与脚本库的版权、许可声明见 docs/NOTICE。
+  Third-party components and fonts: see the LICENSE file within each
+third_party/ submodule; bundled fonts and libraries are listed in NOTICE.
