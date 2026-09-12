@@ -43,6 +43,10 @@ ECMA-376 Agile / AES-256 / SHA-512 / spinCount 100000，口令 `1234`）。
 | 保存（不传密码） | `…;m7auto=1` | 产物 `check=zip ok`，但 `file` 判定 = **明文 zip**（密文被静默降级） |
 | 保存（传 `m_sSavePassword`） | 同上 | 产物 `CDFV2 Encrypted`；第三方实现 msoffcrypto 用 `1234` 校验通过并解出 20 部件，正文含编辑标记 `M7AUTO-EDIT-OK` |
 | **保存产物再打开**（round-trip） | 把上一步产物当样本部署后 `m7file=enc.docx;m7pwd=1234` | `rc=0x0` + `M7AUTO_DOC_READY`（37888 字节产物，同密码可重新打开） |
+| **产品路径弹框输入** | 无 `m7pwd` 打开 → 弹框手输 1234 → 确定 | `OPEN_PWD_SUBMIT len=4` → `rc=0x0` → `P1B_OPEN_TAB` → `LSO_OPEN_DOCUMENT_OK` |
+| **编辑经保存进入产物** | 打开后输入文本 → 工具栏保存 | 产物解密后正文含该文本（`ENC-EDIT-OK`） |
+| **另存为保持加密** | 打开密文 → 文件菜单「另存为」 | `SAVE_AS_X2T rc=0x0` + `check=zip ok`；沙箱 `saveas-out.docx` = `CDFV2 Encrypted`，同密码解出 20 部件 |
+| **取消密码框** | 弹框点「取消」 | `OPEN_PWD_CANCEL` → 弹框关闭、回欢迎页、**无** `LSO_OPEN_DOCUMENT_OK`；随后重新打开正常 |
 
 即：**打开密文 → 编辑 → 保存（仍加密）→ 再次打开**全链闭环成立；
 保存产物的加密参数为 x2t 固定的 Agile 档（AES-256 + SHA-512，spinCount 100000），
@@ -104,8 +108,8 @@ x2t 失败
 
 | 项 | 说明 |
 |---|---|
-| 旧二进制 .doc/.xls/.ppt 密文 | 代码路径有密码透传，但**无样本**（msoffcrypto 只支持 OOXML）→ 未实测 |
-| Extensible Encryption | core 明确不支持（`ECMACryptFile.cpp:679-682`）；应给出「不支持该加密方式」提示 |
+| 旧二进制 .doc/.xls/.ppt 密文 | 代码路径有密码透传（`lib/doc.h`/`xls.h`/`ppt.h`），但**造不出样本**（msoffcrypto 只支持 OOXML）→ 未实测 |
+| Extensible Encryption | core 明确不支持（`ECMACryptFile.cpp:679-682`）；只做了「暂不支持该加密方式」提示（`0x80041355`），无样本验证 |
 | `setup.bin`/宏等其它密文变体 | 未覆盖 |
 | 密码错误次数/锁定 | 官方无此语义，不做 |
 | 大文档解密耗时 | `x2tConvertSync` 在 UI 线程同步执行（既有约束，非本次引入） |
