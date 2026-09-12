@@ -653,23 +653,31 @@ def install_smoke():
 
 
 def install_licenses():
-    """随包许可证文本 → rawfile/onlyoffice/licenses/LICENSE.txt。
+    """随包许可证与声明文本 → rawfile/onlyoffice/licenses/{LICENSE,NOTICE}.txt。
 
-    内容 = third_party/core/LICENSE（AGPL v3 全文 + 官方附加条款——四个 submodule
-    LICENSE 内容相同，md5 均为 7de9925b…（2026-09-07 校验））。
-    About 面板「许可信息」链接 http://localhost/onlyoffice/licenses/LICENSE.txt →
-    EditorPage 本地 serve（rawfile 根）。
-    合规依据：官方附加条款 3(iii) 用户界面须能访问适用许可信息——AGPL 全文随包+
-    可访问链;若某天打开的不是本地 URL 而是外部域名，许可证文本作为本地资源不依赖外网。
+    两源均在仓库根：
+      LICENSE = AGPL v3 全文 + 官方附加条款（与 third_party/core/LICENSE 正文
+        逐字一致，md5 7de9925b…）+ 本工程声明段（自有代码授权 + 修改版声明与
+        修改起始日期）。取根文件而非子模块文件：附加条款 2 要求修改版携带
+        修改声明与日期——声明随 LICENSE 走，一份文件满足「保留原条款」与
+        「声明修改」两项，避免两处文本漂移。
+      NOTICE = 上游归属、修改清单、随包字体/脚本库的版权与许可、对应源码获取
+        方式（附加条款 1/3 的归属声明与源码可得性）。
+    About 面板许可行链接 http://localhost/onlyoffice/licenses/LICENSE.txt →
+    EditorPage 本地 serve（rawfile 根）；NOTICE 同源可访问（55_lic.js 弹层）。
+    合规依据：官方附加条款 3(iii) 用户界面须能访问适用许可信息——文本随包+
+    可访问链，作为本地资源不依赖外网。
     """
-    src = os.path.join(ROOT, 'third_party', 'core', 'LICENSE')
-    if not os.path.isfile(src):
-        raise SystemExit('随包许可证源缺失：%s' % src)
     dst_dir = os.path.join(DST, 'licenses')
     os.makedirs(dst_dir, exist_ok=True)
-    shutil.copy2(src, os.path.join(dst_dir, 'LICENSE.txt'))
-    print('  许可证文本 → %s/LICENSE.txt (%d bytes)'
-          % (dst_dir, os.path.getsize(os.path.join(dst_dir, 'LICENSE.txt'))))
+    for src_name, dst_name in (('LICENSE', 'LICENSE.txt'), ('NOTICE', 'NOTICE.txt')):
+        src = os.path.join(ROOT, src_name)
+        if not os.path.isfile(src):
+            raise SystemExit('随包许可源缺失：%s' % src)
+        shutil.copy2(src, os.path.join(dst_dir, dst_name))
+        print('  %s → %s/%s (%d bytes)'
+              % (src_name, dst_dir, dst_name,
+                 os.path.getsize(os.path.join(dst_dir, dst_name))))
 
 
 def patch_about_brand():
@@ -694,7 +702,9 @@ def patch_about_brand():
          DesktopEditors（AGPL-3.0）」，其中「AGPL-3.0」即许可全文链接（用户
          2026-09-10：删独占「许可信息：…」行，链接并入本行；修改版日期经用户
          决策不展示——官方附加条款 2 的日期声明由随包 LICENSE 中的说明文本承接；
-         .asc-about-lic 12px 灰字，满足官方附加条款 3(i/ii/iii)）；
+         .asc-about-lic 12px 灰字，满足官方附加条款 3(i/ii/iii)）；其下再一行
+         源码/声明入口（NOTICE，见 §「源码可用性行」）——同时满足 AGPL §6 的
+         对应源码可得性在应用内可达；
       3) 五编辑器 app.css `.asc-about-office:before{content:url(logo_s.svg)}`
          → `content:''`（亮/暗主题两变体）——官方 logo 图示清除；
       4) licensor 公司信息表（公司名/地址/邮箱/电话/网址）→ class hidden
@@ -714,6 +724,12 @@ def patch_about_brand():
     LIC_URL = 'http://localhost/onlyoffice/licenses/LICENSE.txt'
     CREDIT = ('基于 ONLYOFFICE DesktopEditors（<a class="link" href="' + LIC_URL
               + '" target="_blank">AGPL-3.0</a>）')
+    # 源码可用性行（AGPL §6：以客体形式分发须提供对应源码）：随包 NOTICE 写明
+    # 完整源码获取地址与重建步骤。链接走与许可同一本地通道（55_lic.js 弹层），
+    # 不依赖外网可达——审核/用户离线也能读到源码去向。
+    NOTE_URL = 'http://localhost/onlyoffice/licenses/NOTICE.txt'
+    SOURCE_LINE = ('完整源码与第三方声明见 <a class="link" href="' + NOTE_URL
+                   + '" target="_blank">NOTICE</a>')
     APP_BRAND = "appName: 'Pure Office'"
     patched = 0
 
@@ -770,6 +786,15 @@ def patch_about_brand():
             raise SystemExit('About 模板 licensor 版本行命中 %d != 1，结构变化?' % n)
         s = s.replace(old_line, old_line + '\n                ' + new_line)
         print('  about品牌: licensor 模板 + 归属/许可行')
+    # 源码/声明行：紧随归属行（同款样式）；幂等与插入点断言同归属行策略
+    src_line = ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
+                + SOURCE_LINE + '</label></td></tr>\',')
+    if src_line not in s:
+        n = s.count(new_line)
+        if n != 1:
+            raise SystemExit('About 模板归属行命中 %d != 1，无法定位源码行插入点' % n)
+        s = s.replace(new_line, new_line + '\n                ' + src_line)
+        print('  about品牌: licensor 模板 + 源码/声明行')
     # （b2）licensor 公司信息表整体隐藏（用户决策 2026-09-07「暂时先不放公司信息」——
     #     官方公司名/地址/邮箱/电话/网址不再展示，仅保留主品牌/版本/归属/许可；
     #     官方附加条款未要求 UI 展示公司联系方式，版权声明保留在源码头与随包 LICENSE）。

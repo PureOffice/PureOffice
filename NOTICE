@@ -1,0 +1,123 @@
+NOTICE
+======
+Pure Office —— ONLYOFFICE DesktopEditors 的 HarmonyOS NEXT 移植工程
+
+本文件列明本工程发行物中的上游归属、对上游的修改、第三方组件与字体的版权和
+许可声明，与仓库根 LICENSE（GNU AGPL-3.0 全文 + ONLYOFFICE Additional Terms）
+配套阅读。根 LICENSE 是本工程及其上游组件的共同授权条款。
+
+--------------------------------------------------------------------------------
+1. 上游项目
+
+本工程基于以下 ONLYOFFICE 开源组件（原始开发者：Ascensio System SIA，
+https://www.onlyoffice.com ，Copyright (C) 2009-2026 Ascensio System SIA）：
+
+  组件            来源                                   基线
+  core            https://github.com/ONLYOFFICE/core      release/v9.4.0
+  sdkjs           https://github.com/ONLYOFFICE/sdkjs     release/v9.4.0
+  web-apps        https://github.com/ONLYOFFICE/web-apps  release/v9.4.0
+  desktop-apps    https://github.com/ONLYOFFICE/desktop-apps  release/v9.4.0
+  build_tools     https://github.com/ONLYOFFICE/build_tools   release/v9.4.0
+
+以上组件均以 GNU Affero General Public License v3.0 授权，并附 ONLYOFFICE
+Additional Terms（AGPL 第 7 条附加条款）。条款全文随本工程随包分发（见 §6），
+亦见各子模块目录内的 LICENSE 文件（内容一致）。
+
+--------------------------------------------------------------------------------
+2. 修改版声明（依 Additional Terms 第 2 条）
+
+本发行版是 ONLYOFFICE DesktopEditors 的**修改版**，并非 Ascensio System SIA
+发布的原始版本。修改起始日期：2026-09-02。
+
+2.1 third_party/core（补丁集）
+  - Common/3dParty/harfbuzz/make.py：确保 harfbuzz 构建补丁在 apply_patch 前
+    被重新应用（OHOS 构建链依赖）。
+  - DesktopEditor/doctrenderer/hash.cpp：openssl 3.0 在 OPENSSL_NO_MD2 时改用
+    软件实现回落。
+  - 补丁文件：scripts/onlyoffice/patches/core-ohos/*.patch（三条：上述两项 +
+    freetype builds/unix/configure 可执行位修复），由
+    scripts/onlyoffice/patch_core_ohos.sh 幂等应用；官方树保持干净。
+
+2.2 third_party/sdkjs（补丁集）
+  - configs/{word,cell,slide}.json：裁剪 desktop 构建清单（desktop 段仅
+    license.js；Local/common.js 为打开崩溃源）。
+  - common/apiBase.js：空文档（getEmpty）补 word/document/editor.js 进清单；
+    空文档 bSerFormat 显式置 true（9.4.0 DOCY;v2 字符串签名嗅探恒 false）。
+  - 补丁文件：scripts/onlyoffice/patches/sdkjs-desktop/*.patch，由
+    scripts/onlyoffice/patch_sdkjs_desktop.sh 幂等应用；官方树保持干净。
+
+2.3 运行时注入层（ascshim，本工程自有代码）
+  ascshim 是本工程自有的页面注入层（scripts/onlyoffice/desktop/make_ascshim.py
+  及其 src/*.js），在运行时向官方 web 产物注入适配脚本（打开/保存/打印/字体/
+  语言/许可弹层等链路）。它不是对上游源码的源码级修改，为披露完整起见按
+  "修改版组成部分"一并声明。
+
+2.4 未修改组件
+  web-apps、desktop-apps、build_tools 与上游 release/v9.4.0 一致。
+
+2.5 本工程自有代码
+  ArkTS 应用壳（entry/src/main/ets/**）、ascshim 注入层、构建与打包脚本
+  （scripts/onlyoffice/**）、文档——由本工程作者以 GNU AGPL-3.0 授权，
+  条款同根 LICENSE。
+
+--------------------------------------------------------------------------------
+3. 随发行物分发的第三方字体
+
+  字体                             用途          许可
+  Liberation Sans/Serif/Mono       拉丁默认族    SIL Open Font License 1.1
+    （各 4 变体，共 12 个文件）     （Arial 等     （"Licensed under the SIL Open
+                                     字体名映射）   Font License, Version 1.1"）
+  Noto Serif CJK SC                宋体（衬线）  SIL Open Font License 1.1
+  FandolFang / FandolKai           仿宋 / 楷体   GNU GPL + GPL font exception
+  OpenSymbol                       符号字体      MPL-2.0（含部分 Apache-2.0）
+  HarmonyOS Sans SC                黑体（默认    HarmonyOS Sans 字体许可
+                                   CJK 无衬线）  （仅限 HarmonyOS 签名应用内使用）
+
+  版权行（取自字体文件内置 name 表）：
+  - Liberation：Digitized data copyright (c) 2010 Google Corporation.
+    Copyright (c) 2012 Red Hat, Inc.
+  - Noto Serif CJK：(c) 2017-2024 Adobe (http://www.adobe.com/).
+  - Fandol：Copyright (c) 2012-2013, the Fandol team.
+  - OpenSymbol：(c) 2009 Sun Microsystems Inc.；其后由 LibreOffice 贡献者维护。
+  - HarmonyOS Sans：Copyright 2021-2024 Huawei Device Co., Ltd.
+    All Rights Reserved.
+
+  字体文件本身不单独再分发；随本应用二进制包一并提供，不构成字体产品的单独
+  再分发或销售。
+
+--------------------------------------------------------------------------------
+4. 随 web-apps 打包的第三方脚本库
+
+官方 web-apps v9.4.0 产物内随包分发下列库（版本随上游基线）：jQuery、
+Backbone、Underscore、RequireJS（含 requirejs-text）、Monaco、Ace、Less.js、
+socket.io、perfect-scrollbar、XRegExp、es6-promise、whatwg-fetch、
+svg-injector、Framework7(-React)、Bootstrap 等。其许可以 MIT 为主，个别为
+BSD-3-Clause / Apache-2.0；各库完整的版权与许可声明见上游 web-apps 仓库
+vendor/ 目录内随附的许可文件。
+
+--------------------------------------------------------------------------------
+5. 对应源码（Corresponding Source）与复现
+
+本工程完整源码（含上述全部修改）由本工程发布仓库提供，获取地址与版本 tag 见
+仓库 README「源码获取」一节；每个发行版的源码 tag 与二进制产物对应关系记录于
+该节。从源码重建发行物的步骤见 README「快速开始（从零复现）」：
+
+  git submodule update --init            # 取上游基线（子模块 pin = 官方 commit）
+  bash scripts/onlyoffice/patch_core_ohos.sh       # core OHOS 补丁
+  bash scripts/onlyoffice/patch_sdkjs_desktop.sh   # sdkjs desktop 构建适配
+  python3 scripts/onlyoffice/core3d/gen_cmake.py && cmake ... # 构建 native 库
+  cp build-profile.json5.template build-profile.json5         # 本机签名配置
+  OHOS_DEV=<device> bash scripts/onlyoffice/deploy_ohos.sh    # 装配 + 打包 + 装机
+
+（对上游的全部修改均以上述补丁集形式记录，子模块 pin 保持官方 release/v9.4.0；
+完整步骤以 README「快速开始（从零复现）」为准。）
+
+--------------------------------------------------------------------------------
+6. 随包许可文本
+
+本文件与根 LICENSE 的文本随应用二进制包分发于：
+  resources/rawfile/onlyoffice/licenses/LICENSE.txt
+
+应用内「关于」面板提供许可全文访问入口（AGPL Additional Terms 第 3 条）：
+「基于 ONLYOFFICE DesktopEditors（AGPL-3.0）」中的链接可在应用内直接打开
+许可全文。本应用为修改版的信息亦在上述位置与本文件声明。

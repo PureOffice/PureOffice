@@ -16,6 +16,19 @@
   对话/摘要/翻译窗口；**模型配置**：首次点 Chatbot 无模型时按官方语义自动弹设置窗口
   （Ollama localhost:11434 等 provider 自理）
 
+## 源码获取
+
+本工程完整源码（含对上游 ONLYOFFICE 组件的全部修改，清单见 `NOTICE`）：
+
+    https://github.com/hackeris/pure-office-ohos
+
+每个发布版本对应一个源码 tag，与 `.app` / HAP 产物一一对应；从源码重建的完整步骤
+见下节「快速开始（从零复现）」。
+
+许可：本工程以 GNU AGPL-3.0 授权（根 `LICENSE`）。基于 ONLYOFFICE DesktopEditors
+（Copyright (C) Ascensio System SIA，AGPL-3.0），**本版本为修改版**，修改起始日期
+2026-09-02。第三方组件与随包字体的版权、许可声明见 `NOTICE`。
+
 ## 快速开始（从零复现）
 
 ```bash
@@ -25,9 +38,11 @@
 #   hvigor /apps/harmony/bin/hvigorw → OHOS_HVIGORW
 #   target device → OHOS_DEV（必须显式指定，无默认值）
 
-# 0) 子模块与补丁
+# 0) 子模块与补丁（两者幂等，已应用即跳过；grunt-build.sh 全链会自动调用）
 git submodule update --init                 # core/sdkjs/web-apps/build_tools（官方 release/v9.4.0）
-bash scripts/onlyoffice/patch_core_ohos.sh  # core OHOS 平台补丁（幂等）
+bash scripts/onlyoffice/patch_core_ohos.sh      # core OHOS 平台补丁（native 链前置）
+bash scripts/onlyoffice/patch_sdkjs_desktop.sh  # sdkjs desktop 构建适配（grunt 前置）
+cp build-profile.json5.template build-profile.json5   # 本机签名配置（模板含说明；不入库）
 
 # 1) 构建库产物（first time / clean 误清后）
 python3 scripts/onlyoffice/core3d/gen_cmake.py

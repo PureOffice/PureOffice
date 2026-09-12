@@ -91,7 +91,7 @@ bash scripts/onlyoffice/deploy_ohos.sh --probe     # 打包+装机+重启+读探
   `python3 scripts/onlyoffice/core3d/gen_cmake.py && cmake -S build/core3d -B build/core3d/build -DCMAKE_TOOLCHAIN_FILE=<abs path>/scripts/onlyoffice/core3d/ohos-arm64.toolchain.cmake && cmake --build build/core3d/build -j$(nproc)`
 - **增量打包校准**：改 .ets 后行为没变 → `strings entry/build/.../entry-default-signed.hap | grep <新字符串>` 确认进包（踩坑：modules.abc 未刷新）。
 - hdc **多设备必须 `-t 192.168.1.8:33363`**；截图 `snapshot_display` 后缀必须 `.jpeg`。
-- 签名复用 wineohos 证书（build-profile.json5 signingConfigs）。
+- 签名配置在 build-profile.json5 的 signingConfigs（2026-09-12 起该文件不入库——含本机签名材料路径与口令；模板见 build-profile.json5.template）。
 
 ## 9. 下一步（迭代 2/3）注意点
 
