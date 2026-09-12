@@ -703,6 +703,22 @@ struct EditorPage {
           break;
         }
       }
+      // 编辑器内顶部标题栏同步：官方标题只在打开链注入一次（ascshim 的
+      // document.title → onDocInfo → Header.setDocumentCaption），另存为改名后
+      // 官方 UI 仍显示旧名——走同一个官方入口刷新（该函数内部同时维护
+      // caption/扩展名/只读后缀三个状态，直接改 DOM 会与其状态脱节）。
+      if (base.length > 0) {
+        ctx.js('(function(){try{'
+          + 'var ns=window.SSE||window.DE||window.PE;'
+          + 'var m=ns&&ns.controllers&&ns.controllers.Main;'
+          + 'var a=(m&&typeof m.getApplication==="function")?m.getApplication():null;'
+          + 'var vp=(a&&typeof a.getController==="function")?a.getController("Viewport"):null;'
+          + 'var hd=(vp&&typeof vp.getView==="function")?vp.getView("Common.Views.Header"):null;'
+          + 'if(hd&&typeof hd.setDocumentCaption==="function"){hd.setDocumentCaption('
+          + JSON.stringify(base) + ');}'
+          + 'console.error("LSO_TITLE_SET");'
+          + '}catch(x){console.error("LSO_TITLE_ERR "+x);}})()', 'titleSet');
+      }
       if (ctx.state.name.length > 0) {
         const specA = specOf(ctx.state.ext);
         const typeNum = specA !== null ? specA.recentType : RECENT_TYPE_DOCX;

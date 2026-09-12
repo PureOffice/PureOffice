@@ -1122,8 +1122,14 @@ git commit -m "docs: 格式扩展实测记录与功能矩阵更新"
 | 6 | recents 图标 | ⚠️ UI 不可达 |「最近使用」面板自 2026-09-05 起隐藏（B 架构下文件位置为 picker 授权 uri、授权会回收 → 路径语义不成立）→ 该项当前无 UI 出口；recents 数据本身由 `RECENTS_APPEND_SAVEAS` 日志守 |
 | 7 | 打印 .doc | ✅ | `PRINT_X2T rc=0x0` → `PRINT_PDF size=147458 pdfok` → 系统打印界面两页预览内容正确（**源格式 .doc**，证明 bin2pdf 与源格式无关） |
 
-**遗留小瑕疵（记录，未修）**：另存为切换格式后，tab 标题已更新为目标名，但**编辑器内
-顶部标题栏**仍显示旧名（`editorConfig.title` 未随身份演进刷新）。
+**另存为后标题栏同步（2026-09-12 查出并修复）**：另存为改名后 tab 标题已更新，但
+**编辑器内顶部标题栏**仍显示旧名——官方标题只在打开链注入一次（ascshim 的
+`document.title` → `onDocInfo` → `Header.setDocumentCaption`），改名路径无人再调它。
+修法 = `doSaveAs` 落盘并更新身份后，经页面调官方同一入口
+（`Main.getApplication().getController('Viewport').getView('Common.Views.Header')
+.setDocumentCaption(新名)`；该函数内部同时维护 caption/扩展名/只读后缀状态，直接改 DOM
+会与其状态脱节）。真机 1.6 实证：sample.doc 另存为 sample.docx 后，编辑器标题栏与
+tab 标题一致（日志 `LSO_TITLE_SET`）。
 
 ### T8 Step 2 保真度记录
 
