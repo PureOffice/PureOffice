@@ -112,7 +112,8 @@ function buildP0Web(ctx: P0TabCtx) {
     .domStorageAccess(true)
     .fileAccess(true)
     .onInterceptRequest((event) =>
-      loadRaw(event.request, ctx.resMgr!, ctx.filesDir, ((m: string) => ctx.log('[P0T' + ctx.id + '] ' + m))) as WebResourceResponse)
+      loadRaw(event.request, ctx.resMgr!, ctx.filesDir, ctx.filesDir + '/media',
+        ((m: string) => ctx.log('[P0T' + ctx.id + '] ' + m))) as WebResourceResponse)
     .onControllerAttached(() => {
       ctx.onAttached();
     })

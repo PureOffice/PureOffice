@@ -1,6 +1,7 @@
 import { webview } from '@kit.ArkWeb';
 import { BuilderNode, NodeController, UIContext } from '@kit.ArkUI';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
 import { loadRaw } from '../common/rawfileLoader';
 import { resourceManager } from '@kit.LocalizationKit';
 import { specOf } from '../common/formats';
@@ -65,6 +66,15 @@ export class DocTabCtx {
   onPageEndCb: CtxReady | null;
   /** Web 组件 onControllerAttached 回调（仅第一次——节点复用时不重装配） */
   onAttached: () => void;
+  /**
+   * 页面侧文件选择器请求（ArkWeb onShowFileSelector）。
+   * 引擎的插入图片/插入文档走 web 形态的 `<input type=file>`（editorscommon.js
+   * `GetUploadInput`）——ArkWeb 里必须由宿主接管才会弹选择器，否则 click() 无反应。
+   * EditorPage 注入实现：弹系统 picker → 拷入本 tab 工作目录 → handleFileList(路径)。
+   * 缺省空实现 = 取消（回填空列表）。
+   */
+  onPickFile: (result: FileSelectorResult, acceptTypes: string[]) => void = () => {
+  };
 
   constructor(id: number, kind: string, title: string, url: string,
     resMgr: resourceManager.ResourceManager, filesDir: string, log: (m: string) => void,
@@ -93,13 +103,28 @@ export class DocTabCtx {
     };
   }
 
-  /** per-tab 临时文件名（多文档隔离——共享名互踩必现级 bug，2026-09-08） */
-  tabPath(base: string): string {
-    const dot = base.lastIndexOf('.');
-    if (dot > 0) {
-      return this.filesDir + '/' + base.substring(0, dot) + '.' + this.id + '.' + base.substring(dot + 1);
+  /**
+   * per-tab 工作目录（多文档隔离的**目录**级实现）。
+   * 为何要目录（2026-09-12）：x2t 转换时把文档内嵌媒体解包到「工作文件所在目录/media」
+   * （DocxSerializer setSrcPath(bin 目录)），而原先所有 tab 的临时文件平铺在 filesDir
+   * 根、只靠文件名后缀区分 → 媒体全落同一个 `filesDir/media/` → 两个 tab 打开不同文档
+   * 且图名相同（都叫 image1.png）时互相覆盖（显示/保存都拿错图，静默）。
+   * 收进 per-tab 目录后 x2t 自然解包到 `<tabDir>/media/`，隔离无需额外代码。
+   * 目录首次取用时创建（mkdirSync 非递归，此处仅一级；已存在则忽略）。
+   */
+  tabDir(): string {
+    const d = this.filesDir + '/t' + this.id;
+    try {
+      fs.mkdirSync(d);
+    } catch (e) {
+      // 已存在——正常路径
     }
-    return this.filesDir + '/' + base + '.' + this.id;
+    return d;
+  }
+
+  /** per-tab 临时文件路径（工作目录内——多文档隔离） */
+  tabPath(base: string): string {
+    return this.tabDir() + '/' + base;
   }
 
   /** runJavaScript 帮助（打点/守卫共用；错误留痕） */
@@ -203,7 +228,24 @@ function buildDocWeb(ctx: DocTabCtx) {
     .domStorageAccess(true)
     .fileAccess(true)
     .onInterceptRequest((event) =>
-      loadRaw(event.request, ctx.resMgr!, ctx.filesDir, ((m: string) => ctx.log('[' + ctx.kind + ctx.id + '] ' + m))) as WebResourceResponse)
+      loadRaw(event.request, ctx.resMgr!, ctx.filesDir, ctx.tabDir() + '/media',
+        ((m: string) => ctx.log('[' + ctx.kind + ctx.id + '] ' + m))) as WebResourceResponse)
+    // 文件选择器（插入图片等 <input type=file> 的宿主实现）。同步 return true =
+    // 已接管；实际选择与回填在 ctx.onPickFile 里异步完成（handleFileList 可在
+    // 回调外调用）。不接管则 ArkWeb 无从弹选择器，页面 click() 静默无反应。
+    .onShowFileSelector((event) => {
+      try {
+        ctx.onPickFile(event.result, event.fileSelector.getAcceptType());
+      } catch (e) {
+        ctx.log('[' + ctx.kind + ctx.id + '] pickfile err ' + String(e));
+        try {
+          event.result.handleFileList([]);
+        } catch (e2) {
+          // 回填失败——忽略（页面侧按取消处理）
+        }
+      }
+      return true;
+    })
     .onControllerAttached(() => {
       ctx.onAttached();
     })

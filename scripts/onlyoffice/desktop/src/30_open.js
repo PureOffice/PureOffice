@@ -44,12 +44,69 @@
             }
           } catch (x) { console.error('M7AUTO_DIRECT_ERR ' + String(x)); }
         };
+        // 插入图片（m7img=1 专用）：构造 File 对象喂给 sdkjs 的**上传汇合点**
+        // （AscCommon.UploadImageFiles —— <input type=file> 选完文件之后的同一条路；
+        // 只跳过系统 picker 一步，picker 需要手指、uitest 注入不了）。返回的 URL 再走
+        // _addImageUrl 进模型（等同 _uploadCallback 的后半程）。
+        var _insertImage = function(_ap, done) {
+          var _PNG = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAeklEQVR4nO3ZwQmDQABFQQ0WZXch3dmV3sVDSMSHOHNcWPiPPe4wAJTGg7NlvXzG1+b94Fcy40QCagJqAmoCagJqAmrTP5fX+XPKiHF5/3z39i8goCagJqAmoCagJqAmoCagJqAmoCag5peyJqAmoCagJqAmoCYA4Nk2q3UHadIXJqMAAAAASUVORK5CYII=';
+          var _n = 0;
+          var _tick = function() {
+            _n++;
+            var AC = window.AscCommon;
+            if (!AC || typeof AC.UploadImageFiles !== 'function') {
+              if (_n < 200) { setTimeout(_tick, 200); } else { console.error('M7IMG_GIVEUP'); done(); }
+              return;
+            }
+            try {
+              var _bin = atob(_PNG);
+              var _arr = new Uint8Array(_bin.length);
+              for (var i = 0; i < _bin.length; i++) { _arr[i] = _bin.charCodeAt(i); }
+              var _f = new File([_arr], 'm7insert.png', { type: 'image/png' });
+              AC.UploadImageFiles([_f], '', '', '', '', '', '', function(err, urls) {
+                console.error('M7IMG_UPLOAD err=' + err + ' urls=' + JSON.stringify(urls));
+                try {
+                  if (_ap && typeof _ap._addImageUrl === 'function') {
+                    _ap._addImageUrl(urls, {});
+                    console.error('M7IMG_INSERTED');
+                  } else { console.error('M7IMG_NOAPI'); }
+                } catch (e) { console.error('M7IMG_INS_ERR ' + String(e)); }
+                setTimeout(done, 1500);   // 留一拍给模型装载与渲染再保存
+              });
+            } catch (e) { console.error('M7IMG_ERR ' + String(e)); done(); }
+          };
+          setTimeout(_tick, 300);
+        };
         var _onDocReady = function() {
           try {
             var _ap = _getApi();
             // 官方事件 asc_onDocumentContentReady（apiBase.js:1519）已证文档加载完成
             // （=旧轮询判据 private_GetLogicDocument/wbModel 的等价且更权威时机）
             var _ftq = (String(window.location.search).match(/[?&]fileType=([^&]+)/) || [])[1] || 'docx';
+            // m7img：插入图片后保存（验证"插入的图进模型 → 渲染供给 → 进保存产物"）。
+            // =2 时插入后再撤销——验证**模型回退后保存产物不含该图**（删除链的另一半：
+            // 保存按模型引用打包，模型里没有的图不会被打进产物；真机选中→按键删除的
+            // 交互层由手指验证）。
+            var _mimg = (String(window.location.search).match(/[?&]m7img=([123])(&|$)/) || [])[1];
+            if (_mimg) {
+              _insertImage(_ap, function() {
+                if (_mimg === '2') {
+                  try {
+                    // 三编辑器的撤销导出名不同：word/slide 是 Undo，cell 另有 asc_Undo
+                    var _uf2 = (typeof _ap.Undo === 'function') ? _ap.Undo
+                      : (typeof _ap.asc_Undo === 'function' ? _ap.asc_Undo : null);
+                    if (_uf2) {
+                      _uf2.call(_ap);
+                      console.error('M7IMG_UNDONE');
+                    } else { console.error('M7IMG_NOUNDO'); }
+                  } catch (ue) { console.error('M7IMG_UNDO_ERR ' + String(ue)); }
+                  setTimeout(_doSave, 1500);
+                  return;
+                }
+                _doSave();
+              });
+              return;
+            }
             var _insOk = false;
             if (_ftq === 'docx' && _ap && typeof _ap.asc_AddText === 'function') {
               // docx：插入文本+保存（验证编辑内容进保存产物）

@@ -87,7 +87,7 @@ SRC_DIR = os.path.join(HERE, 'src')
 #   的**独立段**里尽早装钩子——见该文件注释）
 # 注意：00_boot.js 的 `(function() {` 是**故意不闭合**的「外层头」（其后各段都在它内部），
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
-PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '44_modalguard.js', '45_print.js', '50_init.js', '55_lic.js', '57_about.js']
+PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '44_modalguard.js', '45_print.js', '47_img.js', '48_mediaunpack.js', '50_init.js', '55_lic.js', '57_about.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 

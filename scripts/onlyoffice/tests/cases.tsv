@@ -15,6 +15,24 @@
 open-word|m7accept=1;m7file=sample.docx|60|PROF_SNAP|LSO_OPEN_DOCUMENT_OK,FONT_WARM_FILLED|FONT_WARM_PF_GIVEUP,LSO_LOAD_ERR|docx 打开+渲染+字体装填
 open-cell|m7accept=1;m7file=sample.xlsx|180|PROF_SNAP|LSO_DIOPEN_OK,FONT_WARM_FILLED|FONT_WARM_PF_GIVEUP|cell 打开（DI 链，GUI 懒建较慢：超时给足）
 open-slide|m7accept=1;m7file=sample.pptx|180|PROF_SNAP|LSO_KICK_SERVERID,FONT_WARM_FILLED|FONT_WARM_PF_GIVEUP|slide 打开（DI 链 + 双闸门踢闸）
+# —— 媒体供给（显示链：引擎内嵌图 → _offline_media/<name> → 拦截层读 files/media）——
+#   结束判据必须取 media hit 本身：实采 PROF_SNAP（ts 63687）早于图片请求（68800），
+#   用 PROF_SNAP 会在断言前就判定结束。禁止项只针对**样本那张图**的 miss 全路径——
+#   引擎对非文档来源另有 image1.jpg…image6.jpg 一族请求（本来就不存在），
+#   宽泛禁 "media miss:" 会假 FAIL。
+media-supply|m7accept=1;m7file=sample-img.pptx|180|media hit: image1.png|media hit: image1.png bytes=769,LSO_KICK_SERVERID|/image1.png Error|含图 pptx：内嵌媒体供给命中（x2t 解包就位 → 拦截层应答，图片渲染前置条件）
+media-supply-doc|m7accept=1;m7file=sample-img.docx|180|media hit: image1.png|media hit: image1.png bytes=765,LSO_OPEN_DOCUMENT_OK|/image1.png Error|含图 docx：内嵌媒体供给命中（三格式共用同一拦截层与 tabDir/media）
+# —— 插入图片链（m7img=1：构造 File 走 sdkjs 上传汇合点，跳过需手指的系统 picker）——
+#   判据取 media hit insert1.png：证明插入的图真的**回灌渲染**（落盘→模型→引擎请求→
+#   拦截层应答），不只是写了个文件；保存产物含图另由 out 目录的产物比对证（见 img-insert 说明）。
+img-insert-ppt|m7accept=1;m7file=sample-img.pptx;m7auto=1;m7img=1|180|M7AUTO_DIRECT_SAVE|M7IMG_INSERTED,media hit: insert1.png bytes=179,IMG_PUT ok|IMG_PUT_BADPARAM,LSO_OPEN_STALE|插入图片(pptx)：上传→宿主落盘 tabDir/media→进模型→渲染供给→保存
+img-insert-doc|m7accept=1;m7file=sample-img.docx;m7auto=1;m7img=1|180|M7AUTO_DIRECT_SAVE|M7IMG_INSERTED,media hit: insert1.png bytes=179|IMG_PUT_BADPARAM,LSO_OPEN_STALE|插入图片(docx)：同上（word 编辑器插入路径）
+# 反向链（删除的可自动验部分）：插入后**撤销** → 模型回退 → 保存产物不含该图
+#   （保存按模型引用打包，模型里没有的图不进产物；真机选中→按键删除由手指验证）
+img-undo-ppt|m7accept=1;m7file=sample-img.pptx;m7auto=1;m7img=2|180|M7AUTO_DIRECT_SAVE|M7IMG_UNDONE,M7IMG_INSERTED|IMG_PUT_BADPARAM|插入后撤销：模型回退 → 产物不含插入的图
+# xlsx 的媒体供给靠**宿主预解包**补齐（x2t 不导出 xl/media/*，见 48_mediaunpack.js）：
+#   页面在文档注入前解析源 zip → media/unpack 落 tabDir/media → 引擎渲染时按引用取。
+media-supply-xls|m7accept=1;m7file=sample-img.xlsx|240|media hit: image1.png|LSO_UNPACK found,media hit: image1.png bytes=767|/image1.png Error|含图 xlsx：宿主预解包 xl/media → 拦截层应答
 # —— 保存链（m7auto：模型就绪→序列化→x2t→回写源文件）——
 save-word|m7accept=1;m7file=sample.docx;m7auto=1|120|SAVE_BIN_BACK|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|docx 自动编辑+保存+回写
 save-cell|m7accept=1;m7file=sample.xlsx;m7auto=1|240|SAVE_BIN_BACK|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|xlsx 自动编辑+保存+回写

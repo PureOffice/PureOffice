@@ -24,6 +24,30 @@ interface CloseGuardDefer {
 
 /** ArkTS 侧调试开关：false=仅落 web_console.txt 文件（默认）；true=另 hilog 双写 */
 const ARK_DEBUG: boolean = false;
+
+/** 图片替换/插入的默认后缀集（accept 给不出可用后缀时兜底） */
+const IMAGE_SUFFIXES: string[] = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp',
+  '.tif', '.tiff', '.svg'];
+
+/**
+ * ArkWeb accept 类型 → picker 后缀过滤。页面 `<input type=file>` 的 accept 由 sdkjs
+ * 图片属性给出（形如 '.png,.jpg' 或 'image/*'）；picker 只认后缀形态，通配/空则用
+ * 图片后缀集兜底（插入图片是当前唯一的页面侧文件选择场景）。
+ */
+function imageSuffixesFrom(accept: string[]): string[] {
+  const out: string[] = [];
+  for (const a of accept) {
+    const t = a.trim().toLowerCase();
+    if (t.startsWith('.') && t.length > 1) {
+      out.push(t);
+    } else if (t.indexOf('image/') === 0) {
+      for (const suf of IMAGE_SUFFIXES) {
+        out.push(suf);
+      }
+    }
+  }
+  return out.length > 0 ? out : IMAGE_SUFFIXES;
+}
 /**
  * 打印字体表（x2t bin2pdf 的 m_sFontDir 内容）——2026-09-10。
  *
@@ -217,7 +241,11 @@ struct EditorPage {
       // 字节 len=1086）但旧文档模型残留（真机实锤：新建「未命名的文档」显示 demo-cn 7 页
       // 内容）；sid 强制全新导航。P1b 起 sid=tabId（单调递增，比 Date.now 更保唯一；
       // 语义=tab 标识）。禁止回退为固定 URL（v= 仅防 HTTP 缓存，不防复用）。
-      + '&sid=' + (sidVal !== undefined ? sidVal : Date.now());
+      + '&sid=' + (sidVal !== undefined ? sidVal : Date.now())
+      // 源文件名交给页面做**媒体预解包**（48_mediaunpack：xlsx 的 xl/media/* 不被 x2t
+      // 导出到工作目录，页面在文档注入前自己解出来落盘）。新建文档时 title 是默认名
+      // （无 OOXML 后缀）→ 页面侧直接跳过，无额外网络请求。
+      + '&src=' + encodeURIComponent(title);
     // M7 验收态：自动打开后追加 m7auto=1（ascshim：模型就绪→序列化→save:bin→x2t 落盘）
     if (this.m7Target.length > 0) {
       url = url + '&m7auto=1'
@@ -229,7 +257,9 @@ struct EditorPage {
         + (Smoke.ai ? '&m7ai=1' : '')
         // autosave 语义保存（userFlag=0）验收门控：仅显式 m7autosave=1 时拼——
         // 产品路径的保存恒为用户保存（见 30_open.js m7autosave 段）
-        + (Smoke.autosave ? '&m7autosave=1' : '');
+        + (Smoke.autosave ? '&m7autosave=1' : '')
+        // 插入图片验收门控（m7img）：模型就绪后走上传汇合点插入内置小图（见 47_img/30_open）
+        + (Smoke.img.length > 0 ? '&m7img=' + Smoke.img : '');
     }
     return url;
   }
@@ -292,6 +322,17 @@ struct EditorPage {
       // （引擎 CDocumentRenderer 产物，非 PDF 文件格式）→ x2t bin2pdf 转真 PDF
       // → @ohos.print 调起系统打印。
       return this.printBin(ctx, param);
+    }
+    if (cmd === 'media:put') {
+      // 插入图片链：47_img.js 覆写 AscCommon.UploadImageFiles 后发来（官方 web 形态
+      // 此处 POST DocumentServer 上传服务，本壳无服务器 → 宿主落盘）。param 形如
+      // '<ext>|<base64>'，返回写入的文件名（页面据此建模型引用 media/<name>）。
+      return this.putMedia(ctx, param);
+    }
+    if (cmd === 'media:unpack') {
+      // 文档内嵌媒体预解包（48_mediaunpack.js：xlsx 的 xl/media/* 不被 x2t 导出到
+      // 工作目录，由页面在文档注入前解出并落盘）。param 用原名，与 bin 里的引用对齐。
+      return this.putMediaNamed(ctx, param);
     }
     if (cmd === 'go:folder') {
       // 官方桌面"返回"（FileMenu 返回到文档列表）→ tab 化语义：激活主页 tab（doc 实例
@@ -746,6 +787,155 @@ struct EditorPage {
   }
 
   /**
+   * 插入图片落盘（47_img.js 覆写 AscCommon.UploadImageFiles 后的宿主端）。
+   * param = '<ext>|<base64>'；字节写进**本 tab** 的 media/ 目录——与打开链 x2t 解包
+   * 同处、保存链也从这里取图（DocxSerializer 按 bin 同级 media/ 取图），三条链共用
+   * 一个目录是"插入的图保存后还在"的前提。返回文件名；失败返回 '""'（页面按上传
+   * 错误提示，不静默）。
+   * 命名 insert<N>.<ext>：与引擎自解包的 image<N>.* 区分，编号取目录现状（避免覆盖
+   * 已插入的图——同名会让两张图互相顶替）。
+   */
+  private putMedia(ctx: DocTabCtx, param: string): string {
+    try {
+      const bar = param.indexOf('|');
+      if (bar <= 0) {
+        this.arkLog('IMG_PUT_BADPARAM');
+        return '""';
+      }
+      const ext = param.substring(0, bar).replace(/[^a-z0-9]/g, '');
+      const buf = b64ToBuf(param.substring(bar + 1));
+      if (ext.length === 0 || buf.byteLength === 0) {
+        this.arkLog('IMG_PUT_EMPTY ext=' + ext + ' len=' + buf.byteLength);
+        return '""';
+      }
+      const dir = ctx.tabDir() + '/media';
+      try {
+        fs.mkdirSync(dir);
+      } catch (e) {
+        // 目录已存在
+      }
+      let n = 1;
+      try {
+        for (const nm of fs.listFileSync(dir)) {
+          const m = nm.match(/^insert([0-9]+)\./);
+          if (m !== null) {
+            const v = parseInt(m[1], 10);
+            if (v >= n) {
+              n = v + 1;
+            }
+          }
+        }
+      } catch (e) {
+        // 目录为空/不可列（首次插入即此）
+      }
+      const name = 'insert' + n + '.' + ext;
+      if (!writeFileBuf(dir + '/' + name, buf)) {
+        this.arkLog('IMG_PUT_WRITE_ERR ' + dir + '/' + name);
+        return '""';
+      }
+      this.arkLog('IMG_PUT ok tab=' + ctx.id + ' ' + name + ' bytes=' + buf.byteLength);
+      return name;
+    } catch (e) {
+      this.arkLog('IMG_PUT_ERR ' + String(e));
+      return '""';
+    }
+  }
+
+  /**
+   * 文档内嵌媒体按**原名**落盘（48_mediaunpack.js 预解包后发来；与 putMedia 的区别是
+   * 名字必须保持 zip 里的原始文件名——bin 里的图片引用就是这个名字，改名等于对不上）。
+   * 形态校验从严（单段文件名 + 图片后缀）：名字来自文档 zip，与用户输入同等不可信。
+   */
+  private putMediaNamed(ctx: DocTabCtx, param: string): string {
+    try {
+      const bar = param.indexOf('|');
+      if (bar <= 0) {
+        return '""';
+      }
+      const name = param.substring(0, bar);
+      if (!/^[A-Za-z0-9_]+\.(png|jpg|jpeg|gif|bmp|webp|tif|tiff|svg|emf|wmf)$/.test(name)) {
+        this.arkLog('MEDIA_UNPACK_BADNAME ' + name);
+        return '""';
+      }
+      const buf = b64ToBuf(param.substring(bar + 1));
+      if (buf.byteLength === 0) {
+        return '""';
+      }
+      const dir = ctx.tabDir() + '/media';
+      try {
+        fs.mkdirSync(dir);
+      } catch (e) {
+        // 目录已存在
+      }
+      if (!writeFileBuf(dir + '/' + name, buf)) {
+        this.arkLog('MEDIA_UNPACK_WRITE_ERR ' + name);
+        return '""';
+      }
+      this.arkLog('MEDIA_UNPACK ok tab=' + ctx.id + ' ' + name + ' bytes=' + buf.byteLength);
+      return name;
+    } catch (e) {
+      this.arkLog('MEDIA_UNPACK_ERR ' + String(e));
+      return '""';
+    }
+  }
+
+  /**
+   * 插入图片的宿主文件选择器（DocTabHost.onShowFileSelector → ctx.onPickFile）。
+   * ArkWeb 不接管 `<input type=file>` 的 click 时页面侧**静默无反应**——接收管后由
+   * 宿主弹系统 picker，把选中文件先拷进本 tab 工作目录再回填路径：picker 授权的 uri
+   * 页面侧读不到（FileReader 需要沙箱内可读路径），拷入后也与源文件解耦（源文件被
+   * 删/移动不影响已插入的图）。
+   */
+  private pickFileForWeb(ctx: DocTabCtx, result: FileSelectorResult, accept: string[]): void {
+    this.doPickFile(ctx, result, accept);
+  }
+
+  private async doPickFile(ctx: DocTabCtx, result: FileSelectorResult,
+    accept: string[]): Promise<void> {
+    try {
+      const aCtx = getContext(this) as common.UIAbilityContext;
+      const dvp = new picker.DocumentViewPicker(aCtx);
+      const opts = new picker.DocumentSelectOptions();
+      opts.maxSelectNumber = 1;
+      opts.fileSuffixFilters = imageSuffixesFrom(accept);
+      const uris = await dvp.select(opts);
+      if (uris.length === 0) {
+        this.arkLog('PICKFILE_CANCEL tab=' + ctx.id + ' accept=' + accept.join(','));
+        result.handleFileList([]);
+        return;
+      }
+      const ab = readFileBuf(uris[0]);
+      if (ab === null) {
+        this.arkLog('PICKFILE_READERR ' + uris[0]);
+        result.handleFileList([]);
+        return;
+      }
+      let base = uris[0].substring(uris[0].lastIndexOf('/') + 1);
+      try {
+        base = decodeURIComponent(base);
+      } catch (de) {
+        // 尾段编码异常：按原样用（与 handleLocalUri 同策略）
+      }
+      base = base.replace(/[\\/]/g, '_');
+      const dst = ctx.tabDir() + '/' + base;
+      if (!writeFileBuf(dst, ab)) {
+        this.arkLog('PICKFILE_WRITE_ERR ' + dst);
+        result.handleFileList([]);
+        return;
+      }
+      this.arkLog('PICKFILE_OK tab=' + ctx.id + ' ' + base + ' bytes=' + ab.byteLength);
+      result.handleFileList([dst]);
+    } catch (e) {
+      this.arkLog('PICKFILE_ERR ' + String(e));
+      try {
+        result.handleFileList([]);
+      } catch (e2) {
+        // 回填失败（页面已销毁等）——页面按取消处理
+      }
+    }
+  }
+
+  /**
    * 打印字体就绪（幂等）：rawfile/onlyoffice/fonts → 沙箱 printFontDir，供 x2t
    * bin2pdf 建字体表（缘由见 PRINT_FONT_FILES）。标记文件 .ready 存在即视为完成，
    * 避免每次启动重复写 ~10MB。返回是否可用。
@@ -946,6 +1136,39 @@ struct EditorPage {
     }
   }
 
+  /**
+   * per-tab 工作目录启动清扫（`t<id>`，DocTabCtx.tabDir）。
+   * 与 sweepPrintFiles 同款兜底：进程崩溃/强杀时 tab 未走正常关闭路径 → 目录连同
+   * 其中的 x2t 解包媒体（media/）一起残留。启动时刻无活跃 tab，可整体清。
+   * 只认 `t<数字>` 形态（避免误伤其它 t 开头的文件）。
+   */
+  private sweepTabDirs(): void {
+    try {
+      const names = fs.listFileSync(this.hostFilesDir);
+      for (const n of names) {
+        if (!/^t\d+$/.test(n)) {
+          continue;
+        }
+        const dir = this.hostFilesDir + '/' + n;
+        try {
+          const inner = fs.listFileSync(dir);
+          for (const f of inner) {
+            try {
+              fs.unlinkSync(dir + '/' + f);
+            } catch (e) {
+              // 占用中/已删/子目录——忽略（残留由下次启动再试）
+            }
+          }
+          fs.rmdirSync(dir);
+        } catch (e) {
+          // 非目录/非空——忽略
+        }
+      }
+    } catch (e) {
+      // 目录不可读——非致命
+    }
+  }
+
   /** 删除该 tab 的打印工作目录（幂等；调用点只在打印任务终态） */
   private cleanupPrintFiles(ctx: DocTabCtx): void {
     const dir = this.hostFilesDir + '/print/' + ctx.id;
@@ -1136,6 +1359,8 @@ struct EditorPage {
         this.resourceManager!, this.hostFilesDir,
         ((m: string) => this.arkLog(m)), ((c: DocTabCtx) => this.onInstanceReady(c)),
         ((c: DocTabCtx) => this.onPageEndCB(c)));
+      // 插入图片：页面 <input type=file> 的宿主端（onShowFileSelector → 系统 picker）
+      ctx.onPickFile = ((r: FileSelectorResult, a: string[]) => this.pickFileForWeb(ctx, r, a));
       // M7：源文件持久化到沙箱 <name>（openRecent 的来源 / 保存回写目标 / recents 条目；
       // 选择器授权 uri 读权限短暂——字节落盘即固化）。newDoc 跳过（无文件身份，2026-09-05）
       if (!newDoc) {
@@ -1251,12 +1476,24 @@ struct EditorPage {
     // asc_openDocumentFromBytes，checkStreamSignature 嗅探 DOCY 签名 —— web/服务器链，
     // 与 3.7 web 语义（编辑器页删除 AscDesktopEditor）配套；桌面 doffline 链路待桌面
     // 字体/native 通路三件套齐备后再启用）。
+    // URL 必须指向**本 tab 的工作目录**（t<id>/）：临时产物由 openNewTabEntry 写在
+    // ctx.tabPath 下，按旧的 filesDir/<name> 取会命中上一轮同名残留——文件存在所以
+    // 不报错，页面静默装载陈旧内容（图不渲染、保存回写旧模型）。sz 校验是同一问题
+    // 的第二道闸：内容长度与本轮产物不符即报错，不再静默。
+    let binSz = 0;
+    try {
+      binSz = fs.statSync(docC.tabPath('open-in.bin')).size;
+    } catch (e) {
+      this.arkLog('LSO_BIN_STAT_ERR ' + String(e));
+    }
     const js = '(function(){'
       + 'try{var x=new XMLHttpRequest();'
-      + 'x.open("GET","http://localhost/userfile/open-in.' + docC.id + '.bin?v="+Date.now(),true);'
+      + 'x.open("GET","http://localhost/userfile/t' + docC.id + '/open-in.bin?v="+Date.now(),true);'
       + 'x.responseType="arraybuffer";'
       + 'x.onload=function(){try{var ab=x.response;'
       + 'if(!ab||!ab.byteLength){console.error("LSO_XHR_EMPTY st="+x.status);return;}'
+      + 'if(' + binSz + '&&ab.byteLength!==' + binSz + '){'
+      + 'console.error("LSO_OPEN_STALE got="+ab.byteLength+" want=' + binSz + '");return;}'
       + 'window.postMessage({command:"openDocumentFromBinary",data:ab},"*");'
       + 'console.error("LSO_OPEN_DOCUMENT_OK len="+ab.byteLength);'
       + '}catch(e){console.error("LSO_LOAD_ERR "+String(e));}};'
@@ -1314,6 +1551,7 @@ struct EditorPage {
     // 打印临时文件启动清扫（上次进程崩溃/强杀时任务终态回调未跑，文件会残留
     // 在沙箱；按前缀扫一遍删除。正常关闭路径已在任务终态/tab 关闭时清过）
     this.sweepPrintFiles();
+    this.sweepTabDirs();
     // 打印字体后台解包（~10MB 一次性；放启动后让位首屏。首次打印若仍未就绪
     // 由 ensurePrintFonts 同步补——正确性不依赖本调用）
     setTimeout(() => {
@@ -1390,6 +1628,9 @@ struct EditorPage {
           this.resourceManager!, this.hostFilesDir,
           ((m: string) => this.arkLog(m)), ((c: DocTabCtx) => this.onInstanceReady(c)),
           ((c: DocTabCtx) => this.onPageEndCB(c)));
+        // 与 doc 实例同款注入（欢迎页的上传入口若有 <input type=file> 同样接管）
+        homeCtx.onPickFile = ((r: FileSelectorResult, a: string[]) =>
+          this.pickFileForWeb(homeCtx, r, a));
         this.docTabs = [new DocTabPair(homeCtx)];
         this.docTitles = ['主页'];
         this.docAccents = [''];
@@ -1410,7 +1651,8 @@ struct EditorPage {
     }
     // 清单 = formats 表派生（每种可打开格式一个 sample.<ext>）+ 专用样本——新增格式
     // 自动带上样本（原硬编码四文件清单在扩格式后会静默漏拷：m7open 走沙箱路径读不到）
-    const names: string[] = ['m7-open-test.docx'];
+    const names: string[] = ['m7-open-test.docx', 'sample-img.docx', 'sample-img.pptx',
+      'sample-img.xlsx'];
     for (const suf of pickerSuffixes()) {
       names.push('sample' + suf);
     }

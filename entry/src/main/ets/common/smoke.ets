@@ -30,6 +30,13 @@ export class Smoke {
    *  回归「autosave 不得回写不能原地保存的格式源文件」这条数据安全不变量（见 30_open.js
    *  m7autosave 段；产品路径 userFlag 恒 1） */
   static autosave: boolean = false;
+  /** 插入图片验收门控（m7img）：模型就绪后构造 File 对象走 sdkjs 上传汇合点
+   *  （AscCommon.UploadImageFiles）插入一张内置小图——覆盖"上传→落盘→进模型→渲染
+   *  供给→进保存产物"全链；只跳过系统 picker（需手指，uitest 注入不了）。
+   *  取值 1=插入后保存（正向链）；2=插入后**撤销**再保存（反向链：模型回退后产物
+   *  不含该图——删除链的自动可验部分）。需与 m7auto=1 同用（挂它的模型就绪回调）。
+   *  见 30_open.js m7img 段。 */
+  static img: string = '';
 
   protected static readonly DEFAULT_SAMPLE = 'sample.docx';
   /** 白名单后缀（m7file 只允许验收样本；dev-only 参数，防路径越界）——
@@ -64,6 +71,7 @@ export class Smoke {
     Smoke.key = String(params['m7key'] ?? '');
     Smoke.ai = String(params['m7ai'] ?? '') === '1';
     Smoke.autosave = String(params['m7autosave'] ?? '') === '1';
+    Smoke.img = String(params['m7img'] ?? '');
     const f = String(params['m7file'] ?? Smoke.DEFAULT_SAMPLE);
     // 仅接受 "名.白名单后缀" 文件名（rawfile 路径 <onlyoffice>/<f> 与沙箱 <filesDir>/<f> 拼接处）
     const dot = f.lastIndexOf('.');
