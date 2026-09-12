@@ -1117,7 +1117,7 @@ git commit -m "docs: 格式扩展实测记录与功能矩阵更新"
 | 1 | 打开选择器可见全部支持格式 | ✅ | 一次同屏列出 docx/xlsx/pptx/csv/xls/txt/rtf/ppt/doc —— 需先修 `fileSuffixFilters`（每元素=下拉一个选项且默认只选第一项，逐后缀传会导致只列 .docx），改为单元素+逗号分隔（`ebd6a8e`） |
 | 2 | .doc 保存提示链 | ✅ | `FMT_DIALOG_ON ext=doc to=docx` →「继续」`FMT_DIALOG_CONFIRM` → 保存框默认名 **sample.docx** → `SAVE_AS_WRITE ok=true` → tab 标题变 sample.docx → **二次保存直接 `SAVE_BIN_URI`（无提示）** |
 | 3 | .xls / .ppt / .txt 同款 | ✅ | 默认名 sample.xlsx / sample.pptx / sample.docx，提示文案与落盘均正确（xls、ppt 各走一次完整「继续→保存→替换」） |
-| 4 | .rtf / .csv 原地保存 | ✅ | 回归 case `save-rtf` / `save-csv` PASS（无提示、直接回写、rtf 头与非空校验通过） |
+| 4 | .rtf / .csv 保存 | ✅ | rtf：无提示直接回写（回归 `save-rtf`）；**csv：原地回写前弹「只保存文本内容，格式将丢失」提示**（2026-09-12 新增，见下），回归 `save-csv` PASS |
 | 5 | 提示框取消 | ✅ | `FMT_DIALOG_CANCEL` → 无 `SAVE_AS_WRITE`（不落盘）→ 关闭 tab 时 `CLOSE_GUARD_SAVEABORTED` 仍拦（引擎判干净但保存被取消，守卫按数据安全语义弹框） |
 | 6 | recents 图标 | ⚠️ UI 不可达 |「最近使用」面板自 2026-09-05 起隐藏（B 架构下文件位置为 picker 授权 uri、授权会回收 → 路径语义不成立）→ 该项当前无 UI 出口；recents 数据本身由 `RECENTS_APPEND_SAVEAS` 日志守 |
 | 7 | 打印 .doc | ✅ | `PRINT_X2T rc=0x0` → `PRINT_PDF size=147458 pdfok` → 系统打印界面两页预览内容正确（**源格式 .doc**，证明 bin2pdf 与源格式无关） |
@@ -1130,6 +1130,20 @@ git commit -m "docs: 格式扩展实测记录与功能矩阵更新"
 .setDocumentCaption(新名)`；该函数内部同时维护 caption/扩展名/只读后缀状态，直接改 DOM
 会与其状态脱节）。真机 1.6 实证：sample.doc 另存为 sample.docx 后，编辑器标题栏与
 tab 标题一致（日志 `LSO_TITLE_SET`）。
+
+**csv 保存前提示（2026-09-12 新增）**：csv 只承载纯文本——编辑器里新加的合并单元格/
+颜色/列宽保存回 `.csv` 时写不进去。此前是**静默丢弃**（csv 的 `saveExt == ext`，
+`needsSaveAsPrompt` 为假 → 不触发任何提示），用户以为保存成功却丢了格式。真实差异
+实证：样本原日期 `2026/1/15` 存回后成为 `01-15-26`。
+实现：`formats.ets` 的 `FormatSpec.lossySave`（csv=true，唯一数据源）+ `isLossySave()`；
+`saveBinRaw` 在「不能原地保存」分支**之前**插入 csv 提示分支——**继续 = 原地回写**
+（目标格式不变，与另存为路径本质不同）、取消 = 本次不落盘；落盘段抽成
+`commitSavedLocal()` 供常规路径与「确认后」路径共用（提示框的中断点在 x2t 产物之后，
+确认后无需重新序列化）。
+真机 1.6 产品路径验证（欢迎页「打开本地文件」→ sample.csv → 编辑 → 保存）：
+`FMT_DIALOG_ON ext=csv lossy` → 继续 → `FMT_DIALOG_CONFIRM_LOSSY` + `SAVE_BIN_URI
+ok=true`（**无 `SAVE_AS_WRITE`**，确认是原地回写而非另存为）；取消 → 无落盘
+（产物时间戳不变）。
 
 ### T8 Step 2 保真度记录
 

@@ -63,21 +63,25 @@ export interface FormatSpec {
    *  与 openBinTo 同理必须成对下发。 */
   saveFrom: number;
   saveTo: number;
+  /** 保存只保留文本内容（csv：编辑器里新加的合并单元格/颜色/列宽写不进纯文本）
+   *  → 保存前提示确认（官方 Excel 保存 csv 亦提示）。false = 无此限制 */
+  lossySave: boolean;
 }
 
 /** 可打开格式表（新增格式 = 此处加一行 + 备样本 + 回归 case） */
 const FORMATS: FormatSpec[] = [
-  { ext: 'docx', family: 'word', fileType: 'docx', recentType: 0x41, saveExt: 'docx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
-  { ext: 'doc', family: 'word', fileType: 'docx', recentType: 0x42, saveExt: 'docx', check: 'zip', openBinTo: 0x2001, saveFrom: 0, saveTo: 0, openExtra: '' },
-  { ext: 'rtf', family: 'word', fileType: 'docx', recentType: 0x44, saveExt: 'rtf', check: 'rtf', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
-  { ext: 'txt', family: 'word', fileType: 'docx', recentType: 0x45, saveExt: 'docx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
-  { ext: 'xlsx', family: 'cell', fileType: 'xlsx', recentType: 0x101, saveExt: 'xlsx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
-  { ext: 'xls', family: 'cell', fileType: 'xlsx', recentType: 0x102, saveExt: 'xlsx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
+  { ext: 'docx', family: 'word', fileType: 'docx', recentType: 0x41, saveExt: 'docx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false },
+  { ext: 'doc', family: 'word', fileType: 'docx', recentType: 0x42, saveExt: 'docx', check: 'zip', openBinTo: 0x2001, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false },
+  { ext: 'rtf', family: 'word', fileType: 'docx', recentType: 0x44, saveExt: 'rtf', check: 'rtf', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false },
+  { ext: 'txt', family: 'word', fileType: 'docx', recentType: 0x45, saveExt: 'docx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false },
+  { ext: 'xlsx', family: 'cell', fileType: 'xlsx', recentType: 0x101, saveExt: 'xlsx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false },
+  { ext: 'xls', family: 'cell', fileType: 'xlsx', recentType: 0x102, saveExt: 'xlsx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false },
   { ext: 'csv', family: 'cell', fileType: 'xlsx', recentType: 0x104, saveExt: 'csv', check: 'size', openBinTo: 0x2002,
     saveFrom: 0x2002, saveTo: 0x104,
-    openExtra: '<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding><m_nCsvDelimiter>4</m_nCsvDelimiter>' },
-  { ext: 'pptx', family: 'slide', fileType: 'pptx', recentType: 0x81, saveExt: 'pptx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' },
-  { ext: 'ppt', family: 'slide', fileType: 'pptx', recentType: 0x82, saveExt: 'pptx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '' }
+    openExtra: '<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding><m_nCsvDelimiter>4</m_nCsvDelimiter>',
+    lossySave: true },
+  { ext: 'pptx', family: 'slide', fileType: 'pptx', recentType: 0x81, saveExt: 'pptx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false },
+  { ext: 'ppt', family: 'slide', fileType: 'pptx', recentType: 0x82, saveExt: 'pptx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false }
 ];
 
 /** 扩展名（可带点/大小写）→ 格式规格；未支持返回 null（唯一判定入口） */
@@ -137,6 +141,12 @@ export function editorAppOf(family: string): string {
 export function needsSaveAsPrompt(ext: string): boolean {
   const f = specOf(ext);
   return f !== null && f.saveExt !== f.ext;
+}
+
+/** 保存是否会丢弃格式（原地保存但只留文本——需提示确认，见 FormatSpec.lossySave） */
+export function isLossySave(ext: string): boolean {
+  const f = specOf(ext);
+  return f !== null && f.lossySave;
 }
 
 /** RTF 头「{\rtf」的字节 */

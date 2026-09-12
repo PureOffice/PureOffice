@@ -9,7 +9,7 @@ import { Smoke } from '../common/smoke';
 import { getLaunchOptions, setWindowCloseHandler, setWantUriHandler, takeLaunchUri } from '../entryability/EntryAbility';
 import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, x2tXmlFont, u8ToStr } from '../common/bytes';
 import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } from '../common/recents';
-import { specOf, pickerSuffixes, pickerFilterOption, editorAppOf, needsSaveAsPrompt, checkSaveOut } from '../common/formats';
+import { specOf, pickerSuffixes, pickerFilterOption, editorAppOf, needsSaveAsPrompt, isLossySave, checkSaveOut } from '../common/formats';
 import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
 import { DocTabHost, DocTabCtx, DocTabPair } from './DocTabHost';
 
@@ -202,6 +202,8 @@ struct EditorPage {
   @State fmtDialogText: string = '';
   private fmtDialogCtx: DocTabCtx | null = null;
   private fmtDialogOut: ArrayBuffer | null = null;
+  /** 提示模式：false=「不能原地保存」→确认后另存为；true=csv「丢格式」→确认后原地回写 */
+  private fmtDialogLossy: boolean = false;
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
    *  lang=zh-CN：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
@@ -1264,6 +1266,24 @@ struct EditorPage {
       // 确认后走 doSaveAs（强制 saveExt）。禁止回写：savePath 指向源 .doc，覆盖
       // 会把 docx 字节写进 .doc 文件（名实不符）。新建（saveTarget='none'）本就走
       // 另存为，不需此提示。
+      if (userSaved && ctx.state.saveTarget !== 'none' && isLossySave(ctx.state.ext)) {
+        // csv「丢格式」提示：csv 只承载纯文本，编辑器里新加的合并单元格/颜色/列宽
+        // 写不回去（官方 Excel 保存 csv 亦提示）。与「不能原地保存」不同——确认后
+        // 走**原地回写**（目标格式不变），故单列提示模式；不确认则本次不落盘。
+        this.fmtDialogCtx = ctx;
+        this.fmtDialogOut = outBuf;
+        this.fmtDialogLossy = true;
+        this.fmtDialogText = '「.' + ctx.state.ext + '」只保存文本内容，'
+          + '合并单元格/颜色/列宽等格式将丢失。';
+        this.fmtDialogOn = true;
+        // 守卫「保存」在途：复用 awaitingSaveAs 语义（本段不消费 defer，确认由
+        // commitSavedLocal 收尾 / 取消走 fmtDialogAction 的 clearCloseGuard）
+        if (this.closeGuardDefer !== null && this.closeGuardDefer.ctx === ctx) {
+          this.closeGuardDefer.awaitingSaveAs = true;
+        }
+        this.arkLog('FMT_DIALOG_ON ext=' + ctx.state.ext + ' lossy tab=' + ctx.id);
+        return 'true';
+      }
       if (userSaved && ctx.state.saveTarget !== 'none' && needsSaveAsPrompt(ctx.state.ext)) {
         this.fmtDialogCtx = ctx;
         this.fmtDialogOut = outBuf;
@@ -1292,61 +1312,77 @@ struct EditorPage {
         return 'true';
       }
       if (ctx.state.name.length > 0) {
-        // 「不能原地保存」的格式永不回写源文件——**与 userSaved 无关**：autosave
-        // 走同一约束，否则 .doc 会被 docx 字节原地覆盖（名实不符）。用户保存路径
-        // 已在上方提示分支转另存为；autosave 此处仅同步沙箱工作副本（静默）
-        let uriFailed = false;
-        if (!needsSaveAsPrompt(ctx.state.ext)
-          && ctx.state.saveTarget === 'uri' && ctx.state.savePath.length > 0) {
-          // 已另存为：覆写真实位置（用户数据=savePath uri）
-          const okUri = writeFileBuf(ctx.state.savePath, outBuf);
-          this.arkLog('SAVE_BIN_URI ok=' + okUri + ' uri=' + ctx.state.savePath + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
-          if (!okUri) {
-            // 原位置不可写（授权过期/只读交付 uri）：**不中断**——继续写沙箱工作副本
-            // 保住本次编辑，末尾显式告知另存出口（静默失败=用户以为已保存）
-            this.arkLog('SAVE_BIN_URI_ERR ' + ctx.state.savePath);
-            uriFailed = true;
-          }
+        return this.commitSavedLocal(ctx, outBuf, userSaved);
+      }
+      ctx.state.saveAborted = false;
+      return 'true';
+    } catch (e) {
+      this.arkLog('SAVE_BIN_ERR ' + String(e));
+      return 'false';
+    }
+  }
+
+  /**
+   * 保存落盘（原地回写 + 引擎工作副本同步 + 引擎水位复位 + recents 补录）。
+   * saveBinRaw 的常规路径与「格式提示确认后」路径（csv 丢格式提示）共用——提示框的
+   * 中断点在 x2t 产物之后，用户确认后无需重新序列化，落盘与收尾即可。
+   */
+  private commitSavedLocal(ctx: DocTabCtx, outBuf: ArrayBuffer, userSaved: boolean): string {
+    try {
+      // 「不能原地保存」的格式永不回写源文件——**与 userSaved 无关**：autosave
+      // 走同一约束，否则 .doc 会被 docx 字节原地覆盖（名实不符）。用户保存路径
+      // 已在上方提示分支转另存为；autosave 此处仅同步沙箱工作副本（静默）
+      let uriFailed = false;
+      if (!needsSaveAsPrompt(ctx.state.ext)
+        && ctx.state.saveTarget === 'uri' && ctx.state.savePath.length > 0) {
+        // 已另存为：覆写真实位置（用户数据=savePath uri）
+        const okUri = writeFileBuf(ctx.state.savePath, outBuf);
+        this.arkLog('SAVE_BIN_URI ok=' + okUri + ' uri=' + ctx.state.savePath + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
+        if (!okUri) {
+          // 原位置不可写（授权过期/只读交付 uri）：**不中断**——继续写沙箱工作副本
+          // 保住本次编辑，末尾显式告知另存出口（静默失败=用户以为已保存）
+          this.arkLog('SAVE_BIN_URI_ERR ' + ctx.state.savePath);
+          uriFailed = true;
         }
-        // 引擎工作副本同步（打开/另存为后重开链以最新内容起步；不参与 recents/用户
-        // 数据——用户文件=savePath（uri 或沙箱工作副本，2026-09-05）
-        const srcP = this.hostFilesDir + '/' + ctx.state.name;
-        if (!writeFileBuf(srcP, outBuf)) {
-          this.arkLog('SAVE_BIN_BACK_ERR src=' + srcP);
-          return 'false';
-        }
-        this.arkLog('SAVE_BIN_BACK src=' + srcP + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
-        // 引擎「已保存」水位复位：本保存链是 ArkTS 侧序列化（不经引擎 asc_Save），引擎
-        // History 的 SavedIndex 停在旧值 → Have_Changes() 恒真 → 关闭守卫把已保存的文档
-        // 再判一次「未保存」（重复弹框；覆写幂等故不丢数据，但每存必弹一次）。
-        // 对齐官方 _onSaveCallbackInner 的收尾：Reset_SavedIndex(true) 把已保存点推进到
-        // 当前（Local 形态语义：Index == UserSavedIndex 即无变更），CheckChangedDocument
-        // 同步 isDocumentModified / CanSave 两个标志位。
-        ctx.js('(function(){try{'
-          + 'var h=window.AscCommon&&window.AscCommon.History;'
-          + 'if(h&&typeof h.Reset_SavedIndex==="function"){h.Reset_SavedIndex(true);}'
-          + 'var ns=window.SSE||window.DE||window.PE;'
-          + 'var m=ns&&ns.controllers&&ns.controllers.Main;'
-          + 'var e=m&&m.api;'
-          + 'if(e&&typeof e.CheckChangedDocument==="function"){e.CheckChangedDocument();}'
-          + 'console.error("LSO_SAVED_INDEX_RESET");'
-          + '}catch(x){console.error("LSO_SAVED_INDEX_ERR "+x);}})()', 'saveReset');
-        if (uriFailed) {
-          this.showFormatNotice('原文件不可写（授权已过期或只读），内容已留在应用内；'
-            + '请用「文件 → 另存为」保存到其他位置');
-        }
-        // 保存成功 = 文件身份成立（官方桌面语义：保存后的文件进「最近使用」；
-        // 新建在打开链已禁 recents（openNewTabEntry addRecent=false）——用户保存即补录；
-        // appendRecent 同名去旧置顶，已打开文件的保存同样刷新置顶。
-        // 仅用户保存补录（自动保存/autosave 不打扰列表——2026-09-05 用户实测后修正）。
-        if (userSaved) {
-          const specR = specOf(ctx.state.ext);
-          const saveType = specR !== null ? specR.recentType : RECENT_TYPE_DOCX;
-          // recents.path：真实位置优先（uri），否则沙箱（打开链/兼容）
-          const recentPath = ctx.state.saveTarget === 'uri' ? ctx.state.savePath : srcP;
-          if (appendRecent(this.hostFilesDir, ctx.state.name, recentPath, saveType)) {
-            this.arkLog('RECENTS_APPEND_SAVE name=' + ctx.state.name);
-          }
+      }
+      // 引擎工作副本同步（打开/另存为后重开链以最新内容起步；不参与 recents/用户
+      // 数据——用户文件=savePath（uri 或沙箱工作副本，2026-09-05）
+      const srcP = this.hostFilesDir + '/' + ctx.state.name;
+      if (!writeFileBuf(srcP, outBuf)) {
+        this.arkLog('SAVE_BIN_BACK_ERR src=' + srcP);
+        return 'false';
+      }
+      this.arkLog('SAVE_BIN_BACK src=' + srcP + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
+      // 引擎「已保存」水位复位：本保存链是 ArkTS 侧序列化（不经引擎 asc_Save），引擎
+      // History 的 SavedIndex 停在旧值 → Have_Changes() 恒真 → 关闭守卫把已保存的文档
+      // 再判一次「未保存」（重复弹框；覆写幂等故不丢数据，但每存必弹一次）。
+      // 对齐官方 _onSaveCallbackInner 的收尾：Reset_SavedIndex(true) 把已保存点推进到
+      // 当前（Local 形态语义：Index == UserSavedIndex 即无变更），CheckChangedDocument
+      // 同步 isDocumentModified / CanSave 两个标志位。
+      ctx.js('(function(){try{'
+        + 'var h=window.AscCommon&&window.AscCommon.History;'
+        + 'if(h&&typeof h.Reset_SavedIndex==="function"){h.Reset_SavedIndex(true);}'
+        + 'var ns=window.SSE||window.DE||window.PE;'
+        + 'var m=ns&&ns.controllers&&ns.controllers.Main;'
+        + 'var e=m&&m.api;'
+        + 'if(e&&typeof e.CheckChangedDocument==="function"){e.CheckChangedDocument();}'
+        + 'console.error("LSO_SAVED_INDEX_RESET");'
+        + '}catch(x){console.error("LSO_SAVED_INDEX_ERR "+x);}})()', 'saveReset');
+      if (uriFailed) {
+        this.showFormatNotice('原文件不可写（授权已过期或只读），内容已留在应用内；'
+          + '请用「文件 → 另存为」保存到其他位置');
+      }
+      // 保存成功 = 文件身份成立（官方桌面语义：保存后的文件进「最近使用」；
+      // 新建在打开链已禁 recents（openNewTabEntry addRecent=false）——用户保存即补录；
+      // appendRecent 同名去旧置顶，已打开文件的保存同样刷新置顶。
+      // 仅用户保存补录（自动保存/autosave 不打扰列表——2026-09-05 用户实测后修正）。
+      if (userSaved) {
+        const specR = specOf(ctx.state.ext);
+        const saveType = specR !== null ? specR.recentType : RECENT_TYPE_DOCX;
+        // recents.path：真实位置优先（uri），否则沙箱（打开链/兼容）
+        const recentPath = ctx.state.saveTarget === 'uri' ? ctx.state.savePath : srcP;
+        if (appendRecent(this.hostFilesDir, ctx.state.name, recentPath, saveType)) {
+          this.arkLog('RECENTS_APPEND_SAVE name=' + ctx.state.name);
         }
       }
       // 保存真正落盘（URI/沙箱覆写完成）→ 清「保存中止」标记（2026-09-09 review：
@@ -1355,7 +1391,7 @@ struct EditorPage {
       ctx.state.saveAborted = false;
       return 'true';
     } catch (e) {
-      this.arkLog('SAVE_BIN_ERR ' + String(e));
+      this.arkLog('SAVE_BIN_LOCAL_ERR ' + String(e));
       return 'false';
     }
   }
@@ -2469,10 +2505,12 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     }
     const ctx = this.fmtDialogCtx;
     const out = this.fmtDialogOut;
+    const lossy = this.fmtDialogLossy;
     this.fmtDialogOn = false;
     this.fmtDialogCtx = null;
     this.fmtDialogOut = null;
     this.fmtDialogText = '';
+    this.fmtDialogLossy = false;
     if (ctx === null) {
       // 告知层（不支持格式 / 保存链异常）无保存上下文：关闭即可，无落盘动作。
       // 但 defer 在途时必须消费——本层会出现在守卫「保存」链中途（如源文件不可写），
@@ -2501,6 +2539,12 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
       return;
     }
     const spec = specOf(ctx.state.ext);
+    if (lossy) {
+      // csv「丢格式」提示的「继续」= 直接落盘（原地回写，保存目标格式不变）
+      this.arkLog('FMT_DIALOG_CONFIRM_LOSSY ext=' + ctx.state.ext + ' tab=' + ctx.id);
+      this.commitSavedLocal(ctx, out, true);
+      return;
+    }
     const targetExt = spec !== null ? spec.saveExt : 'docx';
     this.arkLog('FMT_DIALOG_CONFIRM ext=' + ctx.state.ext + ' to=' + targetExt + ' tab=' + ctx.id);
     this.doSaveAs(ctx, out, targetExt);

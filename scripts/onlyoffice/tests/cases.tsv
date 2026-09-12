@@ -64,7 +64,11 @@ open-txt|m7accept=1;m7file=sample.txt|60|PROF_SNAP|M7_DIRECT_OPEN sample.txt len
 open-csv|m7accept=1;m7file=sample.csv|120|PROF_SNAP|M7_DIRECT_OPEN sample.csv len=,OPEN_X2T rc=0x0,LSO_DIOPEN_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|csv 打开（cell，编码+分隔符参数）
 #   保存：rtf/csv 可原地回写；doc 不可 → 必须出现格式提示且禁止回写源文件（反向断言 SAVE_BIN_BACK）
 save-rtf|m7accept=1;m7file=sample.rtf;m7auto=1|120|PROF_SNAP|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|rtf 原地保存（rtf 头校验通过）
-save-csv|m7accept=1;m7file=sample.csv;m7auto=1|120|PROF_SNAP|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|csv 原地保存（非空校验通过）
+save-csv|m7accept=1;m7file=sample.csv;m7auto=1;m7autosave=1|120|PROF_SNAP|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|csv 自动保存静默回写（userFlag=0 不弹「丢格式」提示；用户保存路径的提示由 csv-lossy 守）
+#   用户保存 csv：先弹「只保存文本内容，格式将丢失」提示，**确认前不落盘**——
+#   禁止 SAVE_BIN_BACK（未确认不该写）/ SAVE_AS_WRITE（提示的「继续」是原地回写、
+#   不是另存为）。提示需点击，回归只验「弹没弹」，点「继续/取消」后的落盘由真机验
+csv-lossy|m7accept=1;m7file=sample.csv;m7auto=1|120|FMT_DIALOG_ON ext=csv lossy|FMT_DIALOG_ON ext=csv lossy,SAVE_BIN_OUT|SAVE_BIN_BACK,SAVE_AS_WRITE|csv 用户保存前弹「格式将丢失」提示
 save-doc|m7accept=1;m7file=sample.doc;m7auto=1|90|PROF_SNAP|M7_DIRECT_OPEN sample.doc len=,SAVE_BIN_X2T,FMT_DIALOG_ON|SAVE_BIN_BACK,SAVE_BIN_URI|doc 保存被格式提示拦下（禁止回写原 doc）
 #   autosave（userFlag=0，m7autosave）走的是「不弹提示」的静默分支——数据安全不变量：
 #   源 .doc 永不被 docx 字节覆盖（SAVE_BIN_URI 必须不出现）；沙箱工作副本仍更新（SAVE_BIN_BACK）
