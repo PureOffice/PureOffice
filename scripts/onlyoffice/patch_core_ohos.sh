@@ -12,7 +12,7 @@
 #   01_harfbuzz-make-ensure-patch-preserved.patch   harfbuzz make.py 补丁保留（apply_patch 前重新应用）
 #   02_openssl-md2-compat.patch                     doctrenderer/hash.cpp: openssl 3.0 OPENSSL_NO_MD2 时 MD2 软件回落
 #   03_configure-exec-bit.patch                     freetype builds/unix/configure 可执行位（100644->100755）
-set -e
+set -eo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CORE="$ROOT/third_party/core"
 PATCHES="$ROOT/scripts/onlyoffice/patches/core-ohos"

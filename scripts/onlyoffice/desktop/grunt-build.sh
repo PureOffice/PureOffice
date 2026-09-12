@@ -39,6 +39,12 @@ UPSTREAM=1
 if [ "${1:-}" = "--no-upstream" ]; then UPSTREAM=0; fi
 
 if [ "$UPSTREAM" = "1" ]; then
+  # 子模块补丁前置：sdkjs 的 desktop 构建适配直接决定本次产物（configs/*.json 清单），
+  # core 的 OHOS 补丁决定 native 链编译（core3d）；两者均幂等，已应用即跳过。
+  echo "== 0/6 子模块补丁（core OHOS + sdkjs desktop）=="
+  bash "$ROOT/scripts/onlyoffice/patch_core_ohos.sh"
+  bash "$ROOT/scripts/onlyoffice/patch_sdkjs_desktop.sh"
+
   echo "== 1/6 web-apps grunt (deploy) =="
   (cd "$ROOT/third_party/web-apps/build" && npx grunt) 2>&1 | tail -3
   [ -f "$ROOT/third_party/web-apps/deploy/web-apps/apps/documenteditor/main/index.html" ] \
@@ -46,8 +52,11 @@ if [ "$UPSTREAM" = "1" ]; then
 
   echo "== 2/6 sdkjs build (--desktop) =="
   (cd "$ROOT/third_party/sdkjs" && python3 build/build.py --desktop) 2>&1 | tail -3
-  [ -f "$ROOT/third_party/sdkjs/deploy/sdkjs/common/plugins.js" ] \
-    || { echo "!! sdkjs deploy 产物缺失" >&2; exit 1; }
+  # 断言取引擎主文件：deploy/sdkjs/common/ 里只有子目录（plugins.js 是**源树**
+  # 文件 third_party/sdkjs/common/plugins.js，不进 deploy 产物——原断言指它属过时
+  # 路径，2026-09-12 补丁化演练中暴露）
+  [ -f "$ROOT/third_party/sdkjs/deploy/sdkjs/word/sdk-all.js" ] \
+    || { echo "!! sdkjs deploy 产物缺失（word/sdk-all.js）" >&2; exit 1; }
 
   echo "== 3/6 loginpage grunt (desktop startpage) =="
   (cd "$ROOT/third_party/desktop-apps/common/loginpage/build" && npx grunt) 2>&1 | tail -3
