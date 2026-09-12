@@ -411,9 +411,11 @@ struct EditorPage {
       } catch (e) {
         // 不存在=首次另存为的正常情形
       }
+      const pwdAs = ctx.state.pwd.length > 0
+        ? '<m_sSavePassword>' + ctx.state.pwd + '</m_sSavePassword>' : '';
       const rcA = x2tConvertSync((specA !== null && specA.saveFrom > 0)
-        ? x2tXml(inA, outA, specA.saveFrom, specA.saveTo)
-        : x2tXml(inA, outA));
+        ? x2tXml(inA, outA, specA.saveFrom, specA.saveTo, pwdAs)
+        : x2tXml(inA, outA, 0, 0, pwdAs));
       this.arkLog('SAVE_AS_X2T rc=0x' + (rcA >>> 0).toString(16) + ' tab=' + ctx.id);
       if (rcA !== 0) {
         this.arkLog('SAVE_AS_X2T_FAIL');
@@ -1238,9 +1240,13 @@ struct EditorPage {
       }
       // x2t doct_bin2docx（checker 以文件头 DOCY 内容识别，.bin 后缀无碍；POC 保存链实证）。
       // saveFrom ≠ 0 的格式要显式给出格式对（方向表与转换器 switch 不一致，见 formats.ets）
+      // 密文文档：保存时同密码重加密（x2t 的 m_sSavePassword，见 lib/common.h
+      // dir2zipMscrypt——有该参数则产物为密文，否则明文落盘）
+      const pwdSave = ctx.state.pwd.length > 0
+        ? '<m_sSavePassword>' + ctx.state.pwd + '</m_sSavePassword>' : '';
       const rc = x2tConvertSync((srcSpec !== null && srcSpec.saveFrom > 0)
-        ? x2tXml(inP, outP, srcSpec.saveFrom, srcSpec.saveTo)
-        : x2tXml(inP, outP));
+        ? x2tXml(inP, outP, srcSpec.saveFrom, srcSpec.saveTo, pwdSave)
+        : x2tXml(inP, outP, 0, 0, pwdSave));
       this.arkLog('SAVE_BIN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
       if (rc !== 0) {
         return 'false';
@@ -1452,9 +1458,14 @@ struct EditorPage {
       // x2t 按输入扩展名自动选 *2doct_bin 转换器；.bin 输出后缀已实机验证（POC 打开链 v10）。
       // openBinTo ≠ 0 的格式要显式给出格式对（方向表与转换器 switch 不一致，见 formats.ets）
       const specOpen = specOf(extU);
+      // smoke 门控（m7pwd）：非空时把文档密码拼进转换参数（x2t 输入参数 m_sPassword——
+      // 密文文档由 x2t 内部探测并解密，见 core/X2tConverter/src/lib/crypt.h）；空串时
+      // XML 与产品路径逐字节相同。
+      const pwdExtra = Smoke.pwd.length > 0
+        ? '<m_sPassword>' + Smoke.pwd + '</m_sPassword>' : '';
       const rc = x2tConvertSync((specOpen !== null && specOpen.openBinTo > 0)
-        ? x2tXml(inP, outP, specOpen.recentType, specOpen.openBinTo, specOpen.openExtra)
-        : x2tXml(inP, outP));
+        ? x2tXml(inP, outP, specOpen.recentType, specOpen.openBinTo, specOpen.openExtra + pwdExtra)
+        : x2tXml(inP, outP, 0, 0, pwdExtra));
       this.arkLog('OPEN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ') tab=' + ctx.id);
       if (rc !== 0) {
         this.arkLog('OPEN_X2T_FAIL ext=' + extU);
@@ -1466,6 +1477,9 @@ struct EditorPage {
         return 'false';
       }
       // per-tab 身份赋值（原保存链单例字段→ctx.state）
+      // 密文文档密码：本轮转换成功即证明该密码可解此文档（无密码成功的普通文档
+      // Smoke.pwd 为空）——记进 tab 状态供保存链复用
+      ctx.state.pwd = Smoke.pwd;
       if (newDoc) {
         ctx.state.name = '';
         ctx.state.ext = extU;

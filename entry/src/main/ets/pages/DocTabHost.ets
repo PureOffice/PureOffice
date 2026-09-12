@@ -47,6 +47,10 @@ export class DocTabState {
    *  canSave——但另存为取消/落盘失败=数据未保存、页面 CanSave 却已 false——
    *  ArkTS 侧记忆此态，守卫查询时忽略页面 '0'（真数据未落盘，必须再弹框） */
   saveAborted: boolean = false;
+  /** 密文文档密码（非空 = 该 tab 打开的是密码保护文档）。打开链解密成功后写入；
+   *  保存链据此下发 m_sSavePassword，否则产物是明文——加密文档保存一次即被静默
+   *  降级为明文（2026-09-12 实测：密文 docx 打开后保存产物为明文 zip）。 */
+  pwd: string = '';
 }
 
 export class DocTabCtx {

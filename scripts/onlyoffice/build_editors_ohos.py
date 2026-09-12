@@ -647,7 +647,10 @@ def install_smoke():
                  'sample.rtf', 'sample.txt', 'sample.csv',
                  # 含图样本（make_img_sample.py 生成）：判定 _offline_media 媒体供给
                  # 缺失的真实影响（丢不丢图），别删
-                 'sample-img.pptx'):
+                 'sample-img.pptx',
+                 # 密文样本（ECMA-376 Agile 加密，口令 1234；msoffcrypto 从 sample.* 生成）：
+                 # 验证打开链对密文文档的 x2t 解密通路（m7pwd 门控，见 smoke.ets）
+                 'enc.docx', 'enc.xlsx', 'enc.pptx'):
         if not os.path.isfile(os.path.join(SMOKE_DST, 'samples', name)):
             raise SystemExit('smoke 样本缺失：samples/%s（格式扩展回归依赖）' % name)
 

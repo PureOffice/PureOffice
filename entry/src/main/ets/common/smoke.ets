@@ -37,6 +37,9 @@ export class Smoke {
    *  不含该图——删除链的自动可验部分）。需与 m7auto=1 同用（挂它的模型就绪回调）。
    *  见 30_open.js m7img 段。 */
   static img: string = '';
+  /** 打开链文档密码（m7pwd 启动参数）。加密样本（samples/enc.*，口令 1234）用于验证
+   *  x2t 的密文解密通路：非空时打开链在转换参数里拼 <m_sPassword>，空 = 产品路径不受影响。 */
+  static pwd: string = '';
 
   protected static readonly DEFAULT_SAMPLE = 'sample.docx';
   /** 白名单后缀（m7file 只允许验收样本；dev-only 参数，防路径越界）——
@@ -54,6 +57,7 @@ export class Smoke {
     Smoke.key = '';
     Smoke.ai = false;
     Smoke.autosave = false;
+    Smoke.pwd = '';
     if (params['m7args'] !== undefined) {
       // 复合载体（; 与 = 拆解；值无空格——aa start 参数值空格会断键）
       const merged: Record<string, string> = {};
@@ -72,6 +76,7 @@ export class Smoke {
     Smoke.ai = String(params['m7ai'] ?? '') === '1';
     Smoke.autosave = String(params['m7autosave'] ?? '') === '1';
     Smoke.img = String(params['m7img'] ?? '');
+    Smoke.pwd = String(params['m7pwd'] ?? '');
     const f = String(params['m7file'] ?? Smoke.DEFAULT_SAMPLE);
     // 仅接受 "名.白名单后缀" 文件名（rawfile 路径 <onlyoffice>/<f> 与沙箱 <filesDir>/<f> 拼接处）
     const dot = f.lastIndexOf('.');

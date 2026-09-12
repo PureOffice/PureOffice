@@ -152,6 +152,26 @@ export function isLossySave(ext: string): boolean {
 /** RTF 头「{\rtf」的字节 */
 const RTF_HEAD: number[] = [0x7B, 0x5C, 0x72, 0x74, 0x66];
 
+/** ECMA-376 密文容器头（CFB/OLE2 魔数）。密码保护文档的字节是 CFB 容器而非 zip
+ *  ——加密保存（x2t m_sSavePassword）产出的 docx/xlsx/pptx 均以此开头，
+ *  天然通不过 zip/rtf 魔数判据，故在判据前放行（2026-09-12 实测：密文产物
+ *  被 ZIPBAD 拦下致保存失败）。本工程保存链的明文产物恒为 zip 或 rtf，出现
+ *  CFB 只可能是密文。 */
+const CFB_HEAD: number[] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
+/** 字节是否为 CFB/OLE2 容器（密文 OOXML） */
+export function isEncryptedContainer(buf: Uint8Array): boolean {
+  if (buf.byteLength < CFB_HEAD.length) {
+    return false;
+  }
+  for (let i = 0; i < CFB_HEAD.length; i++) {
+    if (buf[i] !== CFB_HEAD[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * 保存产物校验（按 check 分派）：null = 通过；否则返回失败标签（调用方打日志）。
  * 'size'（csv 纯文本无稳定魔数）只拦空产物——内容正确性由真机回读验证。
@@ -159,6 +179,10 @@ const RTF_HEAD: number[] = [0x7B, 0x5C, 0x72, 0x74, 0x66];
 export function checkSaveOut(buf: Uint8Array, check: string): string | null {
   if (buf.byteLength === 0) {
     return 'EMPTY';
+  }
+  if (isEncryptedContainer(buf)) {
+    // 密文产物：CFB 容器合法（zip/rtf 魔数均不适用——加密后的字节不是 zip）
+    return null;
   }
   if (check === 'zip') {
     if (buf.byteLength < 2 || buf[0] !== 0x50 || buf[1] !== 0x4B) {
