@@ -1,0 +1,28 @@
+{
+  /* build-profile.json5 模板 —— 复制为 build-profile.json5 后按需使用：
+   *     cp build-profile.json5.template build-profile.json5
+   *
+   * 为什么分开：签名材料路径与口令属本机私有信息，build-profile.json5 已在
+   * .gitignore 中（勿提交）。本模板不含任何签名配置——默认构建出 unsigned 产物
+   * （可编译、可跑预览，不能直接安装真机）。
+   *
+   * 需要装真机时二选一（配置后本文件即含私有信息，注意别提交）：
+   *   a) DevEco Studio：File → Project Structure → Signing Configs →
+   *      勾选自动签名（写回本文件）；
+   *   b) 手工：加回 signingConfigs 段（material = 本机 .p12/.cer/.p7b 路径与口令，
+   *      name 任意），并给 products[0] 补 "signingConfig": "<该 name>"。
+   */
+  "app": {
+    "products": [
+      {
+        "name": "default",
+        "targetSdkVersion": "6.1.0(23)",
+        "compatibleSdkVersion": "6.1.0(23)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": { "nativeCompiler": "BiSheng" }
+      }
+    ],
+    "buildModeSet": [ { "name": "debug" }, { "name": "release" } ]
+  },
+  "modules": [ { "name": "entry", "srcPath": "./entry", "targets": [ { "name": "default", "applyToProducts": ["default"] } ] } ]
+}

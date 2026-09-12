@@ -7,6 +7,10 @@ hvigor/output/
 oh-package-lock.json5
 local.properties
 .ohos/
+# 本机签名配置（含签名材料路径与口令，属本机私有；模板见 build-profile.json5.template）
+build-profile.json5
+# 发布打包脚本（挂载上架签名档的私有发布流程，不入库；日常构建/装机见 deploy_ohos.sh）
+scripts/onlyoffice/pack_release_app.sh
 # third_party 由四个 submodule 管理（core/sdkjs/web-apps/build_tools，官方 release/v9.4.0）
 
 # —— 生成产物（勿入库；可复现来源见 docs/ONLYOFFICE_OHOS_NEXT_STEPS.md §1）——
@@ -27,7 +31,7 @@ entry/src/main/resources/rawfile/onlyoffice/templates/
 # 插件资产（AI 插件 + v1 框架；源 scripts/onlyoffice/plugins/ 入库，构建脚本解包安装）
 entry/src/main/resources/rawfile/onlyoffice/plugins/
 entry/src/main/resources/rawfile/onlyoffice/plugins.json
-# 随包许可证文本（install_licenses 由 third_party/core/LICENSE 拷贝生成；About「许可信息」弹层引用）
+# 随包许可证文本（install_licenses 由仓库根 LICENSE/NOTICE 拷贝生成；About 面板许可行/NOTICE 行弹层引用）
 entry/src/main/resources/rawfile/onlyoffice/licenses/
 # 版本号（构建期内容哈希生成——阶段3，替代手改 VERSION_BUMP）
 entry/src/main/resources/rawfile/onlyoffice/version.json
