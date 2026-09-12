@@ -3,6 +3,63 @@
     //      打开/保存链（uitest 无法向 contenteditable 输字、无法注入系统 picker 列表交互）。
     //      产品路径不拼该参数 → 不生效；2026-09-04 已验证 docx：M7AUTO-EDIT-OK 进 save.docx
     //      word/document.xml，xlsx/pptx 同段（asc_PasteData Text=1 引擎常量） ----
+    // ---- 3.55a 装载链探针（m7img 态附带）：cell 的文档图不显示，缺口指向"装载时没把
+    //      drawing 对象注册进 worksheet"（判据 M7IMG_DARR/WSD 在插入一张后均为 1）。
+    //      这里 hook 装载侧的两个必经点：DrawingObjects.createDrawingObject（ReadDrawings
+    //      里 new 出来后立刻调用 → 出现即说明 bin 的 drawing 段确实被读）与
+    //      DrawingBase.initAfterSerialize（注册进 ws.Drawings 的唯一入口，前置三个早退：
+    //      无 graphicObject / 图片缺 spPr / IsHiddenObj）。只打点不改行为。
+    if (/[?&]m7img=/i.test(window.location.search) && !window.__lsoIASHook) {
+      window.__lsoIASHook = true;
+      (function _hookLoadProbe() {
+        var _n = 0;
+        var _tick = function () {
+          _n++;
+          var AF = window.AscFormat;
+          // DrawingBase 由 DrawingObjects.js:4936 `window["AscFormat"].DrawingBase = ...` 导出
+          //（createDrawingObject 是**实例**方法 `_this.createDrawingObject`，不能按 prototype
+          //  探测——照那个写会永远轮询不上）
+          var DB = AF && AF.DrawingBase;
+          if (!DB || !DB.prototype || typeof DB.prototype.initAfterSerialize !== 'function') {
+            if (_n < 300) { setTimeout(_tick, 300); }
+            return;
+          }
+          if (DB.prototype.__lsoIAS) { return; }
+          DB.prototype.__lsoIAS = true;
+          var _origI = DB.prototype.initAfterSerialize;
+          DB.prototype.initAfterSerialize = function (ws) {
+            try {
+              var go = this.graphicObject;
+              var oX = go && go.spPr && go.spPr.xfrm;
+              console.error('LSO_IAS enter go=' + (!!go) + ' ws=' + (!!ws)
+                + ' img=' + (!!(go && go.isImage && go.isImage()))
+                + ' shp=' + (!!(go && go.isShape && go.isShape()))
+                + ' spPr=' + (!!(go && go.spPr))
+                + ' xfrm=' + (!!oX)
+                + ' del=' + ((go && go.getBDeleted) ? go.getBDeleted() : '?'));
+            } catch (e) { console.error('LSO_IAS_P_ERR ' + String(e)); }
+            // 三个早退条件已在入口验完（实测 img/spPr 都成立），若对象仍未注册即说明
+            // 函数后半段被打断——this.from/this.to 为 null 时 `this.from.initAfterSerialize()`
+            // 会抛，异常吞在装载流程里就是"对象凭空消失"。这里抓出来。
+            var _from = this.from, _to = this.to;
+            var _r;
+            try {
+              _r = _origI.apply(this, arguments);
+            } catch (ex2) {
+              console.error('LSO_IAS THROW from=' + (!!_from) + ' to=' + (!!_to)
+                + ' err=' + String(ex2));
+              return _r;
+            }
+            console.error('LSO_IAS after from=' + (!!_from) + ' to=' + (!!_to)
+              + ' pushed=' + ((ws && ws.Drawings) ? ws.Drawings.length : '?'));
+            return _r;
+          };
+          console.error('LSO_LOADPROBE_HOOKED db=' + (!!DB));
+        };
+        setTimeout(_tick, 300);
+      })();
+    }
+
     if (/[?&]m7auto=1(&|$)/.test(window.location.search) && !window.__m7auto) {
       window.__m7auto = true;
       (function() {
