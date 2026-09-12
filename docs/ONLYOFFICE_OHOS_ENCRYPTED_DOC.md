@@ -42,6 +42,11 @@ ECMA-376 Agile / AES-256 / SHA-512 / spinCount 100000，口令 `1234`）。
 | 带密码 pptx | `m7file=enc.pptx;m7pwd=1234` | `rc=0x0` + `M7AUTO_DOC_READY` |
 | 保存（不传密码） | `…;m7auto=1` | 产物 `check=zip ok`，但 `file` 判定 = **明文 zip**（密文被静默降级） |
 | 保存（传 `m_sSavePassword`） | 同上 | 产物 `CDFV2 Encrypted`；第三方实现 msoffcrypto 用 `1234` 校验通过并解出 20 部件，正文含编辑标记 `M7AUTO-EDIT-OK` |
+| **保存产物再打开**（round-trip） | 把上一步产物当样本部署后 `m7file=enc.docx;m7pwd=1234` | `rc=0x0` + `M7AUTO_DOC_READY`（37888 字节产物，同密码可重新打开） |
+
+即：**打开密文 → 编辑 → 保存（仍加密）→ 再次打开**全链闭环成立；
+保存产物的加密参数为 x2t 固定的 Agile 档（AES-256 + SHA-512，spinCount 100000），
+不沿用原文件的加密参数（原文件若为较弱的 Standard/RC4，保存后即被升级为该档）。
 
 结论：**打开只需把密码填进 `m_sPassword`，保存只需填 `m_sSavePassword`**——
 两个方向的引擎能力都已具备且产出标准格式（第三方工具可解，非私有格式）。
