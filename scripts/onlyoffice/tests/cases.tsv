@@ -30,9 +30,11 @@ img-insert-doc|m7accept=1;m7file=sample-img.docx;m7auto=1;m7img=1|180|M7AUTO_DIR
 # 反向链（删除的可自动验部分）：插入后**撤销** → 模型回退 → 保存产物不含该图
 #   （保存按模型引用打包，模型里没有的图不进产物；真机选中→按键删除由手指验证）
 img-undo-ppt|m7accept=1;m7file=sample-img.pptx;m7auto=1;m7img=2|180|M7AUTO_DIRECT_SAVE|M7IMG_UNDONE,M7IMG_INSERTED|IMG_PUT_BADPARAM|插入后撤销：模型回退 → 产物不含插入的图
-# xlsx 的媒体供给靠**宿主预解包**补齐（x2t 不导出 xl/media/*，见 48_mediaunpack.js）：
-#   页面在文档注入前解析源 zip → media/unpack 落 tabDir/media → 引擎渲染时按引用取。
-media-supply-xls|m7accept=1;m7file=sample-img.xlsx|240|media hit: image1.png|LSO_UNPACK found,media hit: image1.png bytes=767|/image1.png Error|含图 xlsx：宿主预解包 xl/media → 拦截层应答
+# xlsx 暂缺（2026-09-12 定位到 cell 的 drawing 对象层，与媒体供给无关）：
+#   宿主预解包已通（LSO_UNPACK found / MEDIA_UNPACK ok bytes=767），插入的图也能触发
+#   media hit，但 cell **既不绘制、也不把新增对象写进保存产物**（回写 xlsx 的 drawing1.xml
+#   仍 1 个 pic）→ 卡在 cell 侧 drawing 对象层，判据留着，修好后取消注释即用：
+# media-supply-xls|m7accept=1;m7file=sample-img.xlsx|240|media hit: image1.png|LSO_UNPACK found,media hit: image1.png bytes=767|/image1.png Error|含图 xlsx：宿主预解包 xl/media → 拦截层应答
 # —— 保存链（m7auto：模型就绪→序列化→x2t→回写源文件）——
 save-word|m7accept=1;m7file=sample.docx;m7auto=1|120|SAVE_BIN_BACK|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|docx 自动编辑+保存+回写
 save-cell|m7accept=1;m7file=sample.xlsx;m7auto=1|240|SAVE_BIN_BACK|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|xlsx 自动编辑+保存+回写

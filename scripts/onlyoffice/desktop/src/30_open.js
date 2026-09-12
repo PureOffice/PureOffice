@@ -71,6 +71,54 @@
                     console.error('M7IMG_INSERTED');
                   } else { console.error('M7IMG_NOAPI'); }
                 } catch (e) { console.error('M7IMG_INS_ERR ' + String(e)); }
+                // 判别探针：cell 的浮动对象绘制链断点定位（xlsx 图片排查——媒体已供给
+                // 且被请求、主动 ws.draw() 也无效，说明断在"对象↔图片数据"的关联上）。
+                // 一次采全：objectRender/drawingDocument/drawingObjects 是否就位、对象表
+                // 里有几个、首个对象有没有 Image、ImageLoader 能否按 URL 取回带 Image 的项。
+                setTimeout(function () {
+                  try {
+                    var _wb2 = _ap.wb;
+                    var _ws2 = (_wb2 && typeof _wb2.getWorksheet === 'function') ? _wb2.getWorksheet() : null;
+                    var _or = _ws2 && _ws2.objectRender;
+                    var _doc = _or && _or.drawingDocument;
+                    var _ctrl = _or && _or.controller;
+                    var _dobjs = _ctrl && _ctrl.drawingObjects;
+                    var _objs = _dobjs && _dobjs.objects;
+                    var _n = -1;
+                    if (_objs) { _n = (_objs.length !== undefined) ? _objs.length : Object.keys(_objs).length; }
+                    var _img = _ap.ImageLoader ? _ap.ImageLoader.LoadImage('_offline_media/insert1.png', 1) : null;
+                    console.error('M7IMG_ORP ws=' + (!!_ws2) + ' or=' + (!!_or) + ' dd=' + (!!_doc)
+                      + ' ctrl=' + (!!_ctrl) + ' dobjs=' + (!!_dobjs) + ' objs=' + _n
+                      + ' imgL=' + (!!_img) + ' imgL.Image=' + (!!(_img && _img.Image))
+                      + ' imgL.src=' + ((_img && _img.src) || ''));
+                    if (_objs && _objs.length) {
+                      var _o0 = _objs[0];
+                      console.error('M7IMG_OBJ0 img=' + (!!(_o0 && _o0.Image))
+                        + ' src=' + ((_o0 && _o0.Image && _o0.Image.src) || '')
+                        + ' type=' + ((_o0 && _o0.getObjectType) ? _o0.getObjectType() : '?'));
+                    }
+                    // 对象表字段名未知（objects=-1）：采样三个候选容器上的数组型字段，
+                    // 找出真正装 drawing 对象的那一个——对象表为空即说明"bin 解析没建对象"
+                    //（区别于"建了但没绘制"），这是本缺口最关键的分叉判据。
+                    var _out = [];
+                    var _scan = function (o, tag) {
+                      var _c = 0;
+                      for (var kk in o) {
+                        try {
+                          var vv = o[kk];
+                          if (Array.isArray(vv)) {
+                            _out.push(tag + '.' + kk + '=' + vv.length);
+                            if (++_c > 6) { break; }
+                          }
+                        } catch (e2) { }
+                      }
+                    };
+                    if (_dobjs) { _scan(_dobjs, 'dobjs'); }
+                    if (_ctrl) { _scan(_ctrl, 'ctrl'); }
+                    if (_doc) { _scan(_doc, 'doc'); }
+                    console.error('M7IMG_SCAN ' + _out.slice(0, 18).join(' | '));
+                  } catch (e) { console.error('M7IMG_ORP_ERR ' + String(e)); }
+                }, 900);
                 setTimeout(done, 1500);   // 留一拍给模型装载与渲染再保存
               });
             } catch (e) { console.error('M7IMG_ERR ' + String(e)); done(); }
