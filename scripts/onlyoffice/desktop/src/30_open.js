@@ -133,6 +133,15 @@
                     var _dl = -1;
                     if (_darr) { _dl = (_darr.length !== undefined) ? _darr.length : -2; }
                     console.error('M7IMG_DARR ' + (_darr ? ('len=' + _dl) : 'noapi'));
+                    // ws.Drawings = 装载时 DrawingBase.initAfterSerialize 的注册点
+                    //（Charts/DrawingObjects.js:1879）。它为 0 即说明装载读出的 drawing
+                    // 在三个早退条件（无 graphicObject / 图片缺 spPr / IsHiddenObj）上被丢掉，
+                    // 对象从未成为 worksheet 的绘制对象——这就是"文档图不显示"的落点。
+                    // 注意取 **model** 的 Drawings：getWorksheet() 给的是 WorksheetView，
+                    // 注册点在 Worksheet（model）上（Serialize.js:11379 `oWorksheet.Drawings.push`）
+                    var _mdl = _ws2 && _ws2.model;
+                    var _wdr = (_mdl && _mdl.Drawings) ? _mdl.Drawings.length : -1;
+                    console.error('M7IMG_WSD mdl=' + (!!_mdl) + ' wsDrawings=' + _wdr);
                   } catch (e) { console.error('M7IMG_ORP_ERR ' + String(e)); }
                 }, 900);
                 setTimeout(done, 1500);   // 留一拍给模型装载与渲染再保存
