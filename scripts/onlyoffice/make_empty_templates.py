@@ -157,6 +157,15 @@ DOCX_DOC_RELS = (
     '</Relationships>\n'
 )
 
+# —— pptx 文档语言对齐（2026-09-12 用户需求：三种格式新建语言统一中文简体）——
+# 官方 blank 主题自带 165 处 lang="en-US"（slideMaster / 11 个 slideLayout / 母版与
+# 版式里的占位符 run / notesMaster / notesSlide / presentation 的 defaultTextStyle
+# defPPr）——引擎据此把新建演示判为 English（状态栏 "English - United States"），
+# 与 docx 模板 docDefaults 的 w:lang=zh-CN 不对齐。PPTX 的语言声明只出现在
+# lang="..." 属性上（run / endParaRPr / defRPr / defPPr），故纯文本级替换即可。
+PPTX_LANG_FROM = 'lang="en-US"'
+PPTX_LANG_TO = 'lang="zh-CN"'
+
 # 骨架部件 → 重写内容（未列出的部件原样保留）
 XLSX_REPLACES = {
     'xl/workbook.xml': BLANK_WORKBOOK,
@@ -237,6 +246,8 @@ def empty_pptx():
                 continue  # 预览缩略图（样本外观），空白模板勿带
             else:
                 data = src.read(item.filename)
+                if item.filename.endswith('.xml'):
+                    data = data.decode('utf-8').replace(PPTX_LANG_FROM, PPTX_LANG_TO).encode('utf-8')
             out.writestr(item, data)
     src.close()
 
@@ -289,11 +300,18 @@ if __name__ == '__main__':
     check(DST_P, [
         # 空白演示判据：首滑无任何文本；标准 11 版式齐；样本作者/标题残留已清
         ('ppt/slides/slide1.xml', ['p:ph type="ctrTitle"'], ['<a:t>', '<a:pPr>']),
-        ('ppt/presentation.xml', ['sldIdLst'], []),
+        ('ppt/presentation.xml', ['sldIdLst', 'lang="zh-CN"'], []),
         ('docProps/core.xml', [], ['Teamlab', 'Oleg', '>User<', 'dc:title']),
     ])
     n_l = len([n for n in zipfile.ZipFile(DST_P).namelist()
                if n.startswith('ppt/slideLayouts/slideLayout') and n.endswith('.xml')])
     if n_l != 11:
         raise SystemExit('empty.pptx slideLayout 数 %d != 11' % n_l)
+    # 语言对齐判据：全包（含母版/版式/备注，它们不逐条断言）不得残留 en-US
+    _zp = zipfile.ZipFile(DST_P)
+    _left = [n for n in _zp.namelist()
+             if n.endswith('.xml') and PPTX_LANG_FROM in _zp.read(n).decode('utf-8')]
+    _zp.close()
+    if _left:
+        raise SystemExit('empty.pptx 残留 %s：%s' % (PPTX_LANG_FROM, ', '.join(_left)))
     print('完成（模板随 HAP 打包：重新构建 HAP 后生效；重跑本脚本可再生成）')
