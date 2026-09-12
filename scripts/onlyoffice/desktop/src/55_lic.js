@@ -81,8 +81,9 @@
         if (typeof d.close === 'function') { d.close(); }
       });
     } catch (e6) {}
-    // 标题固定（取链接整文会把「（点击查看全文）」等链接文案带进标题栏——2026-09-07 用户指出）
-    title.textContent = '许可证文本';
+    // 标题固定（取链接整文会把「（点击查看全文）」等链接文案带进标题栏——2026-09-07 用户指出）；
+    // 按目标文件分两种本地文本：NOTICE = 第三方声明与源码获取，其余按许可全文兜底
+    title.textContent = /\/NOTICE\.txt$/i.test(href) ? '第三方声明与源码获取' : '许可证文本';
     iframe.srcdoc = '<pre style="white-space:pre-wrap;padding:20px 24px;font:12px/1.6 monospace;color:#333;">加载中…</pre>';
     mask.style.display = 'block';
     fetch(href)

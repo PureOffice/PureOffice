@@ -728,7 +728,9 @@ def patch_about_brand():
     # 完整源码获取地址与重建步骤。链接走与许可同一本地通道（55_lic.js 弹层），
     # 不依赖外网可达——审核/用户离线也能读到源码去向。
     NOTE_URL = 'http://localhost/onlyoffice/licenses/NOTICE.txt'
-    SOURCE_LINE = ('完整源码与第三方声明见 <a class="link" href="' + NOTE_URL
+    # 「见」与链接之间用 &nbsp;：中文与拉丁词之间的普通空格在 HTML 渲染中会被
+    # 压缩到近乎不可见（2026-09-12 真机截图呈「见NOTICE」紧贴）
+    SOURCE_LINE = ('完整源码与第三方声明见&nbsp;<a class="link" href="' + NOTE_URL
                    + '" target="_blank">NOTICE</a>')
     APP_BRAND = "appName: 'Pure Office'"
     patched = 0
@@ -909,6 +911,16 @@ def patch_about_brand():
                 s = s.replace(old, new)
                 wpatched += n
                 print('  about品牌: 欢迎页 %s ×%d' % (desc, n))
+        # 版权行（CREDIT）之后补源码/声明行：必须独立判存——归属行替换是一次性的
+        # （替换后官方源串不复存在），新加行若挂在上面那步里，已 patch 过的老产物
+        # 重跑永远补不上（2026-09-12 真机踩到：编辑器 About 有源码行、欢迎页没有）。
+        credit_div = '<div class="ver-copyright about-field">' + CREDIT + '</div>'
+        src_div = '<div class="ver-copyright about-field">' + SOURCE_LINE + '</div>'
+        if credit_div in s and src_div not in s:
+            n = s.count(credit_div)
+            s = s.replace(credit_div, credit_div + src_div)
+            wpatched += n
+            print('  about品牌: 欢迎页 源码/声明行 ×%d' % n)
         if del_line in s:
             n = s.count(del_line)
             s = s.replace(del_line, '')
