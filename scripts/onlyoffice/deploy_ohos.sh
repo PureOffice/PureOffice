@@ -39,7 +39,21 @@ LOG=/tmp/deploy_build.log
 echo "== build =="
 "$HVIGORW" assembleHap -p product=default --mode module --no-daemon 2>&1 | tee "$LOG" | tail -3
 echo "== install =="
-"$HDC" -t "$DEV" install -r "$HAP" 2>&1 | tee -a "$LOG" | tail -1
+# hdc install 失败时 **rc 仍为 0**（2026-09-12 实测：设备上是 release 包、装 debug 包报
+# `code:9568332 install sign info inconsistent` 时 rc=0）——`| tail -1` + pipefail 兜不住，
+# 只能查输出文本，否则安装失败被吞成假成功（同类坑见文件头 2026-09-05 注）
+INST_OUT="$("$HDC" -t "$DEV" install -r "$HAP" 2>&1)"
+echo "$INST_OUT" | tee -a "$LOG" | tail -1
+case "$INST_OUT" in
+  *"install bundle successfully"*) ;;
+  *"sign info inconsistent"*)
+    echo "错误：设备上已有签名不同的包（release ↔ debug 不能互相覆盖安装）。" >&2
+    echo "须先卸载（**会清空应用沙箱数据**）：$HDC -t $DEV uninstall $BUNDLE" >&2
+    exit 1 ;;
+  *)
+    echo "错误：安装失败（完整输出见 $LOG）" >&2
+    exit 1 ;;
+esac
 echo "== restart =="
 "$HDC" -t "$DEV" shell "aa force-stop $BUNDLE; sleep 1; aa start -a EntryAbility -b $BUNDLE" 2>&1 | tee -a "$LOG" | tail -1
 
