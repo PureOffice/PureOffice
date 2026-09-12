@@ -17,9 +17,10 @@
   //   1. 预写缺失的偏好键（zh-CN 的 LCID 2052 = 0x0804）——用户若在设置里改过，
   //      键已在 = 不覆盖，用户选择持久化；
   //   2. api 就绪后把该值回灌引擎字段（拼写检查/输入默认取它）。
-  // 判据：LSO_DOCLANG（cell 没有 asc_onTextLanguage 注册 → 状态栏不显示语言，无 UI
-  // 可核；下两个编辑器不执行本段——它们的语言由文档自身承载，越权设置默认语言会
-  // 盖掉文档语言）。
+  // 判据：LSO_DOCLANG。cell 的用户可见处 = 左侧菜单 abc「拼写检查」面板里的「字典
+  // 语言」下拉（cell 无 asc_onTextLanguage 注册 → **状态栏**不显示语言，别处找不到）。
+  // 另两个编辑器不执行本段——它们的语言由文档自身承载，越权设置默认语言会盖掉
+  // 文档语言（word 的 run/docDefaults、slide 的 run/defRPr 各自带 lang）。
   (function _docLang() {
     try {
       if ((window.location.pathname || '').indexOf('/spreadsheeteditor/') < 0) {

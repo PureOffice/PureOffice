@@ -57,6 +57,7 @@ plug-ai-gated|m7accept=1;m7file=sample.docx|120|PLUG_AI_CHAT_GATED|PLUG_AI_TOGGL
 #   结束判据统一 PROF_SNAP：实采显示它最晚出现，用它做终态不会截断保存链标签
 open-doc|m7accept=1;m7file=sample.doc|60|PROF_SNAP|M7_DIRECT_OPEN sample.doc len=,OPEN_X2T rc=0x0,LSO_OPEN_DOCUMENT_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|doc 打开（旧二进制转 word 族 doct_bin）
 open-xls|m7accept=1;m7file=sample.xls|120|PROF_SNAP|M7_DIRECT_OPEN sample.xls len=,OPEN_X2T rc=0x0,LSO_DIOPEN_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|xls 打开（cell 族）
+newlang-xls|m7accept=1;m7file=sample.xlsx|120|LSO_OPEN_DOCUMENT_OK|LSO_DOCLANG first-run=,want=2052 cur=2052||cell 默认语言=中文（三格式新建语言对齐；cell 无状态栏语言项，只能以日志守，见 ascshim 49_doclang.js）
 open-ppt|m7accept=1;m7file=sample.ppt|120|PROF_SNAP|M7_DIRECT_OPEN sample.ppt len=,OPEN_X2T rc=0x0,LSO_DIOPEN_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|ppt 打开（slide 族）
 open-rtf|m7accept=1;m7file=sample.rtf|60|PROF_SNAP|M7_DIRECT_OPEN sample.rtf len=,OPEN_X2T rc=0x0,LSO_OPEN_DOCUMENT_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|rtf 打开（word）
 open-txt|m7accept=1;m7file=sample.txt|60|PROF_SNAP|M7_DIRECT_OPEN sample.txt len=,OPEN_X2T rc=0x0,LSO_OPEN_DOCUMENT_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|txt 打开（word）
