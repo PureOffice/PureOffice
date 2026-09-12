@@ -24,15 +24,29 @@
           // 系统按 skills 匹配候选应用——不声明则本应用不出现在列表里（用户选不到）。
           // entities 留空（不声明）：声明 entity 等于要求 want 必须带该 entity，而文件
           // 管理器发的 want 不带——声明了反而匹配不上（对照 cn.wps.mobileoffice.hap
-          // 的可用声明：entities 空 + type */* + utd general.entity）。
-          // type */* + utd general.entity（UTD 根类型）= 接收一切文件；linkFeature
-          // FileOpen = 文件管理器「打开方式」的入选标记（对照 com.huawei.hmos.files
-          // 与 LinysBrowser_NEXT 的可用声明）。格式是否支持由 EditorPage 按 formats
-          // 表判定（不支持=显式提示，见 handleLocalUri）
+          // 的可用声明：entities 空）。
+          // uris 逐条枚举实际支持的格式，不用 utd=general.entity 通配——UTD 根类型
+          // 等于声称「能打开一切文件」，而壳层只支持 formats.ets 表内 9 种；声明宽于
+          // 能力会让用户在打不开的类型上也看到本应用、选中后才被拒，与「按实际能提供
+          // 的能力配置 skills」的上架要求不符。UTD 取系统对扩展名的规范化结果（真机
+          // 日志 normalized:<值> 实测），type 与 utd 同值填写以覆盖系统对这两个字段的
+          // 两种解析路径。linkFeature: FileOpen = 文件打开能力标记（大小写敏感）。
+          // 新增/删除格式时此处与 entry/src/main/ets/common/formats.ets 的 FORMATS
+          // 表必须同步。
           {
             "actions": ["ohos.want.action.viewData"],
             "entities": [],
-            "uris": [ { "scheme": "file", "type": "*/*", "utd": "general.entity", "linkFeature": "FileOpen", "maxFileSupported": 1 } ]
+            "uris": [
+              { "scheme": "file", "type": "org.openxmlformats.wordprocessingml.document", "utd": "org.openxmlformats.wordprocessingml.document", "linkFeature": "FileOpen", "maxFileSupported": 1 },
+              { "scheme": "file", "type": "com.microsoft.word.doc", "utd": "com.microsoft.word.doc", "linkFeature": "FileOpen", "maxFileSupported": 1 },
+              { "scheme": "file", "type": "general.rich-text", "utd": "general.rich-text", "linkFeature": "FileOpen", "maxFileSupported": 1 },
+              { "scheme": "file", "type": "general.plain-text", "utd": "general.plain-text", "linkFeature": "FileOpen", "maxFileSupported": 1 },
+              { "scheme": "file", "type": "org.openxmlformats.spreadsheetml.sheet", "utd": "org.openxmlformats.spreadsheetml.sheet", "linkFeature": "FileOpen", "maxFileSupported": 1 },
+              { "scheme": "file", "type": "com.microsoft.excel.xls", "utd": "com.microsoft.excel.xls", "linkFeature": "FileOpen", "maxFileSupported": 1 },
+              { "scheme": "file", "type": "general.comma-separated-values-text", "utd": "general.comma-separated-values-text", "linkFeature": "FileOpen", "maxFileSupported": 1 },
+              { "scheme": "file", "type": "org.openxmlformats.presentationml.presentation", "utd": "org.openxmlformats.presentationml.presentation", "linkFeature": "FileOpen", "maxFileSupported": 1 },
+              { "scheme": "file", "type": "com.microsoft.powerpoint.ppt", "utd": "com.microsoft.powerpoint.ppt", "linkFeature": "FileOpen", "maxFileSupported": 1 }
+            ]
           }
         ]
       }
