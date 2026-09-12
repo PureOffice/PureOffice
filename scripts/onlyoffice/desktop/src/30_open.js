@@ -199,6 +199,24 @@
                     var _mdl = _ws2 && _ws2.model;
                     var _wdr = (_mdl && _mdl.Drawings) ? _mdl.Drawings.length : -1;
                     console.error('M7IMG_WSD mdl=' + (!!_mdl) + ' wsDrawings=' + _wdr);
+                    // 文档图已注册进 ws.Drawings 却不请求媒体也不绘制 → 试"显示绘制对象"
+                    // 入口（clipboard 在增删对象后调它，cell/api.js 里也用它刷新）。
+                    // 对象首张的 Image 是否为 null 一并报出，用于区分"没触发加载"与"加载了没画"。
+                    try {
+                      var _d0 = (_wdr > 0 && _mdl.Drawings[0]) ? _mdl.Drawings[0] : null;
+                      var _g0 = _d0 && _d0.graphicObject;
+                      console.error('M7IMG_OBJ0 go=' + (!!_g0)
+                        + ' img=' + (!!(_g0 && _g0.Image))
+                        + ' blip=' + (!!(_g0 && _g0.blipFill && _g0.blipFill.blip))
+                        + ' src=' + ((_g0 && _g0.Image && _g0.Image.src) || ''));
+                    } catch (e3) { console.error('M7IMG_OBJ0_ERR ' + String(e3)); }
+                    try {
+                      var _or2 = _ws2 && _ws2.objectRender;
+                      if (_or2 && typeof _or2.showDrawingObjects === 'function') {
+                        _or2.showDrawingObjects();
+                        console.error('LSO_SHOWDO called');
+                      } else { console.error('LSO_SHOWDO noapi'); }
+                    } catch (e4) { console.error('LSO_SHOWDO_ERR ' + String(e4)); }
                   } catch (e) { console.error('M7IMG_ORP_ERR ' + String(e)); }
                 }, 900);
                 setTimeout(done, 1500);   // 留一拍给模型装载与渲染再保存
