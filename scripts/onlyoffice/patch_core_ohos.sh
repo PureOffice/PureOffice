@@ -25,13 +25,14 @@ fi
 cd "$CORE"
 for p in "$PATCHES"/*.patch; do
   n="$(basename "$p")"
-  if git apply --reverse --check "$p" 2>/dev/null; then
-    echo "== $n 已应用，跳过"
-    continue
-  fi
-  if git apply --check "$p" 2>/dev/null; then
+  # 判据：该方向可用 = 退出码 0 **且 无输出**。mode-only 补丁（03_configure-exec-bit）
+  # 无论工作区是否已达标，git apply --check 正反向都返回 0，只把类型不符写一行
+  # warning——把 warning 也算作"不匹配"才能区分"未应用/已应用"，否则会反复 applied。
+  if out=$(git apply --check "$p" 2>&1) && [ -z "$out" ]; then
     git apply "$p"
     echo "== $n applied"
+  elif out=$(git apply --reverse --check "$p" 2>&1) && [ -z "$out" ]; then
+    echo "== $n 已应用，跳过"
   else
     echo "!! $n 无法应用（third_party/core 源码已被修改？先 git -C third_party/core status 检查）" >&2
     exit 1

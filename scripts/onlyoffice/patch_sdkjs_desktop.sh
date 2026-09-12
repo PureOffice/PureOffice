@@ -29,13 +29,14 @@ fi
 cd "$SDKJS"
 for p in "$PATCHES"/*.patch; do
   n="$(basename "$p")"
-  if git apply --reverse --check "$p" 2>/dev/null; then
-    echo "== $n 已应用，跳过"
-    continue
-  fi
-  if git apply --check "$p" 2>/dev/null; then
+  # 判据：该方向可用 = 退出码 0 **且 无输出**。mode-only 补丁两向都返回 0、只写一行
+  # warning，必须把 warning 也算作"不匹配"才能区分未应用/已应用。本目录当前无
+  # mode-only 补丁，保持与 patch_core_ohos.sh 同一判据，避免日后加补丁时踩同一个坑。
+  if out=$(git apply --check "$p" 2>&1) && [ -z "$out" ]; then
     git apply "$p"
     echo "== $n applied"
+  elif out=$(git apply --reverse --check "$p" 2>&1) && [ -z "$out" ]; then
+    echo "== $n 已应用，跳过"
   else
     echo "!! $n 无法应用（third_party/sdkjs 源码已被修改？先 git -C third_party/sdkjs status 检查）" >&2
     exit 1
