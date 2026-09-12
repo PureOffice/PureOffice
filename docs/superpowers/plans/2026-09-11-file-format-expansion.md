@@ -1099,3 +1099,45 @@ git commit -m "docs: 格式扩展实测记录与功能矩阵更新"
 - **spec 覆盖**：§3 范围 → Task 1/2；§4 数据模型 → Task 1；§5 打开链 → Task 3；§6 保存链 → Task 4/5；§7 拒绝路径 → Task 6；§9 测试 → Task 2/7/8；§8 已知限制 → Task 8 Step 2/3 ✓
 - **与 spec 的差异（有意）**：spec §6 提到的新字段 `awaitingFormatConfirm` 由现有 `closeGuardDefer.awaitingSaveAs` 复用替代（少一个状态、与守卫机制同源），已在 Task 5 Step 4/5/6 写明。
 - **类型一致性**：`specOf` / `pickerSuffixes` / `editorAppOf` / `needsSaveAsPrompt` / `checkSaveOut` 五个函数在 Task 1 定义，Task 3/4/5/6 使用处名称一致；`doSaveAs(ctx, outBuf, forceExt?)` 在 Task 4 改签名、Task 5 调用处传三参 ✓
+
+---
+
+## 实测记录（2026-09-12）
+
+环境：真机 1.6（MatePad 11.5 S / tablet），全量回归 **28/28 PASS**。
+
+### T8 Step 1 手工矩阵
+
+本轮改为 **uitest 自动化**（此前标"需手指"）：`uitest uiInput click` 可操作系统 picker
+（点**行的文字区域**即可选中，勿点左侧勾选圈；文件夹需**双击**进入），`uiInput keyEvent`
+可向编辑器正文输入（`inputText` 不行）。
+
+| # | 项 | 结果 | 证据 |
+|---|---|---|---|
+| 1 | 打开选择器可见全部支持格式 | ✅ | 一次同屏列出 docx/xlsx/pptx/csv/xls/txt/rtf/ppt/doc —— 需先修 `fileSuffixFilters`（每元素=下拉一个选项且默认只选第一项，逐后缀传会导致只列 .docx），改为单元素+逗号分隔（`ebd6a8e`） |
+| 2 | .doc 保存提示链 | ✅ | `FMT_DIALOG_ON ext=doc to=docx` →「继续」`FMT_DIALOG_CONFIRM` → 保存框默认名 **sample.docx** → `SAVE_AS_WRITE ok=true` → tab 标题变 sample.docx → **二次保存直接 `SAVE_BIN_URI`（无提示）** |
+| 3 | .xls / .ppt / .txt 同款 | ✅ | 默认名 sample.xlsx / sample.pptx / sample.docx，提示文案与落盘均正确（xls、ppt 各走一次完整「继续→保存→替换」） |
+| 4 | .rtf / .csv 原地保存 | ✅ | 回归 case `save-rtf` / `save-csv` PASS（无提示、直接回写、rtf 头与非空校验通过） |
+| 5 | 提示框取消 | ✅ | `FMT_DIALOG_CANCEL` → 无 `SAVE_AS_WRITE`（不落盘）→ 关闭 tab 时 `CLOSE_GUARD_SAVEABORTED` 仍拦（引擎判干净但保存被取消，守卫按数据安全语义弹框） |
+| 6 | recents 图标 | ⚠️ UI 不可达 |「最近使用」面板自 2026-09-05 起隐藏（B 架构下文件位置为 picker 授权 uri、授权会回收 → 路径语义不成立）→ 该项当前无 UI 出口；recents 数据本身由 `RECENTS_APPEND_SAVEAS` 日志守 |
+| 7 | 打印 .doc | ✅ | `PRINT_X2T rc=0x0` → `PRINT_PDF size=147458 pdfok` → 系统打印界面两页预览内容正确（**源格式 .doc**，证明 bin2pdf 与源格式无关） |
+
+**遗留小瑕疵（记录，未修）**：另存为切换格式后，tab 标题已更新为目标名，但**编辑器内
+顶部标题栏**仍显示旧名（`editorConfig.title` 未随身份演进刷新）。
+
+### T8 Step 2 保真度记录
+
+方法：样本原文（`strings` 提取）与渲染截图逐项对照 —— **内容层面核对 + 排版目视检查**。
+
+| 样本 | 原文要点 | 渲染结果 | 差异 |
+|---|---|---|---|
+| sample.doc | Release Notes 标题 / 署名 / Synopsis / Acceptable Input / `mj2_to_metadata -i ...` 命令段 | 全部呈现；正文衬线体（原文声明 Times New Roman） | 未发现内容丢失 |
+| sample.xls | Lorem ipsum 段落（跨列溢出）+ `tru-bla-bla`（黄底）+ `blah++` | 内容与黄色高亮均保持 | 未发现 |
+| sample.ppt | 绿色矩形形状 | 一致 | 未发现 |
+
+**局限（如实说明）**：本机无 Office/WPS 对照环境，未做"与原文件在其他软件中逐像素/
+分页对比"；上表为**内容完整性与样式保持**的核对。转换链的排版细节（行距、分页位置、
+制表位）未逐项比对。
+
+> 注：截图中出现的 `M7AUTO-EDIT-OK` 等文本来自**沙箱工作副本**被历次回归 case 编辑
+> （rawfile 样本本身干净），不是转换失真。

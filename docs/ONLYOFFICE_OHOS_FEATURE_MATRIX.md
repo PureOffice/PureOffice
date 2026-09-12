@@ -20,7 +20,7 @@
 | 导出 / 另存为 | ✅ | 编辑页左下「导出」按钮 → 自动触发官方保存 → 系统保存对话框（`DocumentViewPicker.save`）→ 写用户选定位置 |
 | 打印（系统打印） | ✅ | 工具栏打印按钮 / 文件菜单「打印」→ 页面元文件流（`Save_End` 真实长度截断）→ x2t `bin2pdf`（随包字体目录）→ `@ohos.print` 调起系统打印界面（选打印机或"打印为 PDF"）；临时文件启动时清扫（2026-09-11 真机三格式全通） |
 | 分享 | 降级 | SDK 无 ShareKit（@ohos.share 缺失）—— 登记 P1：SDK 升级后接 `systemShare` |
-| 新建空白 docx | ✅ | create:new（word）→ 官方空文档（`word/document/editor.js` getEmpty + bSerFormat 补丁） |
+| 新建空白文档（三格式） | ✅ | create:new → 随包空模板 `empty.{docx,xlsx,pptx}`（`make_empty_templates.py` 生成，骨架取自官方素材，仓库跟踪）；官方空文档链（word 另有 `getEmpty` + bSerFormat 补丁）；**三格式默认一致：语言中文简体、字体 Arial + 宋体**（docx=`styles.xml` docDefaults、pptx=模板 165 处 `lang` 替换、xlsx=`theme1.xml`/`styles.xml` 字体、cell 语言走 ascshim 预写编辑器偏好——xlsx 格式本身无文档级语言） |
 | 缩放/状态栏/多视图 | ✅ | 官方 UI 原生实现（100% 起点，Factor 1.0 语义） |
 | 多页视图（新建提示） | ✅ | 官方功能（无 UI 依赖） |
 | 字体（本地 12 个 Liberation 家族） | 部分 | `__fonts_files/__fonts_infos` 注册表 + web 字形引擎；文档字体名差异 → 默认字体替换（可见字形） |
