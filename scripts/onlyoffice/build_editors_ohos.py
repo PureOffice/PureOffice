@@ -644,7 +644,10 @@ def install_smoke():
     # 格式扩展样本存在性断言：缺失 = 回归 case 必失败，构建期拦下
     # （依据：docs/superpowers/specs/2026-09-11-file-format-expansion-design.md §9.1）
     for name in ('sample.doc', 'sample.xls', 'sample.ppt',
-                 'sample.rtf', 'sample.txt', 'sample.csv'):
+                 'sample.rtf', 'sample.txt', 'sample.csv',
+                 # 含图样本（make_img_sample.py 生成）：判定 _offline_media 媒体供给
+                 # 缺失的真实影响（丢不丢图），别删
+                 'sample-img.pptx'):
         if not os.path.isfile(os.path.join(SMOKE_DST, 'samples', name)):
             raise SystemExit('smoke 样本缺失：samples/%s（格式扩展回归依赖）' % name)
 
