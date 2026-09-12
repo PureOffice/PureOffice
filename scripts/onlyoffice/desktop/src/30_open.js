@@ -210,6 +210,63 @@
                         + ' blip=' + (!!(_g0 && _g0.blipFill && _g0.blipFill.blip))
                         + ' src=' + ((_g0 && _g0.Image && _g0.Image.src) || ''));
                     } catch (e3) { console.error('M7IMG_OBJ0_ERR ' + String(e3)); }
+                    // 修复前提：对象上还剩哪些能推出图片名的字段（bin 里该段字节与 pptx 版
+                    // 完全相同，说明 cell 读取器在 pptxDrawing 分支漏了 blipFill，但 rId/名
+                    // 可能在别的字段上留了下来）
+                    try {
+                      var _d0b = (_wdr > 0 && _mdl.Drawings[0]) ? _mdl.Drawings[0] : null;
+                      var _g0b = _d0b && _d0b.graphicObject;
+                      var _ka = [];
+                      for (var _k1 in _d0b) { _ka.push(_k1); }
+                      var _kb = [];
+                      for (var _k2 in _g0b) {
+                        if (/[Ii]mage|[Bb]lip|[Pp]ic|[Uu]rl|[Ss]rc|[Rr]Id/.test(_k2)) { _kb.push(_k2); }
+                      }
+                      console.error('M7IMG_KEYS d0=[' + _ka.slice(0, 18).join(',')
+                        + '] g0=[' + _kb.slice(0, 18).join(',') + ']');
+                    } catch (e5) { console.error('M7IMG_KEYS_ERR ' + String(e5)); }
+                    // blipFill 本身存在（见 M7IMG_KEYS），缺的是它的 blip 子对象——查
+                    // blipFill 里还剩什么、以及 getImageUrl() 这个绘制侧真正取 URL 的入口返回什么
+                    try {
+                      var _g0c = (_wdr > 0 && _mdl.Drawings[0]) ? _mdl.Drawings[0].graphicObject : null;
+                      var _bfx = _g0c && _g0c.blipFill;
+                      var _fk = [];
+                      for (var _k4 in _bfx) { _fk.push(_k4); }
+                      var _u = (_g0c && typeof _g0c.getImageUrl === 'function')
+                        ? String(_g0c.getImageUrl()) : 'nofn';
+                      console.error('M7IMG_BF url=' + _u + ' bf=[' + _fk.slice(0, 14).join(',') + ']');
+                      // Drawings[0] 未必是文档图（插入的图也在同一表里）——逐个列出对象与
+                      // 它们的图片 URL / RasterImageId（后者是 blipFill 里的图片标识，若文档图
+                      // 的这个字段有值，就说明引用读到了、缺的只是"谁来把它变成 URL"）
+                      var _all = [];
+                      for (var _i2 = 0; _i2 < _wdr && _i2 < 6; _i2++) {
+                        var _ob2 = _mdl.Drawings[_i2];
+                        var _gg2 = _ob2 && _ob2.graphicObject;
+                        var _uu2 = (_gg2 && typeof _gg2.getImageUrl === 'function')
+                          ? String(_gg2.getImageUrl()) : 'nofn';
+                        var _rid2 = (_gg2 && _gg2.blipFill)
+                          ? String(_gg2.blipFill.RasterImageId || '(nil)') : '(nobf)';
+                        _all.push(_i2 + ':url=' + _uu2 + ' rid=' + _rid2);
+                      }
+                      console.error('M7IMG_ALL ' + _all.join(' | '));
+                      // 关键分叉：getWorksheet() 只给**活动** sheet，而文档的图由 x2t 挂在
+                      // 它所属的那张表上（我们这份 xlsx 有 3 个 sheet，图在 sheet1）。
+                      // 列出所有 sheet 的 Drawings 数量即可判断"文档图在别的表"还是"确实没建"。
+                      var _sk = [];
+                      try {
+                        var _wbm = _wb2.model;
+                        var _arr2 = _wbm && (_wbm.worksheets || _wbm.aWorksheets || _wbm.sheets);
+                        if (_arr2) {
+                          for (var _s2 = 0; _s2 < _arr2.length && _s2 < 8; _s2++) {
+                            var _sh2 = _arr2[_s2];
+                            var _nm2 = (_sh2 && _sh2.getName) ? String(_sh2.getName()) : String(_s2);
+                            _sk.push(_nm2 + '=' + ((_sh2 && _sh2.Drawings) ? _sh2.Drawings.length : 'x'));
+                          }
+                        }
+                      } catch (e7) { _sk.push('ERR ' + String(e7)); }
+                      var _cur = (_mdl && _mdl.getName) ? String(_mdl.getName()) : '?';
+                      console.error('M7IMG_SHEETS cur=' + _cur + ' all=[' + _sk.join(',') + ']');
+                    } catch (e6) { console.error('M7IMG_BF_ERR ' + String(e6)); }
                     try {
                       var _or2 = _ws2 && _ws2.objectRender;
                       if (_or2 && typeof _or2.showDrawingObjects === 'function') {
