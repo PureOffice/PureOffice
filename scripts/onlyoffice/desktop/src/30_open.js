@@ -66,7 +66,15 @@
               AC.UploadImageFiles([_f], '', '', '', '', '', '', function(err, urls) {
                 console.error('M7IMG_UPLOAD err=' + err + ' urls=' + JSON.stringify(urls));
                 try {
-                  if (_ap && typeof _ap._addImageUrl === 'function') {
+                  // cell 走 asc_addImageDrawingObject：`_addImageUrl(urls, {})` 对它是**空
+                  // 操作**——cell 的 _addImageUrl 最终调 wbModel.addImages()，而后者只在
+                  // obj.id / obj.callback 存在时才真正插入（Workbook.js:3733），空对象
+                  // 什么都不做（图不进模型 → 不绘制也不进产物）。asc_...DrawingObject 进
+                  // objectRender 的绘制对象表，是 cell 的正路。word/slide 无此 API，保持原路。
+                  if (_ap && typeof _ap.asc_addImageDrawingObject === 'function') {
+                    _ap.asc_addImageDrawingObject(urls);
+                    console.error('M7IMG_INSERTED cell');
+                  } else if (_ap && typeof _ap._addImageUrl === 'function') {
                     _ap._addImageUrl(urls, {});
                     console.error('M7IMG_INSERTED');
                   } else { console.error('M7IMG_NOAPI'); }
@@ -117,6 +125,14 @@
                     if (_ctrl) { _scan(_ctrl, 'ctrl'); }
                     if (_doc) { _scan(_doc, 'doc'); }
                     console.error('M7IMG_SCAN ' + _out.slice(0, 18).join(' | '));
+                    // 绘制对象表（cell 的入口是 controller.getDrawingArray → drawingObjects
+                    // .getDrawingObjects）：装载后为 0 即说明 bin→对象的**装载**阶段没建对象
+                    //（与插入路径对照——插入走 objectRender.addImageDrawingObject 是通的）
+                    var _darr = (_ctrl && typeof _ctrl.getDrawingArray === 'function')
+                      ? _ctrl.getDrawingArray() : null;
+                    var _dl = -1;
+                    if (_darr) { _dl = (_darr.length !== undefined) ? _darr.length : -2; }
+                    console.error('M7IMG_DARR ' + (_darr ? ('len=' + _dl) : 'noapi'));
                   } catch (e) { console.error('M7IMG_ORP_ERR ' + String(e)); }
                 }, 900);
                 setTimeout(done, 1500);   // 留一拍给模型装载与渲染再保存

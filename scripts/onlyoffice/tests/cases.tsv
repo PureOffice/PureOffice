@@ -27,6 +27,9 @@ media-supply-doc|m7accept=1;m7file=sample-img.docx|180|media hit: image1.png|med
 #   拦截层应答），不只是写了个文件；保存产物含图另由 out 目录的产物比对证（见 img-insert 说明）。
 img-insert-ppt|m7accept=1;m7file=sample-img.pptx;m7auto=1;m7img=1|180|M7AUTO_DIRECT_SAVE|M7IMG_INSERTED,media hit: insert1.png bytes=179,IMG_PUT ok|IMG_PUT_BADPARAM,LSO_OPEN_STALE|插入图片(pptx)：上传→宿主落盘 tabDir/media→进模型→渲染供给→保存
 img-insert-doc|m7accept=1;m7file=sample-img.docx;m7auto=1;m7img=1|180|M7AUTO_DIRECT_SAVE|M7IMG_INSERTED,media hit: insert1.png bytes=179|IMG_PUT_BADPARAM,LSO_OPEN_STALE|插入图片(docx)：同上（word 编辑器插入路径）
+#   xlsx 插入走 asc_addImageDrawingObject（cell 的 _addImageUrl(urls, {}) 是空操作：
+#   wbModel.addImages 只在 obj.id/obj.callback 存在时才插入，见 30_open.js m7img 段）
+img-insert-xls|m7accept=1;m7file=sample-img.xlsx;m7auto=1;m7img=1|240|M7AUTO_DIRECT_SAVE|M7IMG_INSERTED cell,media hit: insert1.png bytes=179|IMG_PUT_BADPARAM,LSO_OPEN_STALE|插入图片(xlsx)：进 objectRender 绘制对象表 → 绘制 → 保存产物含 xl/media/image2.png
 # 反向链（删除的可自动验部分）：插入后**撤销** → 模型回退 → 保存产物不含该图
 #   （保存按模型引用打包，模型里没有的图不进产物；真机选中→按键删除由手指验证）
 img-undo-ppt|m7accept=1;m7file=sample-img.pptx;m7auto=1;m7img=2|180|M7AUTO_DIRECT_SAVE|M7IMG_UNDONE,M7IMG_INSERTED|IMG_PUT_BADPARAM|插入后撤销：模型回退 → 产物不含插入的图
