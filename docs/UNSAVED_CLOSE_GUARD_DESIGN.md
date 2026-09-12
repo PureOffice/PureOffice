@@ -199,6 +199,18 @@ ascshim 更改无需动 build（40_save 已在 assemble 列表——确认：ass
     **不经引擎 asc_Save**——引擎 undo 栈保存后不清 → **保存成功后再次关闭
     仍会重弹一次**（保存幂等覆写，不丢数据）。彻底消解=改保存链走引擎
     asc_Save（引擎自复位 modified），留待后续。
+11. **保存后重复弹框已消解（2026-09-12）**：根因定位到引擎 Local 形态的未保存
+    判据本身——`AscCommon.History.Have_Changes()` 即 `Index != SavedIndex`
+    （编辑推进 Index，官方 `_onSaveCallbackInner` 收尾调 `Reset_SavedIndex` 复位；
+    sdkjs `word/Editor/History.js` + `word/Local/api.js`）。我们的保存链不走引擎
+    保存，SavedIndex 停在旧值 → 恒判"有变更"；而此前兜底用的 `asc_getCanUndo`
+    说的是"已保存点之前仍可撤销"（保存本不清栈）→ **每存必弹**。
+    修复两处：① 保存链成功收尾（saveBinRaw 落盘后）注入
+    `History.Reset_SavedIndex(true)` + `CheckChangedDocument()` 复位水位与标志位；
+    ② 守卫判据改 `cs || im || hc`（hc=Have_Changes），uu 降为打点。
+    真机 1.6 双向实证：**编辑未保存**（真实按键输入）→ `v=1 cs=1 im=1 uu=1 hc=1`
+    → 弹框拦截；**编辑并保存后** → `v=0 cs=0 im=0 uu=1 hc=0` → 直关不弹
+    （回归 save-word 场景）。
 
 ## 5. 验证清单（✅=2026-09-09/10 真机 1.4（MOR-M1）已验；✳=当前 UI 不可达
    （休眠守卫，逻辑已接、无触发点）；⏳=待验）

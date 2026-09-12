@@ -1300,6 +1300,21 @@ struct EditorPage {
           return 'false';
         }
         this.arkLog('SAVE_BIN_BACK src=' + srcP + ' size=' + outBuf.byteLength + ' tab=' + ctx.id);
+        // 引擎「已保存」水位复位：本保存链是 ArkTS 侧序列化（不经引擎 asc_Save），引擎
+        // History 的 SavedIndex 停在旧值 → Have_Changes() 恒真 → 关闭守卫把已保存的文档
+        // 再判一次「未保存」（重复弹框；覆写幂等故不丢数据，但每存必弹一次）。
+        // 对齐官方 _onSaveCallbackInner 的收尾：Reset_SavedIndex(true) 把已保存点推进到
+        // 当前（Local 形态语义：Index == UserSavedIndex 即无变更），CheckChangedDocument
+        // 同步 isDocumentModified / CanSave 两个标志位。
+        ctx.js('(function(){try{'
+          + 'var h=window.AscCommon&&window.AscCommon.History;'
+          + 'if(h&&typeof h.Reset_SavedIndex==="function"){h.Reset_SavedIndex(true);}'
+          + 'var ns=window.SSE||window.DE||window.PE;'
+          + 'var m=ns&&ns.controllers&&ns.controllers.Main;'
+          + 'var e=m&&m.api;'
+          + 'if(e&&typeof e.CheckChangedDocument==="function"){e.CheckChangedDocument();}'
+          + 'console.error("LSO_SAVED_INDEX_RESET");'
+          + '}catch(x){console.error("LSO_SAVED_INDEX_ERR "+x);}})()', 'saveReset');
         if (uriFailed) {
           this.showFormatNotice('原文件不可写（授权已过期或只读），内容已留在应用内；'
             + '请用「文件 → 另存为」保存到其他位置');
@@ -1807,23 +1822,28 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     }
     this.guardBusy = true;
     try {
-      // 判据=canSave || isDocumentModified（2026-09-10 打开已有文档**守卫失灵**修复：
-      // 真机实证「zzz 修改后 asc_isDocumentCanSave=0 但 asc_getCanUndo=1」——引擎确认
-      // 有未保存修改；canSave 属性由 _onUpdateDocumentCanSave 刷新，本链时序未触发
-      // （官方 Desktop 语义同源；官方自身判未保存=isDocumentModified——Main.js:2575）。
-      // isDocumentModified()=原型方法三引擎均有（word/slide 72179 式 = isDocumentModify
-      // 属性——保存后复位，不误判；cell 另有 asc_ 前缀版）。返回管道串 vcs|im|uu：
-      // im 兜底 cs，uu 仅打点（canUndo 保存后栈不清——不可作判据）。
+      // 判据 = canSave || isDocumentModified || Have_Changes（2026-09-12 修订）：
+      // 引擎真正的「有未保存变更」判据是 AscCommon.History.Have_Changes()——Local 形态
+      // 即 `Index != SavedIndex`（编辑推进 Index，官方保存收尾 Reset_SavedIndex 复位；
+      // 见 sdkjs word/Editor/History.js 与 word/Local/api.js）。
+      // 此前用 asc_getCanUndo 兜底，是因为 canSave/isDocumentModified 在本链时序下不
+      // 刷新（2026-09-10 实测编辑后 cs=0 im=0 uu=1，而保存产物含编辑内容）；但 canUndo
+      // 说的是「已保存点之前仍可撤销」——保存不清栈 → 每存必弹一次未保存框（保存幂等
+      // 不丢数据，纯体验问题）。现由保存链成功收尾复位水位（saveBinRaw 的
+      // Reset_SavedIndex），判据改用 Have_Changes；uu 降为打点。
+      // isDocumentModified()=原型方法三引擎均有（word/slide 为 isDocumentModify 属性；
+      // cell 另有 asc_ 前缀版）。返回管道串 vcs|im|uu|hc。
       const query = '(function(){try{'
         + 'var ns=window.SSE||window.DE||window.PE;'
         + 'var m=ns&&ns.controllers&&ns.controllers.Main;'
         + 'var e=m&&m.api;'
-        + 'var cs="na",im="na",uu="nu";'
+        + 'var cs="na",im="na",uu="nu",hc="nh";'
         + 'try{cs=(e&&typeof e.asc_isDocumentCanSave==="function")?(e.asc_isDocumentCanSave()?"1":"0"):"na";}catch(x){cs="x";}'
         + 'try{im=(e&&typeof e.isDocumentModified==="function")?(e.isDocumentModified()?"1":"0"):"na";}catch(x){im="x";}'
         + 'try{uu=(e&&typeof e.asc_getCanUndo==="function")?(e.asc_getCanUndo()?"1":"0"):"nu";}catch(x){uu="x";}'
-        + 'return "v"+cs+"|"+im+"|"+uu;'
-        + '}catch(x){return "vj|j|j";}})()';
+        + 'try{hc=(window.AscCommon&&window.AscCommon.History&&typeof window.AscCommon.History.Have_Changes==="function")?(window.AscCommon.History.Have_Changes()?"1":"0"):"nh";}catch(x){hc="x";}'
+        + 'return "v"+cs+"|"+im+"|"+uu+"|"+hc;'
+        + '}catch(x){return "vj|j|j|j";}})()';
       ctx.controller.runJavaScript(query, (err: BusinessError, res: string) => {
         if (err) {
           // 页面死/节点已分离（竞态）——守卫只死锁，放行关闭
@@ -1835,11 +1855,8 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
         }
         // ArkWeb runJavaScript 对 JS 字符串返回值做 **JSON 编码**（实测 res=`"1"` 带引号
         // ——2026-09-09 实证；直接 === '1' 永假会落进直关分支。统一 JSON.parse 剥外层，
-        // 得 "vcs|im|uu" 拼接串再拆；**v = cs || im || uu**（2026-09-10 打开已有文档
-        // 修复：cs/im 在该形态下恒 0（引擎 modified 标志链未随编辑触发——实测
-        // zzz 后 cs=0 im=0 uu=1，而保存产物含 zzz），uu=asc_getCanUndo 是引擎唯一
-        // 权威「有变更」信号。已知代价：保存链（ArkTS 侧序列化）不经引擎，undo 栈
-        // 不清——已保存后再次关闭会重弹一次（保存幂等覆写，不丢数据——记录取舍）。
+        // 得 "vcs|im|uu|hc" 拼接串再拆；**v = cs || im || hc**（hc 见上：引擎 Local 形态
+        // 的未保存判据）。任一项查询不可用时按 '0' 处理——只有明确的 '1' 才拦。
         let v: string = String(res);
         let diag: string = 'na';
         try {
@@ -1848,8 +1865,9 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           const cs = parts[0].replace(/^v/, '');
           const im = parts[1] ?? '?';
           const uu = parts[2] ?? '?';
-          diag = 'cs=' + cs + ' im=' + im + ' uu=' + uu;
-          v = (cs === '1' || im === '1' || uu === '1') ? '1' : '0';
+          const hc = parts[3] ?? '?';
+          diag = 'cs=' + cs + ' im=' + im + ' uu=' + uu + ' hc=' + hc;
+          v = (cs === '1' || im === '1' || hc === '1') ? '1' : '0';
         } catch (pe) {
           v = String(res);
         }
