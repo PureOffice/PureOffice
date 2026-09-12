@@ -3,7 +3,7 @@ import { common } from '@kit.AbilityKit';
 import { promptAction, window } from '@kit.ArkUI';
 import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs, picker, fileUri } from '@kit.CoreFileKit';
-import { x2tConvertSync } from '../common/x2t';
+import { x2tConvertSync, X2T_RC_NEED_PASSWORD, X2T_RC_BAD_PASSWORD, X2T_RC_DRM_UNSUPPORTED } from '../common/x2t';
 import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
 import { Smoke } from '../common/smoke';
 import { getLaunchOptions, setWindowCloseHandler, setWantUriHandler, takeLaunchUri } from '../entryability/EntryAbility';
@@ -204,6 +204,14 @@ struct EditorPage {
   private fmtDialogOut: ArrayBuffer | null = null;
   /** 提示模式：false=「不能原地保存」→确认后另存为；true=csv「丢格式」→确认后原地回写 */
   private fmtDialogLossy: boolean = false;
+
+  /** 文档密码弹框（自绘覆盖层，同守卫框；密文文档打开链需要用户输入密码）。
+   *  pwdValue 绑定 TextInput；回调 null=取消（放弃打开该文档）。 */
+  @State pwdDialogOn: boolean = false;
+  @State pwdDialogMsg: string = '';
+  @State pwdValue: string = '';
+  private pwdDialogRetry: boolean = false;
+  private pwdDialogCb: ((pwd: string | null) => void) | null = null;
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
    *  lang=zh-CN：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
@@ -1455,31 +1463,65 @@ struct EditorPage {
         this.arkLog('OPEN_TMP_WRITE_ERR ' + inP);
         return 'false';
       }
-      // x2t 按输入扩展名自动选 *2doct_bin 转换器；.bin 输出后缀已实机验证（POC 打开链 v10）。
-      // openBinTo ≠ 0 的格式要显式给出格式对（方向表与转换器 switch 不一致，见 formats.ets）
+      // 密文文档（密码保护）：x2t 探测到 CFB 密文后走解密分支，未给密码/密码错返回
+      // 可恢复错误码（见 x2t.ets 常量）——弹框收取密码后带 <m_sPassword> 重转同一对
+      // 临时文件（inP 已落盘，不必重读源文件）。m7pwd 门控 = 验收态直接给首轮密码，
+      // 产品路径恒为空串（走弹框）。openBinTo ≠ 0 的格式要显式给出格式对（方向表与
+      // 转换器 switch 不一致，见 formats.ets）。
       const specOpen = specOf(extU);
-      // smoke 门控（m7pwd）：非空时把文档密码拼进转换参数（x2t 输入参数 m_sPassword——
-      // 密文文档由 x2t 内部探测并解密，见 core/X2tConverter/src/lib/crypt.h）；空串时
-      // XML 与产品路径逐字节相同。
-      const pwdExtra = Smoke.pwd.length > 0
-        ? '<m_sPassword>' + Smoke.pwd + '</m_sPassword>' : '';
-      const rc = x2tConvertSync((specOpen !== null && specOpen.openBinTo > 0)
-        ? x2tXml(inP, outP, specOpen.recentType, specOpen.openBinTo, specOpen.openExtra + pwdExtra)
-        : x2tXml(inP, outP, 0, 0, pwdExtra));
-      this.arkLog('OPEN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ') tab=' + ctx.id);
-      if (rc !== 0) {
-        this.arkLog('OPEN_X2T_FAIL ext=' + extU);
-        return 'false';
-      }
-      const buf = readFileBuf(outP);
-      if (buf === null) {
-        this.arkLog('OPEN_BIN_MISS ' + outP);
-        return 'false';
-      }
+      let failed = false;
+      const attempt = (pwd: string): void => {
+        const pwdExtra = pwd.length > 0 ? '<m_sPassword>' + pwd + '</m_sPassword>' : '';
+        const rc = x2tConvertSync((specOpen !== null && specOpen.openBinTo > 0)
+          ? x2tXml(inP, outP, specOpen.recentType, specOpen.openBinTo, specOpen.openExtra + pwdExtra)
+          : x2tXml(inP, outP, 0, 0, pwdExtra));
+        this.arkLog('OPEN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ') tab=' + ctx.id);
+        if (rc === 0) {
+          this.finishOpenTab(ctx, outP, extU, name, addRecent, newDoc, userUri, pwd);
+          return;
+        }
+        const rcU = rc >>> 0;
+        if (rcU === X2T_RC_NEED_PASSWORD || rcU === X2T_RC_BAD_PASSWORD) {
+          this.showPwdDialog(rcU === X2T_RC_BAD_PASSWORD, (p: string | null) => {
+            if (p === null) {
+              this.arkLog('OPEN_PWD_CANCEL tab=' + ctx.id);
+              return;
+            }
+            attempt(p);
+          });
+          return;
+        }
+        failed = true;
+        this.arkLog('OPEN_X2T_FAIL ext=' + extU + ' rc=0x' + rcU.toString(16));
+        if (rcU === X2T_RC_DRM_UNSUPPORTED) {
+          this.showFormatNotice('该文档使用了暂不支持的加密方式，无法打开。');
+        }
+      };
+      attempt(Smoke.pwd);
+      // 'true' = 已受理（转换成功或密码框在途；失败态在 failed 上）
+      return failed ? 'false' : 'true';
+    } catch (e) {
+      this.arkLog('OPEN_CONVERT_ERR ' + String(e));
+      return 'false';
+    }
+  }
+
+  /**
+   * 打开链收尾（转换成功后）：读 doct_bin 字节 → per-tab 身份赋值 → 追加 tab 并聚焦。
+   * 与 openNewTabEntry 拆开的原因：密文文档的转换可能因密码交互**异步**重试——收尾
+   * 逻辑必须能由重试回调触发，不能只活在 openNewTabEntry 的同步栈内。
+   */
+  private finishOpenTab(ctx: DocTabCtx, outP: string, extU: string, name: string,
+    addRecent: boolean, newDoc: boolean, userUri: string | undefined, pwd: string): void {
+    const buf = readFileBuf(outP);
+    if (buf === null) {
+      this.arkLog('OPEN_BIN_MISS ' + outP);
+      return;
+    }
       // per-tab 身份赋值（原保存链单例字段→ctx.state）
-      // 密文文档密码：本轮转换成功即证明该密码可解此文档（无密码成功的普通文档
-      // Smoke.pwd 为空）——记进 tab 状态供保存链复用
-      ctx.state.pwd = Smoke.pwd;
+      // 密文文档密码：本轮转换成功即证明该密码可解此文档（普通文档恒为空串）——
+      // 记进 tab 状态供保存链复用（保存时下发 m_sSavePassword，否则产物落成明文）
+      ctx.state.pwd = pwd;
       if (newDoc) {
         ctx.state.name = '';
         ctx.state.ext = extU;
@@ -1522,11 +1564,6 @@ struct EditorPage {
       this.focusTab = this.docTabs.length - 1;
       this.arkLog('P1B_OPEN_TAB id=' + ctx.id + ' ext=' + extU + ' bin=' + buf.byteLength
         + ' target=' + ctx.state.saveTarget + ' name=' + name);
-      return 'true';
-    } catch (e) {
-      this.arkLog('OPEN_CONVERT_ERR ' + String(e));
-      return 'false';
-    }
   }
 
   /**
@@ -2505,6 +2542,56 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           // 吞掉卡片内点击（不穿透蒙层取消）
         })
       }
+      // —— 文档密码覆盖层（密文文档：无密码/密码错时弹；自绘同守卫框，回车=确定）——
+      if (this.pwdDialogOn) {
+        // 蒙层=取消（不打开该文档）
+        Column()
+          .width('100%').height('100%')
+          .backgroundColor('rgba(0,0,0,0.35)')
+          .onClick(() => {
+            this.pwdDialogAction('cancel');
+          })
+        Column({ space: 4 }) {
+          Text('文档受密码保护')
+            .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
+          Text(this.pwdDialogMsg)
+            .fontSize(14).fontColor('#5A6572').textAlign(TextAlign.Center)
+            .margin({ top: 12 })
+          TextInput({ placeholder: '请输入密码', text: this.pwdValue })
+            .type(InputType.Password)
+            .width('100%')
+            .margin({ top: 16 })
+            .onChange((v: string) => {
+              this.pwdValue = v;
+            })
+            .onSubmit(() => {
+              this.pwdDialogAction('ok');
+            })
+          Row({ space: 12 }) {
+            Button('取消')
+              .layoutWeight(1)
+              .backgroundColor('#F7F7F7').fontColor('#2B3B4D')
+              .onClick(() => {
+                this.pwdDialogAction('cancel');
+              })
+            Button('确定')
+              .layoutWeight(1)
+              .backgroundColor('#0064E7').fontColor(Color.White)
+              .onClick(() => {
+                this.pwdDialogAction('ok');
+              })
+          }
+          .width('100%')
+          .margin({ top: 20 })
+        }
+        .padding(24)
+        .width(420)
+        .backgroundColor(Color.White)
+        .borderRadius(12)
+        .onClick(() => {
+          // 吞掉卡片内点击（不穿透蒙层取消）
+        })
+      }
     }
   }
 
@@ -2562,6 +2649,50 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     const targetExt = spec !== null ? spec.saveExt : 'docx';
     this.arkLog('FMT_DIALOG_CONFIRM ext=' + ctx.state.ext + ' to=' + targetExt + ' tab=' + ctx.id);
     this.doSaveAs(ctx, out, targetExt);
+  }
+
+  /**
+   * 文档密码弹框（密文文档打开链；自绘覆盖层，与守卫框同因——CustomDialog 真机
+   * 点击失效、AlertDialog 无取消键）。cb(null) = 取消（放弃打开该文档）；
+   * cb(密码) = 重转。isRetry 仅决定提示文案（"密码错误"）。
+   */
+  private showPwdDialog(isRetry: boolean, cb: (pwd: string | null) => void): void {
+    if (this.pwdDialogOn) {
+      return; // 互斥：弹框在途时不再叠框
+    }
+    this.pwdDialogRetry = isRetry;
+    this.pwdDialogMsg = isRetry ? '密码错误，请重新输入。' : '该文档已加密，请输入打开密码。';
+    this.pwdValue = '';
+    this.pwdDialogCb = cb;
+    this.pwdDialogOn = true;
+    this.arkLog('OPEN_PWD_DIALOG_ON retry=' + isRetry);
+  }
+
+  /** 密码弹框动作：ok=提交输入值 / cancel 或蒙层=取消。空输入按取消处理——
+   *  对密文文档空密码无意义（x2t 收到空密码会回落试默认口令，属另一语义，
+   *  不该由"没输入就点确定"触发）。 */
+  private pwdDialogAction(act: string): void {
+    if (!this.pwdDialogOn) {
+      return;
+    }
+    const cb = this.pwdDialogCb;
+    const val = this.pwdValue;
+    const retry = this.pwdDialogRetry;
+    this.pwdDialogOn = false;
+    this.pwdDialogCb = null;
+    this.pwdValue = '';
+    this.pwdDialogMsg = '';
+    this.pwdDialogRetry = false;
+    if (cb === null) {
+      return;
+    }
+    if (act !== 'ok' || val.length === 0) {
+      this.arkLog('OPEN_PWD_CANCEL act=' + act + ' empty=' + (val.length === 0));
+      cb(null);
+      return;
+    }
+    this.arkLog('OPEN_PWD_SUBMIT len=' + val.length + ' retry=' + retry);
+    cb(val);
   }
 
   /** 不支持格式的告知层（复用格式覆盖层 UI；文案由调用方给定） */

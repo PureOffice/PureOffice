@@ -51,15 +51,15 @@ ECMA-376 Agile / AES-256 / SHA-512 / spinCount 100000，口令 `1234`）。
 结论：**打开只需把密码填进 `m_sPassword`，保存只需填 `m_sSavePassword`**——
 两个方向的引擎能力都已具备且产出标准格式（第三方工具可解，非私有格式）。
 
-## 四、缺口（全在壳层）
+## 四、缺口与处置（全在壳层；2026-09-12 已实现）
 
-1. **密码没有来源**：打开链一次转换失败即 `return 'false'`（`EditorPage.ets` 打开段），
-   无「要密码 → 输入 → 重试」回路。
-2. **错误码未区分**：`rc !== 0` 一律失败，未利用 `0x8004135a/5b` 这两个可用判据。
-3. **密码无处存放**：需要 per-tab 记忆（`DocTabState`），保存链才能复用。
-4. **产物校验会拦密文**：`checkSaveOut` 的 `zip` 判据只认 `PK` 头，密文产物是 CFB 头
-   （实测 `BAD:ZIPBAD` → 保存失败）。
-5. **密码输入 UI**（见下）。
+| # | 缺口 | 处置 |
+|---|---|---|
+| 1 | 打开链无重试回路（转换失败即 `return 'false'`） | 转换抽成 `attempt(pwd)` 闭包、收尾拆出 `finishOpenTab`——密码交互可异步重转（临时文件已落盘，重转不重读源文件） |
+| 2 | 错误码未区分 | 按码分派：`0x8004135a` 首弹密码框 / `0x8004135b` 弹重试框（"密码错误"）/ `0x80041355` 明确告知不支持该加密方式 |
+| 3 | 密码无处存放 | `DocTabState.pwd`（per-tab）；打开成功即写入，保存链复用 |
+| 4 | 产物校验会拦密文（实测 `BAD:ZIPBAD`） | `checkSaveOut` 前置放行 CFB 容器头（`isEncryptedContainer`） |
+| 5 | 无密码输入 UI | 自绘覆盖层（与未保存守卫框同款——CustomDialog 真机点击失效、AlertDialog 无取消键的既有教训），`TextInput(type: Password)` + 回车提交 |
 
 ## 五、方案
 
@@ -92,6 +92,7 @@ x2t 失败
 | 成本 | 中（3 个接线点 + 重入） | 低（1 个 dialog + 重入） |
 
 推荐 **B**：链路最短、失败态可控；A 的一致性收益不值三点接线与引擎状态机耦合。
+**已按 B 实现**（`EditorPage` 的 `showPwdDialog`/`pwdDialogAction` + build 内覆盖层）。
 
 ### 5.4 附带（可选，非必须）
 - 标题栏锁图标：`DocInfo.put_Encrypted(true)` 或 `asc_onDocumentPassword(true)`
@@ -118,12 +119,12 @@ x2t 失败
 | 回归 case（`open-enc-*`/`save-enc-*`，样本已入库） | 小 |
 | 手工清单（系统 picker 打开加密文件、错误密码重试观感） | 小 |
 
-## 八、附：实测期的 smoke 门控
+## 八、附：验收参数与产品路径的关系
 
-为验证上述链路，本次加入了 `m7pwd` 门控参数（`Smoke.pwd`）：非空时打开链下发
-`<m_sPassword>`、成功打开后记入 `ctx.state.pwd`，保存链据此下发 `<m_sSavePassword>`。
-产品路径下 `m7pwd` 为空 → 转换 XML 与改动前逐字节相同（`x2tXml` 的 extra 为空串），
-零行为差异。
+`m7pwd`（`Smoke.pwd`）是**验收态**给首轮密码的通道：非空时打开链直接用它转换，
+跳过弹框——回归用例靠它覆盖"带密码打开/密码错"两条链（`cases.tsv` 的 `open-enc-*`），
+无需人手输入。产品路径 `m7pwd` 恒为空，走弹框收取密码；两条路径最终都汇到同一个
+`attempt(pwd)` 转换函数与同一份 `ctx.state.pwd`，差别只在密码来源。
 
 ## 九、回归
 

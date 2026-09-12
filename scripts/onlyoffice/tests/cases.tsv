@@ -73,3 +73,13 @@ save-doc|m7accept=1;m7file=sample.doc;m7auto=1|90|PROF_SNAP|M7_DIRECT_OPEN sampl
 #   autosave（userFlag=0，m7autosave）走的是「不弹提示」的静默分支——数据安全不变量：
 #   源 .doc 永不被 docx 字节覆盖（SAVE_BIN_URI 必须不出现）；沙箱工作副本仍更新（SAVE_BIN_BACK）
 save-doc-auto|m7accept=1;m7file=sample.doc;m7auto=1;m7autosave=1|90|SAVE_BIN_BACK|M7_DIRECT_OPEN sample.doc len=,M7AUTO_DIRECT_SAVE len=,SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_URI,FMT_DIALOG_ON,SAVE_BIN_EMPTY,SAVE_BIN_ERR|autosave 不得回写不能原地保存的格式（仅沙箱工作副本）
+# —— 加密文档（密码保护；样本 enc.{docx,xlsx,pptx}＝Agile 密文，口令 1234）——
+#   产品路径无密码 → 弹密码框；m7pwd=验收态直接给首轮密码（跳过人手输入）。
+#   打开侧判据＝x2t 错误码分派（0x8004135a 需密码 / 0x8004135b 密码错）。
+open-enc-pwd|m7accept=1;m7file=enc.docx;m7pwd=1234|90|LSO_OPEN_DOCUMENT_OK|OPEN_X2T rc=0x0,LSO_OPEN_DOCUMENT_OK|OPEN_X2T_FAIL,OPEN_PWD_DIALOG_ON|密文 docx 带密码打开（x2t 解密 → doct_bin）
+open-enc-badpwd|m7accept=1;m7file=enc.docx;m7pwd=wrong|90|OPEN_PWD_DIALOG_ON|OPEN_X2T rc=0x8004135b,OPEN_PWD_DIALOG_ON retry=true|LSO_OPEN_DOCUMENT_OK|密码错 → 弹重试框（错密码不得打开）
+open-enc-nopwd|m7accept=1;m7file=enc.docx|90|OPEN_PWD_DIALOG_ON|OPEN_X2T rc=0x8004135a,OPEN_PWD_DIALOG_ON retry=false|LSO_OPEN_DOCUMENT_OK|密文无密码 → 弹密码框首弹（不得打开）
+#   保存侧：密文产物是 CFB 容器（非 zip），必须被 checkSaveOut 放行——禁止项
+#   BAD:ZIPBAD 就是「产物被误判为坏 zip」这条回归。产物是否真为密文由拉回文件验
+#   （自动层只验链路不验字节形态，见 tests/README 盲区）。
+save-enc|m7accept=1;m7file=enc.docx;m7pwd=1234;m7auto=1|90|SAVE_BIN_BACK|SAVE_BIN_X2T rc=0x0,SAVE_BIN_OUT size=,check=zip ok|BAD:ZIPBAD,SAVE_BIN_EMPTY,SAVE_BIN_ERR|密文保存：m_sSavePassword 重加密 + CFB 产物校验放行

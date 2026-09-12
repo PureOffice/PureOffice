@@ -32,6 +32,7 @@ OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --record --case <id>
 | 字体映射 | 同上两 case | `FONT_PICK`（请求名 → 命中行）：仿宋/楷体不得被宋体截胡、Wingdings/Symbol 必落 OpenSymbol |
 | 插件/AI 链 | `plug-ai-on` / `plug-ai-gated` | 装配→run→AI tab→Chatbot 全链打点；门控态反向断言（默认不点） |
 | 格式扩展 | `open-doc` / `open-xls` / `open-ppt` / `open-rtf` / `open-txt` / `open-csv`、`save-rtf` / `save-csv` / `save-doc` / `save-doc-auto` | 新格式打开链（样本名 + x2t 转换 + 各族就绪标签）+ 原地保存 + 不可原地保存格式的提示拦截（`save-doc` 反向断言 `SAVE_BIN_BACK`/`SAVE_BIN_URI` 必须不出现；`save-doc-auto` = autosave 语义 userFlag=0，断言 `SAVE_BIN_URI` 不出现而沙箱工作副本照更新——「源文件永不被异格式字节覆盖」不变量，与 userSaved 解耦） |
+| 加密文档 | `open-enc-pwd` / `open-enc-badpwd` / `open-enc-nopwd`、`save-enc` | x2t 错误码分派：无密码 `0x8004135a` / 密码错 `0x8004135b` 均须弹密码框（后者 retry 文案、且**不得打开**），带密码 `rc=0x0` 且文档就绪。`save-enc` 断言密文产物过校验（`check=zip ok`，禁止 `BAD:ZIPBAD`——密文是 CFB 容器不是 zip）。**产物是否真为密文、编辑内容是否在**，自动层判不了（见 §2 盲区），须拉回文件用密码解密核对 |
 
 **盲区（自动层判不了）**：**像素级**渲染结果（字形画出来是粗是细、布局是否错位——判据只到
 "字体选中且字节在"这一层）、系统 UI 内的操作（picker/打印框/软键盘）、窗口与手势行为。→ §3。
@@ -46,6 +47,7 @@ OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --record --case <id>
 | 打开方式（文件管理器） | 文件管理器长按文件 → 打开方式 | 候选列表出现 Pure Office；docx 选中直接进编辑器；odt 选中弹「暂不支持该格式：<名>」（不支持格式的唯一可达入口） |
 | 另存为 / 导出 | 编辑页左下「导出」 | 系统保存框弹出、文件名带出、落盘可打开 |
 | 打印 | 工具栏打印按钮（保存图标旁） | 系统打印界面弹出（无打印机＝"未发现打印机"也算通） |
+| 加密文档 | 打开密码保护文档（自备样本：`enc.docx`，口令 `1234`） | 弹「文档受密码保护」框；**输错**提示「密码错误，请重新输入。」可重试；**输对**进编辑器；编辑后保存 → 拉回产物仍能用同密码打开（加密不降级为明文）。取消/蒙层关闭 = 不打开该文档 |
 
 ### 3.2 窗口 / 交互类
 

@@ -23,6 +23,17 @@ export function x2tConvertSync(xml: string): number {
 }
 
 /**
+ * 密文文档相关的 x2t 转换错误码（值为 third_party/core/Common/OfficeFileErrorDescription.h
+ * 的常量：AVS_ERROR_FIRST 0x80040300 + AVS_FILEUTILS_ERROR_FIRST 0x1000 + 偏移）。
+ * 前两个是**可恢复态**——带密码重转即可打开，打开链据此弹密码框；第三个不可恢复
+ * （core 未实现该加密分支，如 ECMA-376 Extensible），只可告知。
+ * 注意：NAPI 返回值为正数（实测 0x8004135a = 2147750746）。
+ */
+export const X2T_RC_NEED_PASSWORD: number = 0x8004135a;
+export const X2T_RC_BAD_PASSWORD: number = 0x8004135b;
+export const X2T_RC_DRM_UNSUPPORTED: number = 0x80041355;
+
+/**
  * 读取系统字体 /system/fonts/<name>（NAPI 同步；native 层 ifstream——ArkTS
  * fileIo 对系统根路径一律 ENOENT（域白名单），native 同 wine 可读）。
  * 失败返回 undefined（native 侧 OH_LOG 留痕）。2026-09-07 系统字体桥 v2。
