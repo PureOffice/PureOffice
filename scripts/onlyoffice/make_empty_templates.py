@@ -166,6 +166,40 @@ DOCX_DOC_RELS = (
 PPTX_LANG_FROM = 'lang="en-US"'
 PPTX_LANG_TO = 'lang="zh-CN"'
 
+# —— xlsx 默认字体对齐（2026-09-12 用户决策：三模板统一）——
+# 官方 simple1.xlsx 骨架带的是 Excel 默认主题字体：minorFont latin=Calibri、
+# majorFont latin="Calibri Light"（东亚面 ea/cs 均为 Arial）。设备上没有 Calibri
+# → 新建表格工具栏字体框显示"Calibri"、实际渲染静默回退（名实不符，与宋体族那次
+# 同类）；东亚面也未指定中文字体。docx/pptx 模板都是拉丁 Arial（docx 另带
+# eastAsia=SimSun）→ 此处对齐为 **拉丁 Arial + 东亚 SimSun**。
+# 两个部件都要改：theme1.xml 是字体**来源**（styles.xml 的 <scheme val="minor"/> 表示
+# 该字体跟随主题 minorFont），styles.xml 的 <name> 是随主题缓存的名字——只改一处会
+# 出现"名字与来源不一致"。
+XLSX_THEME_LATIN_FROM = ('typeface="Calibri Light"', 'typeface="Calibri"')
+XLSX_THEME_EA_FROM = '<a:ea typeface="Arial"/>'
+XLSX_THEME_EA_TO = '<a:ea typeface="SimSun"/>'
+XLSX_FONT_LATIN_TO = 'Arial'
+XLSX_STYLES_NAME_FROM = '<name val="Calibri"/>'
+XLSX_STYLES_NAME_TO = '<name val="Arial"/>'
+
+
+def xlsx_align_font(part: str, data: bytes) -> bytes:
+    """xlsx 部件级字体对齐（仅 theme1.xml / styles.xml 命中，其余原样返回）。
+
+    注意替换顺序：先 "Calibri Light" 再 "Calibri"，否则前者会被后者截成 "Arial Light"。
+    东亚面限定标签替换（裸替换 Arial 会连拉丁面一起改掉）。
+    """
+    if part == 'xl/theme/theme1.xml':
+        s = data.decode('utf-8')
+        for frm in XLSX_THEME_LATIN_FROM:
+            s = s.replace(frm, 'typeface="%s"' % XLSX_FONT_LATIN_TO)
+        s = s.replace(XLSX_THEME_EA_FROM, XLSX_THEME_EA_TO)
+        return s.encode('utf-8')
+    if part == 'xl/styles.xml':
+        s = data.decode('utf-8').replace(XLSX_STYLES_NAME_FROM, XLSX_STYLES_NAME_TO)
+        return s.encode('utf-8')
+    return data
+
 # 骨架部件 → 重写内容（未列出的部件原样保留）
 XLSX_REPLACES = {
     'xl/workbook.xml': BLANK_WORKBOOK,
@@ -176,8 +210,12 @@ XLSX_REPLACES = {
 }
 
 
-def rewrite_zip(src_path, dst_path, replaces):
-    """以官方骨架 src 为底，按 replaces {部件名: 新内容} 重写部件。"""
+def rewrite_zip(src_path, dst_path, replaces, transform=None):
+    """以官方骨架 src 为底，按 replaces {部件名: 新内容} 重写部件。
+
+    transform(part, data) 用于对**保留部件**做就地修改（replaces 命中的部件不经过它
+    ——那些是整段替换，不需要再改）。
+    """
     if not os.path.isfile(src_path):
         raise SystemExit('骨架缺失: %s（来源见文件头注释）' % src_path)
     src = zipfile.ZipFile(src_path)
@@ -191,6 +229,8 @@ def rewrite_zip(src_path, dst_path, replaces):
             data = replaces.get(item.filename)
             if data is None:
                 data = src.read(item.filename)
+                if transform is not None and item.filename.endswith('.xml'):
+                    data = transform(item.filename, data)
             else:
                 data = data.encode('utf-8')
             out.writestr(item, data)
@@ -198,7 +238,7 @@ def rewrite_zip(src_path, dst_path, replaces):
 
 
 def empty_xlsx():
-    rewrite_zip(SRC_XLSX, DST_X, XLSX_REPLACES)
+    rewrite_zip(SRC_XLSX, DST_X, XLSX_REPLACES, xlsx_align_font)
 
 
 def empty_docx():
@@ -296,6 +336,10 @@ if __name__ == '__main__':
         ('xl/worksheets/sheet1.xml', ['<sheetData/>'], ['<row ', '<cols', 'EEF0F6']),
         ('xl/workbook.xml', ['name="Sheet1"'], ['sheet2', 'sheet3', 'Лист']),
         ('xl/sharedStrings.xml', ['count="0"'], ['<si>']),
+        # 默认字体对齐判据（三模板统一：拉丁 Arial + 东亚 SimSun）——theme 与 styles
+        # 两处都不得残留 Calibri（只改一处 = 名实不符，见 xlsx_align_font 注释）
+        ('xl/theme/theme1.xml', ['typeface="Arial"', 'typeface="SimSun"'], ['Calibri']),
+        ('xl/styles.xml', ['<name val="Arial"/>'], ['Calibri']),
     ])
     check(DST_P, [
         # 空白演示判据：首滑无任何文本；标准 11 版式齐；样本作者/标题残留已清
