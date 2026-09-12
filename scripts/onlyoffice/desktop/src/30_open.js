@@ -550,6 +550,16 @@
                 console.error('LSO_FONT_WRAP_NOMETHOD');
                 return;
               }
+              // 内部字体行判定（清单来自构建期注入，见 build_editors_ohos.py
+              // UI_HIDDEN_FONT_ROWS）：窗口属性在推送时才读——AllFonts.js 的注入会不会
+              // 早于本 wrap 安装不确定，缓存快照会漏。空清单 = 不过滤（安全缺省）。
+              var _uiHidden = function(n) {
+                var _hid = window.__lso_font_hidden || [];
+                for (var hi = 0; hi < _hid.length; hi++) {
+                  if (_hid[hi] === n) { return true; }
+                }
+                return false;
+              };
               _m.api.sync_InitEditorFonts = function(fonts) {
                 var _prev = '';
                 try {
@@ -572,6 +582,8 @@
                     var _nm = String(_ft && _ft.asc_getFontName ? _ft.asc_getFontName() : '');
                     var _th = String(_ft && _ft.asc_getFontThumbnail ? _ft.asc_getFontThumbnail() : 'u');
                     if (!_nm || /\.(ttf|otf|eot|woff2?)$/i.test(_nm)) { continue; }
+                    // 内部字体行（构建期清单）：留引擎候选列表供映射，但不进用户下拉
+                    if (_uiHidden(_nm)) { console.error('LSO_FONT_HIDDEN name=' + _nm); continue; }
                     if (!_byThumb[_th]) { _byThumb[_th] = []; }
                     _byThumb[_th].push(_nm);
                   }

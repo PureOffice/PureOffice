@@ -274,6 +274,16 @@ FONT_INFOS = [
     ["Noto Sans Devanagari UI", 19, 0, 19, 0, 19, 0, 19, 0],
 ]
 
+# —— 内部字体行（不进用户字体下拉）——
+# 事实源只有这一处：行**必须**注册（候选列表 = g_fonts_selection_bin，Symbol/Wingdings
+# 的码位映射依赖请求能落到「OpenSymbol」行——见上该行注释的 map.js 机制），但下拉每项
+# 以**自身字体**渲染名字，而 OpenSymbol 无任何拉丁字形（cmap 实测 O/p/e/n/S/y/m/b/o/l
+# 全缺）→ 该行整条显示为方块（2026-09-12 真机 1.5 截图实证）。
+# 派生链：gen_allfonts 注入 window["__lso_font_hidden"] → ascshim 30_open.js 的
+# sync_InitEditorFonts wrap 在归一收集时跳过这些名字（与 .ttf 文件名行剔除同一处判断）。
+# 新增内部行只改本清单——**禁止在页面侧硬编码字体名**。
+UI_HIDDEN_FONT_ROWS = ['OpenSymbol']
+
 # —— 字符范围回退表（引擎 libfont/character.js CFontByCharacter.init 消费的第三张
 # 注入表 window["__fonts_ranges"]，格式 [start, end, infoRowIndex, ...] 展平三元组；
 # 语义：Unicode [start, end] 中字符若在文档字体中缺字形，回退到
@@ -555,7 +565,11 @@ def gen_allfonts(fonts_infos):
             'var g_font_infos = [\n' +
             ',\n'.join(json.dumps(info) for info in fonts_infos) +
             '\n];\n'
-            'window["g_fonts_selection_bin"] = "%s";\n' % sel_b64)
+            'window["g_fonts_selection_bin"] = "%s";\n' % sel_b64 +
+            # 内部行清单的派生注入（事实源 = UI_HIDDEN_FONT_ROWS，见 FONT_INFOS 后注释）：
+            # 页面侧据此过滤用户下拉，故**不能**省——清单缺省 = 页面不过滤 = 方块行回来
+            'window["__lso_font_hidden"] = %s;\n'
+            % json.dumps(UI_HIDDEN_FONT_ROWS, ensure_ascii=False))
 
 DELDIRS = ['ie', 'mobile', 'embed']
 APP_MAIN = ['documenteditor', 'spreadsheeteditor', 'presentationeditor']
