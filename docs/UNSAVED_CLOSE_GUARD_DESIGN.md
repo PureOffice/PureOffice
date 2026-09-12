@@ -114,10 +114,20 @@ ArkTS onTabCommand 增加 `close-request` 分支 → `requestCloseDoc(ctx)`。�
 4. **系统返回键**：EditorPage（@Entry）新增 `onBackPress()` 守卫（§3.5）。
 5. **onbeforeunload** 不动（ArkTS 路径不触发；JS 内部跳转 welcome 时官方行为保留，无重复弹框风险——跳转欢迎页走 goback 官方链（onRequestClose? goback.js:704——是：goback.requestClose 时也走 onRequestClose）…… 注：goback 链 now 也会被 onRequestClose 官方弹框拦（未保存时）——**实测待定项**：goback（返回主页）行为不在本次范围（回主页=关文档语义一致，建议同接 close-request——记入验证清单）。
 
-### 3.5 窗口级守卫 `onBackPress()`
+### 3.5 窗口级守卫 `onBackPress()`（PC）/ Pad 返回 = 回桌面
 
 - @Entry 组件专属回调，返回 true=拦截系统返回键。
-- 流程（**队列**，避免多文档时一屏多框）：
+- **形态分叉（2026-09-12，用户报告「Pad 上返回似乎触发所有文档关闭」）**：
+  - **Pad（tablet/phone）= 回桌面**：`UIAbilityContext.moveAbilityToBackground()`
+    （@since 12）。理由：Pad 走沉浸窗口（EntryAbility.applyWindowMode 隐藏状态栏与
+    导航条）→ **系统 ✕ 不存在**，返回手势是唯一系统出口；而本应用单页面
+    （main_pages.json 仅 EditorPage）无路由上级，「关窗」语义=一口气关掉全部文档并
+    退出应用，不符平板惯例。切后台文档/tab 原地保留、回前台即续 → **不弹未保存框**
+    （文档并未关闭；关文档仍由 tab × 负责）。失败（16000065 非前台 / 16000066
+    Wukong 模式）仅记日志 `LSO_BACK_BG err`、不再动作——事件已消费（应用留原地），
+    不回落关窗守卫（那会违背本次返回意图、成批关文档）。
+  - **PC = 关窗守卫**（下列流程不变）：有系统三键 ✕，返回键非常用出口。
+- PC 流程（**队列**，避免多文档时一屏多框）：
   1. 收集未保存候选队列：`docTabs` 中 kind='doc' 全部（从 focus 起、不含 home）。
   2. 队列逐个 `requestCloseDoc`（复用弹框）；每个完成（关/不关清零）继续下一个。
   3. 队列空 → `getContext(this).terminateSelf()` 退出应用（返回键=关闭窗口语义）。
@@ -203,6 +213,11 @@ ascshim 更改无需动 build（40_save 已在 assemble 列表——确认：ass
 8. ✅ 保存链回退：新建→「保存」→ 另存为框取消 → 不关闭。
 9. ⏳ 查询失败路径：引擎卡死/页面死 → 直接关不弹（日志 CLOSE_GUARD_QUERY_ERR）——逻辑简单且走防御分支，未构造触发。
 10. ✅ 系统 ✕（2026-09-10 新增入口）：无文档直退；未保存弹框→不保存→退出（§4.5.9）。
+11. ✅ **Pad 返回 = 回桌面（2026-09-12 新增）**：编辑中的文档按返回手势 → 应用切后台
+    （文档/tab 保留、无未保存框）→ 从桌面再进入 → 原样续编。真机实证（1.6 = tablet，
+    用户手指）：4 次返回手势日志均 `LSO_BACK_BG call` + `LSO_BACK_BG ok`
+    （files/web_console.txt）。PC 侧代码路径未变——形态判断之后的原守卫分支原样保留
+    （返回键/系统 ✕ 仍同第 5、6、10 项）。
 
 ## 6. 已知取舍（记录）
 

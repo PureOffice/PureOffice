@@ -1975,10 +1975,16 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
   }
 
   /**
-   * 系统返回键 = 关闭窗口守卫（设计 §3.5）：收集全部 doc tab（从焦点起），逐个询问
-   * 未保存（保存/不保存 → 继续下一个；取消 → 停，留在应用）；队列全处置完 →
-   * terminateSelf 退出（返回键语义=关闭窗口）。无 doc tab/仅主页 → 放行系统退出。
-   * 守卫弹框在途（defer/查找期）→ 拦截（不叠框）。
+   * 系统返回键，按窗口形态分叉：
+   *  - Pad（沉浸窗口——EntryAbility.applyWindowMode 隐藏了状态栏与导航条，系统 ✕
+   *    不复存在，返回手势是唯一系统出口）= **回桌面**（切后台）。平板惯例是「返回
+   *    上一级」，而本应用是单页面（main_pages.json 仅 EditorPage）无路由上级；
+   *    沿用 PC 的关窗语义会一口气关掉全部文档并退出应用（2026-09-12 用户报告）。
+   *    切后台文档与 tab 原地保留、回前台即续，故不询问未保存（文档并未关闭）。
+   *  - PC = 关闭窗口守卫（设计 §3.5）：收集全部 doc tab（从焦点起），逐个询问
+   *    未保存（保存/不保存 → 继续下一个；取消 → 停，留在应用）；队列全处置完 →
+   *    terminateSelf 退出。无 doc tab/仅主页 → 直接退出。
+   * 探针态放行系统默认；放映中两侧一致=退放映。
    */
   onBackPress(): boolean {
     if (this.p0On) {
@@ -1992,15 +1998,41 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
       this.exitPresentation();
       return true;
     }
-    // 返回键与系统三键 ✕ 同语义（requestBackExit——系统 ✕ 经 EntryAbility
+    const dt = deviceInfo.deviceType;
+    if (dt === 'tablet' || dt === 'phone') {
+      return this.backToDesktop();
+    }
+    // PC：返回键与系统三键 ✕ 同语义（requestBackExit——系统 ✕ 经 EntryAbility
     // windowStageClose → 本方法）：返回 true=拦截（退出时机由守卫队列决定）；
     // false=放行系统默认（无文档/探针态）
     return this.requestBackExit();
   }
 
   /**
-   * 关闭窗口（系统返回键 / 系统三键 ✕ 共用——✕ 经 EntryAbility windowStageClose 恒
-   * 拦后调用本方法）：收集全部 doc tab（从焦点起），逐个询问未保存（保存/不保存 →
+   * Pad 返回键 = 回桌面：切后台（UIAbilityContext.moveAbilityToBackground，@since 12；
+   * 可能失败码 16000065=非前台、16000066=Wukong 模式）。失败仅记日志、不再动作——
+   * 事件已消费（应用留在原地），不回落关窗守卫：那会违背本次返回意图、成批关文档。
+   */
+  private backToDesktop(): boolean {
+    let ac = this.abilityCtx;
+    if (ac === undefined) {
+      ac = getContext(this) as common.UIAbilityContext;
+    }
+    this.arkLog('LSO_BACK_BG call');
+    ac.moveAbilityToBackground()
+      .then(() => {
+        this.arkLog('LSO_BACK_BG ok');
+      })
+      .catch((e: BusinessError) => {
+        this.arkLog('LSO_BACK_BG err ' + e.code + ' ' + e.message);
+      });
+    return true;
+  }
+
+  /**
+   * 关闭窗口（PC 返回键 / 系统三键 ✕ 共用——✕ 经 EntryAbility windowStageClose 恒
+   * 拦后调用本方法；Pad 返回键不走本链=回桌面，见 onBackPress）：收集全部 doc tab
+   * （从焦点起），逐个询问未保存（保存/不保存 →
    * 继续下一个；取消 → 清队列停：留在应用）；队列全处置完 → terminateSelf 退出
    * （关闭窗口语义）；无 doc tab（仅主页）→ 直接退出。
    * 返回值恒定 true=本层已接管退出时机（onBackPress 拦截系统默认；系统 ✕ 侧由
