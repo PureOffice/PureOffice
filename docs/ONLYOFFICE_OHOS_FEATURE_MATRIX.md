@@ -12,7 +12,7 @@
 | 能力 | 状态 | 说明 |
 |---|---|---|
 | 官方欢迎页（新建卡片；recents 面板已隐藏） | ✅ | loginpage 官方产物；**「最近使用」面板自 2026-09-05 起隐藏**（B 架构文件位置为 picker 授权 uri、授权会回收 → 路径语义不成立）；`recents.ets` 与打开链代码保留，待持久文件位置机制恢复 |
-| 打开本地文件（系统选择器） | ✅ | `open:folder`（loginpage「Open local file」官方命令）→ ArkTS `DocumentViewPicker.select`（9 种后缀过滤，由 `formats.ets` 派生）→ 拷贝沙箱 → x2t 打开链；选择器按后缀**硬过滤**（非白名单后缀不出现，实测 exe/odt 不可见） |
+| 打开本地文件（系统选择器） | ✅ | `open:folder`（loginpage「Open local file」官方命令）→ ArkTS `DocumentViewPicker.select`（9 种后缀过滤，由 `formats.ets` 派生）→ 拷贝沙箱 → x2t 打开链；选择器按后缀**硬过滤**（非白名单后缀不出现，实测 exe/odt 不可见）；过滤项须为**单个** `fileSuffixFilters` 元素（后缀逗号分隔）——该字段每元素 = 「文件格式」下拉的一个选项且默认只选中第一项，逐后缀传会让弹窗只列 .docx（2026-09-12 修复，见 `formats.pickerFilterOption`） |
 | 打开方式（文件管理器交付） | ✅ | `module.json5` 声明 `viewData` skill（`scheme=file` + `utd=general.entity` + `linkFeature=FileOpen`）→ 文件管理器「打开方式」候选出现 Pure Office → `want.uri` → `handleLocalUri` 与 picker 共用处理链；不支持格式弹「暂不支持该格式：&lt;名&gt;」（2026-09-12 真机 1.6：docx 进编辑器 / odt 被拦） |
 | 打开 9 种格式（docx·xlsx·pptx + doc·xls·ppt·rtf·txt·csv） | ✅ | 沙箱源文件 → x2t 按源后缀分派 → 官方 `openDocumentFromBinary` → 引擎渲染（word 走官方 loadDocument；cell/slide 走 DI 链+Gateway 踢闸）。旧二进制（doc/xls/ppt）与 csv 需**显式下发格式对/编码分隔符参数**（x2t 方向表与转换 switch 缺 case，详见 `formats.ets` 与 KEYPOINTS）；2026-09-12 真机 9/9 通过 |
 | 编辑（文本/表格等） | ✅ | 官方编辑器全套 UI（工具栏/右侧栏/状态栏/缩放/分页） |

@@ -9,7 +9,7 @@ import { Smoke } from '../common/smoke';
 import { getLaunchOptions, setWindowCloseHandler, setWantUriHandler, takeLaunchUri } from '../entryability/EntryAbility';
 import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, x2tXmlFont, u8ToStr } from '../common/bytes';
 import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } from '../common/recents';
-import { specOf, pickerSuffixes, editorAppOf, needsSaveAsPrompt, checkSaveOut } from '../common/formats';
+import { specOf, pickerSuffixes, pickerFilterOption, editorAppOf, needsSaveAsPrompt, checkSaveOut } from '../common/formats';
 import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
 import { DocTabHost, DocTabCtx, DocTabPair } from './DocTabHost';
 
@@ -33,6 +33,10 @@ const IMAGE_SUFFIXES: string[] = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.web
  * ArkWeb accept 类型 → picker 后缀过滤。页面 `<input type=file>` 的 accept 由 sdkjs
  * 图片属性给出（形如 '.png,.jpg' 或 'image/*'）；picker 只认后缀形态，通配/空则用
  * 图片后缀集兜底（插入图片是当前唯一的页面侧文件选择场景）。
+ *
+ * 与 formats.pickerFilterOption 同一条约束：fileSuffixFilters 的每个元素 = 下拉里的
+ * 一个**选项**且默认只选中第一项，逐后缀传元素会让用户只看到第一种后缀的图片
+ * → 合并进单个选项（后缀逗号分隔）。
  */
 function imageSuffixesFrom(accept: string[]): string[] {
   const out: string[] = [];
@@ -46,7 +50,7 @@ function imageSuffixesFrom(accept: string[]): string[] {
       }
     }
   }
-  return out.length > 0 ? out : IMAGE_SUFFIXES;
+  return ['图片|' + (out.length > 0 ? out : IMAGE_SUFFIXES).join(',')];
 }
 /**
  * 打印字体表（x2t bin2pdf 的 m_sFontDir 内容）——2026-09-10。
@@ -507,8 +511,9 @@ struct EditorPage {
       const dvp = new picker.DocumentViewPicker(ctx);
       const opts = new picker.DocumentSelectOptions();
       opts.maxSelectNumber = 1;
-      // 可打开格式由 formats 表派生（新增格式自动进入选择器过滤）
-      opts.fileSuffixFilters = pickerSuffixes();
+      // 可打开格式由 formats 表派生（新增格式自动进入选择器过滤）；必须单选项
+      //（多元素 = 下拉多选项且默认只选中第一项，弹窗只列 .docx——见 formats.pickerFilterOption）
+      opts.fileSuffixFilters = pickerFilterOption();
       const uris = await dvp.select(opts);
       if (uris.length === 0) {
         this.arkLog('OPEN_LOCAL_CANCEL');

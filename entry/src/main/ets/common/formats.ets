@@ -103,6 +103,25 @@ export function pickerSuffixes(): string[] {
   return out;
 }
 
+/**
+ * 系统文件选择器过滤项（DocumentSelectOptions.fileSuffixFilters）。
+ *
+ * **必须是单个元素**：该字段的每个元素 = 选择器「文件格式」下拉里的一个**选项**，
+ * 弹窗打开时只默认选中第一项——按后缀逐个传（9 个元素）时，用户打开弹窗只看得到
+ * .docx 文件，要选 pptx 得自己发现并切换右上角下拉（用户实测反馈「没法选择 pptx
+ * 等文件类型」）。单个元素内后缀用逗号分隔（d.ts 原文：Multiple document suffixes
+ * separated by a comma (,) are allowed **in an option**）→ 一个选项覆盖全部支持
+ * 后缀，打开即见全部支持格式的文件。
+ * 元素形式 =「描述|后缀,…」：竖线前是下拉里显示的选项名，无竖线则显示后缀串。
+ *
+ * 注意与保存对话框的 fileSuffixChoices（DocumentSaveOptions）区分：那个的每元素
+ * 同样是「保存类型」下拉里的一项，但保存目标本就只有一个（saveExt 一对一映射，
+ * 不能原地保存的格式只能落 OOXML），单元素即预期形态（见 EditorPage.doSaveAs）。
+ */
+export function pickerFilterOption(): string[] {
+  return ['支持的文件|' + pickerSuffixes().join(',')];
+}
+
 /** 编辑器应用页名（webapps/apps/<name>/main/index.html） */
 export function editorAppOf(family: string): string {
   if (family === 'cell') {
