@@ -13,6 +13,15 @@ import { specOf } from '../common/formats';
 const IS_PC: boolean = deviceInfo.deviceType === '2in1' || deviceInfo.deviceType === 'pc';
 const TAB_BAR_H: number = IS_PC ? 37 : 32;
 
+/** PC 文档页整体放大倍数（ArkUI 渲染层缩放，见 buildDocWeb 注）。主页不放大。
+ *  2026-09-18 用户拍板 1.2——倍数越大清晰度与可视区代价越高（渲染按缩小后的尺寸算）。 */
+const PAGE_ZOOM_PC: number = 1.2;
+
+/** 是否对该实例应用 PC 放大（仅 PC 的文档 tab；主页与 Pad 保持原尺寸） */
+function pcZoomOn(ctx: DocTabCtx): boolean {
+  return IS_PC && ctx.kind === 'doc';
+}
+
 /**
  * 多文档 Tab 容器（P1a：容器骨架——单文档 tab + 常驻主页）。
  * 结构对齐 P0 已验证的 Harmonix 骨架（Tabs+ForEach+NodeContainer；
@@ -272,8 +281,15 @@ function buildDocWeb(ctx: DocTabCtx) {
     .onErrorReceive((err: OnErrorReceiveEvent) => {
       ctx.log('[' + ctx.kind + ctx.id + '] Web error: ' + JSON.stringify(err));
     })
-    .width('100%')
-    .height('100%')
+    // PC 文档页整体放大（ArkUI 渲染层）：布局尺寸缩到 1/f（Web 的 CSS 视口随之变窄，
+    // 页面按更窄视口重排 = UI 相对变大），再以左上角为原点 scale(f) 放大回满。
+    // 与页面侧 JS 改布局的区别：变换由 ArkUI 统一处理，Web 收到的事件坐标仍是自洽的
+    // 布局坐标（无坐标系冲突）；代价是渲染分辨率按缩小后的尺寸算，放大后略糊。
+    .width(pcZoomOn(ctx) ? (100 / PAGE_ZOOM_PC) + '%' : '100%')
+    .height(pcZoomOn(ctx) ? (100 / PAGE_ZOOM_PC) + '%' : '100%')
+    .scale(pcZoomOn(ctx)
+      ? { x: PAGE_ZOOM_PC, y: PAGE_ZOOM_PC, centerX: '0%', centerY: '0%' }
+      : { x: 1, y: 1 })
 }
 
 /**
