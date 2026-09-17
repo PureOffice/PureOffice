@@ -41,6 +41,7 @@
   （Ollama/DeepSeek 等；插件请求直接 fetch，无代理依赖）。
 """
 import os
+import re
 import hashlib
 import json
 import shutil
@@ -56,10 +57,21 @@ SDK_DST = os.path.join(DST, 'sdkjs')
 PLUGIN_SRC = os.path.join(ROOT, 'scripts', 'onlyoffice', 'plugins')
 PLUGIN_DST = os.path.join(DST, 'plugins')          # 本地插件目录（web 语义 server_plugins 链消费）
 LOGIN = os.path.join(ROOT, 'third_party', 'desktop-apps', 'common', 'loginpage', 'deploy', 'index.html')
-# 产品版本号（2026-09-10 用户拍板：About 面板版本行显示产品版本——与资源哈希
-# version.json.v 分开：v 是 URL 缓存指纹（不展示），ver 是对用户展示的产品版本，
-# 随发布手工推进（semver 起步 1.0.0；多引擎版本尾号留待产品化再对齐）。
-PRODUCT_VERSION = '1.0.0'
+# 产品版本号（About 面板版本行展示；与资源哈希 version.json.v 分开：v 是 URL
+# 缓存指纹（不展示），ver 是对用户展示的产品版本）。单一数据源 = AppScope/app.json5
+# 的 versionName——AGC 上架要求递增的同一处，改一处即两处同步（此前是本文件里的
+# 独立常量，2026-09-17 发现 About 显示 1.0.0 而包已 1.0.45 = 第二个数据源的漂移）。
+# 读不到即失败退出，不静默回落（回落值会让 About 显示错误版本且无人察觉）。
+# 用正则而非 json 解析：app.json5 是 json5（可含注释/尾逗号），单字段提取更稳。
+def _read_app_version():
+    with open(os.path.join(ROOT, 'AppScope', 'app.json5'), encoding='utf-8') as f:
+        m = re.search(r'"versionName"\s*:\s*"([^"]+)"', f.read())
+    if not m:
+        raise SystemExit('AppScope/app.json5 未找到 versionName——About 版本号无来源')
+    return m.group(1)
+
+
+PRODUCT_VERSION = _read_app_version()
 FONT_DST = os.path.join(DST, 'fonts')          # GlobalLoaders.fontFilesPath - ../fonts/
 # 系统字体路径（Environment 可覆盖：OHOS_LIBERATION_FONTS；跨机不统一时保持一致性
 # —— 字体版本差异会反映进 version.json 哈希，2026-09-05 审查补）
@@ -883,8 +895,8 @@ def patch_about_brand():
     #   2) 官方 logo 块（#idx-about-cut-logo 内 idx-logo-light/dark use 图示——
     #      同「官方 logo 图示內含超大 ONLYOFFICE 字样」）→ 内联 style display:none；
     #   3) 版本行去「商业版/社区版」前缀 label（strVersionCommunity 语义属官方
-    #      订阅版；本壳 = AGPL 社区构建，label 不成立——版本值=构建哈希
-    #      version.json.v，事件注入）；
+    #      订阅版；本壳 = AGPL 社区构建，label 不成立——版本值=version.json.ver
+    #      （=AppScope/app.json5 的 versionName），由 57_about.js 发 app:version 注入）；
     #   4) 官网/站点行（ver-site，target=popup 无新标签页语义）→ 删除（用户
     #      2026-09-10：面板不留两处 AGPL 文案；承接合规入口见下条）；
     #   5) 版权行（ver-copyright ${t.rights}）→ CREDIT 归属行硬编码（事件不发
