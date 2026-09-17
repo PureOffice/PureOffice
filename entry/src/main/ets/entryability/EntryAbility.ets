@@ -1,6 +1,6 @@
 import { AbilityConstant, Want, UIAbility } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
-import { deviceInfo, BusinessError } from '@kit.BasicServicesKit';
+import { deviceInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /**
@@ -126,10 +126,10 @@ export default class EntryAbility extends UIAbility {
   /**
    * 窗口形态（2026-09-09 用户需求，参考 ../wineohos 窗口逻辑——PAD 虚拟桌面/
    * PC 窗口实锤代码）：
-   *  - Pad（deviceType tablet/phone）→ 沉浸窗口模式：全屏布局 + 隐藏状态栏与
-   *    手势条——wineohos Index.ets「进入桌面」同款（setWindowLayoutFullScreen(true)
-   *    + setSpecificSystemBarEnabled('status'/'navigationIndicator', false)）；
-   *    1.8 真机已验证（状态栏消失、内容贴顶）。
+   *  - Pad（deviceType tablet/phone）→ **系统默认形态**（不干预：状态栏/导航条可见）。
+   *    2026-09-18 用户要求不再常驻沉浸（原实现= setWindowLayoutFullScreen(true) +
+   *    隐藏状态栏/手势条，仿 wineohos「进入桌面」）；放映期仍临时沉浸，见
+   *    EditorPage.applyFsWindow。
    *  - PC（deviceType 2in1/pc）→ 无边框沉浸：setWindowDecorVisible(false) +
    *    setWindowDecorHeight(37)——用户拍板参考 ../wineohos/.temp/HiSH
    *    （见 PC 分支注释）；1.4 真机验收通过（tab 恒不越系统三键区=另加 150 避让）。
@@ -143,17 +143,7 @@ export default class EntryAbility extends UIAbility {
       const mw = windowStage.getMainWindowSync();
       const dt = deviceInfo.deviceType;
       hilog.info(0x0000, 'OfficeWin', 'applyWindowMode deviceType=' + dt);
-      if (dt === 'tablet' || dt === 'phone') {
-        mw.setWindowLayoutFullScreen(true)
-          .then(() => { hilog.info(0x0000, 'OfficeWin', 'fullScreen ok'); })
-          .catch((e: BusinessError) => { hilog.warn(0x0000, 'OfficeWin', 'fullScreen err ' + JSON.stringify(e)); });
-        mw.setSpecificSystemBarEnabled('status', false)
-          .then(() => { hilog.info(0x0000, 'OfficeWin', 'statusBar off ok'); })
-          .catch((e: BusinessError) => { hilog.warn(0x0000, 'OfficeWin', 'statusBar off err ' + JSON.stringify(e)); });
-        mw.setSpecificSystemBarEnabled('navigationIndicator', false)
-          .then(() => { hilog.info(0x0000, 'OfficeWin', 'navBar off ok'); })
-          .catch((e: BusinessError) => { hilog.warn(0x0000, 'OfficeWin', 'navBar off err ' + JSON.stringify(e)); });
-      } else {
+      if (dt !== 'tablet' && dt !== 'phone') {
         // PC（2in1/pc）无边框沉浸——用户拍板参考 ../wineohos/.temp/HiSH
         // （EntryAbility.ets:83-85）：setWindowDecorVisible(false)（隐藏系统
         // 标题栏+按钮）+ setWindowDecorHeight(37)（**保留合法最小 37 装饰区=

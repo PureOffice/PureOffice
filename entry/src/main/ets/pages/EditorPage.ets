@@ -2102,9 +2102,8 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
 
   /**
    * 系统返回键，按窗口形态分叉：
-   *  - Pad（沉浸窗口——EntryAbility.applyWindowMode 隐藏了状态栏与导航条，系统 ✕
-   *    不复存在，返回手势是唯一系统出口）= **回桌面**（切后台）。平板惯例是「返回
-   *    上一级」，而本应用是单页面（main_pages.json 仅 EditorPage）无路由上级；
+   *  - Pad（系统默认窗口形态，2026-09-18 起不再常驻沉浸）= **回桌面**（切后台）。
+   *    平板惯例是「返回上一级」，而本应用是单页面（main_pages.json 仅 EditorPage）无路由上级；
    *    沿用 PC 的关窗语义会一口气关掉全部文档并退出应用（2026-09-12 用户报告）。
    *    切后台文档与 tab 原地保留、回前台即续，故不询问未保存（文档并未关闭）。
    *  - PC = 关闭窗口守卫（设计 §3.5）：收集全部 doc tab（从焦点起），逐个询问
@@ -2300,8 +2299,9 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
   }
 
   /**
-   * 窗口形态随放映切换（PC；Pad 已由 EntryAbility.applyWindowMode 沉浸，只切 tab
-   * 条）。参照 ../wineohos .../VirtualDesktopAbility.ets:78-127（PC 虚拟桌面全屏）：
+   * 窗口形态随放映切换（PC：窗口级全屏；Pad：临时隐藏系统栏——两平台都须自行进出
+   * 沉浸，不再依赖 EntryAbility 的常驻沉浸）。参照 ../wineohos
+   * .../VirtualDesktopAbility.ets:78-127（PC 虚拟桌面全屏）：
    *   进入 = maximize(ENTER_IMMERSIVE_DISABLE_TITLE_AND_DOCK_HOVER)——用 DISABLE_HOVER
    *     变体而非默认 ENTER_IMMERSIVE：铺满的同时鼠标贴屏幕边缘不唤出标题栏/dock
    *     （wineohos 全屏游戏同因；放映时鼠标划到边缘不该弹系统 UI）。
@@ -2314,12 +2314,28 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
   private applyFsWindow(on: boolean): void {
     try {
       const dt = deviceInfo.deviceType;
-      if (dt === 'tablet' || dt === 'phone') {
-        return; // Pad：窗口已沉浸（EntryAbility.applyWindowMode），此处只切 tab 条
-      }
       const actx = this.abilityCtx;
       if (actx === undefined) {
         this.arkLog('LSO_FS_WIN no context');
+        return;
+      }
+      if (dt === 'tablet' || dt === 'phone') {
+        // Pad：放映期临时隐藏系统栏（2026-09-18 用户要求 Pad 不再常驻沉浸 →
+        // EntryAbility 恢复系统默认形态，故此处须自行进出沉浸，否则放映画面
+        // 会被状态栏/导航条遮挡）。退出放映即还原系统栏。
+        window.getLastWindow(actx).then((mw: window.Window) => {
+          mw.setWindowLayoutFullScreen(on).catch((e: BusinessError) => {
+            this.arkLog('LSO_FS_WIN pad layout err ' + e.code);
+          });
+          mw.setSpecificSystemBarEnabled('status', !on).catch((e: BusinessError) => {
+            this.arkLog('LSO_FS_WIN pad status err ' + e.code);
+          });
+          mw.setSpecificSystemBarEnabled('navigationIndicator', !on).catch((e: BusinessError) => {
+            this.arkLog('LSO_FS_WIN pad nav err ' + e.code);
+          });
+        }).catch((e: BusinessError) => {
+          this.arkLog('LSO_FS_WIN pad win err ' + e.code);
+        });
         return;
       }
       window.getLastWindow(actx).then((mw: window.Window) => {
