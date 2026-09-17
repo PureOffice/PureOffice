@@ -20,7 +20,7 @@
 
 本工程完整源码（含对上游 ONLYOFFICE 组件的全部修改，清单见 `NOTICE`）：
 
-    https://github.com/hackeris/pure-office-ohos
+    https://github.com/hackeris/PureOffice
 
 每个发布版本对应一个源码 tag，与 `.app` / HAP 产物一一对应；从源码重建的完整步骤
 见下节「快速开始（从零复现）」。
