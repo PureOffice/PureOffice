@@ -1,116 +1,81 @@
-# ONLYOFFICE → HarmonyOS NEXT 移植（B 架构）
+# Pure Office
 
-把 ONLYOFFICE DesktopEditors（AGPL-3.0）移植到商用鸿蒙 Pad：ArkTS 薄壳 + 系统 ArkWeb
-渲染 ONLYOFFICE web 编辑器 + native core(x2t) 转换引擎。真机已验证：docx/xlsx/pptx
-打开 → 编辑 → 保存全链闭环。
+在鸿蒙（HarmonyOS）手机、平板、PC 上使用的办公软件，可以打开、新建、编辑和保存 Word、Excel、PowerPoint 文档。
 
-## 功能（已实现）
+内核来自知名的开源办公套件 ONLYOFFICE，针对鸿蒙做了适配。**文档全部在本机处理，不会上传到任何服务器**。
 
-- **打开**：欢迎页「打开本地文件」（系统选择器）/「最近使用」列表 / 新建（Word/Excel/PPT 空文档）
-- **编辑**：三格式完整工具栏/菜单/界面渲染
-- **保存**：新建=另存为（系统保存对话框）；打开的文件=覆盖原文件；最近列表随保存刷新
-- **导出**：文件菜单另存为系统位置
-- **默认中文**：界面 + 新建文档默认语言 zh-CN
-- **插件系统 + AI 插件**（2026-09-06）：官方 web 语义插件链（plugins.json 装配 → 后台插件 run →
-  插件菜单/AI 工具栏注册/弹窗全通）；随包官方 AI 插件 3.2.2（AGPL）——顶部「AI」按钮组、
-  对话/摘要/翻译窗口；**模型配置**：首次点 Chatbot 无模型时按官方语义自动弹设置窗口
-  （Ollama localhost:11434 等 provider 自理）
+## 能做什么
 
-## 源码获取
+### 文档编辑
 
-本工程完整源码（含对上游 ONLYOFFICE 组件的全部修改，清单见 `NOTICE`）：
+- **新建**：Word 文档、Excel 表格、PPT 演示文稿
+- **打开**（共 9 种格式，打开后按对应类型编辑）：
+  - Word：`.docx` `.doc` `.rtf` `.txt`
+  - Excel：`.xlsx` `.xls` `.csv`
+  - PPT：`.pptx` `.ppt`
+- **保存**：通用格式存为 `.docx` / `.xlsx` / `.pptx`；`.rtf` 和 `.csv` 保留原格式
+  - 旧格式（`.doc` / `.xls` / `.ppt`）打开后，保存时会转存为新格式，避免老格式丢内容
+  - `.csv` 是纯文本格式，颜色、合并单元格等排版信息存不进去，保存前会先提示
+- **另存为**：把文档存到任意文件夹，文件名自己定
+- **加密文档**：带密码的 Office 文档可以正常打开（会提示输入密码），保存时也可以设置密码
 
-    https://github.com/hackeris/PureOffice
+### 用起来顺手的
 
-每个发布版本对应一个源码 tag，与 `.app` / HAP 产物一一对应；从源码重建的完整步骤
-见下节「快速开始（从零复现）」。
+- **多标签**：同时打开多个文档，像浏览器一样来回切换、随手关闭
+- **未保存提醒**：关闭文档或退出应用时，如果有没保存的内容，会先问你要不要保存
+- **自动保存**：默认关闭，可以在「高级设置」里打开
+- **插入图片**：把本机图片插到文档里，保存后图片跟着文档走
+- **打印**：点顶栏打印按钮调起系统打印界面
+- **幻灯片放映**：全屏播放，退出后窗口恢复正常
+- **中文显示**：内置宋体、黑体、仿宋、楷体等常用中文字体，中文文档不会显示成方块或乱码
+- **界面**：默认「经典浅色」主题；在 PC（2in1 设备）上界面会自动放大一些，看着更清楚
 
-许可：本工程以 GNU AGPL-3.0 授权（根 `LICENSE`）。基于 ONLYOFFICE DesktopEditors
-（Copyright (C) Ascensio System SIA，AGPL-3.0），**本版本为修改版**，修改起始日期
-2026-09-02。第三方组件与随包字体的版权、许可声明见 `NOTICE`。
+### AI 助手
 
-## 快速开始（从零复现）
+内置官方 AI 插件：自己填入大模型服务地址（比如本机跑的 Ollama，或其它兼容接口）后，就能在编辑器里用对话、摘要、翻译等功能处理文档内容。
 
-```bash
-# 环境（可环境变量覆盖）：
-#   OHOS SDK /apps/harmony/sdk/default/openharmony → OHOS_NDK
-#   hdc /apps/harmony/sdk/default/openharmony/toolchains/hdc → OHOS_HDC
-#   hvigor /apps/harmony/bin/hvigorw → OHOS_HVIGORW
-#   target device → OHOS_DEV（必须显式指定，无默认值）
+不配置接口时不会联网。
 
-# 0) 子模块与补丁（两者幂等，已应用即跳过；grunt-build.sh 全链会自动调用）
-git submodule update --init                 # core/sdkjs/web-apps/build_tools（官方 release/v9.4.0）
-bash scripts/onlyoffice/patch_core_ohos.sh      # core OHOS 平台补丁（native 链前置）
-bash scripts/onlyoffice/patch_sdkjs_desktop.sh  # sdkjs desktop 构建适配（grunt 前置）
-cp build-profile.json5.template build-profile.json5   # 本机签名配置（模板含说明；不入库）
+## 怎么用
 
-# 1) 构建库产物（first time / clean 误清后）
-python3 scripts/onlyoffice/core3d/gen_cmake.py
-cmake -S build/core3d -B build/core3d/build \
-  -DCMAKE_TOOLCHAIN_FILE=$PWD/scripts/onlyoffice/core3d/ohos-arm64.toolchain.cmake
-cmake --build build/core3d/build -j$(nproc)
+| 想做什么 | 怎么做 |
+| --- | --- |
+| 打开文档 | 主页点「打开本地文件」选文档；也可以在文件管理器里直接点文档，选「Pure Office」打开 |
+| 新建文档 | 主页选「文档 / 电子表格 / 演示文稿」 |
+| 保存 | 顶栏的保存按钮，存回文档原来的位置；要换位置或换名字，用「文件 → 另存为」 |
+| 打印 | 顶栏打印按钮，或「文件 → 打印」 |
+| 切换文档 | 顶部标签栏点选；标签上的 × 关闭当前文档 |
+| 设置主题、语言等 | 「文件 → 高级设置」 |
 
-# 2) 一键：增量装配（ascshim/空模板/注入 webapps/字体）+ HAP 打包 + 装机 + 重启
-OHOS_DEV=<ip:port> bash scripts/onlyoffice/deploy_ohos.sh
+## 系统要求
 
-# 3) 自动验收（可选）：启动带 m7accept 参数 → 自动打开样本并验证打开/保存链
-hdc -t <ip:port> shell aa start -a EntryAbility -b app.fuqidian.pureoffice --ps m7accept 1
-# 日志：hdc -t <ip:port> shell cat .../files/web_console.txt（页面与壳侧统一落盘）
-```
+- HarmonyOS 6.1.0 及以上（API 23）
+- 支持手机、平板、PC（2in1）三种设备形态
 
-## 工程结构
+## 常见问题
 
-```
-entry/src/main/
-  ets/pages/EditorPage.ets        # 壳：Web 组件 + 编译/打开/保存链（SaveTarget 单一事实源）
-  ets/common/ascBridge.ets        # AscNative 桥（JS 同步 _call + 注册）
-  ets/common/rawfileLoader.ets    # onInterceptRequest：onlyoffice/* 与 userfile/* 沙箱映射
-  ets/common/x2t.ets              # x2tConvertSync（NAPI）
-  ets/common/recents.ets          # 最近使用（recents.json）
-  resources/rawfile/onlyoffice/   # 运行时资源（构建产物，不入库）
-third_party/core|sdkjs|...        # ONLYOFFICE 官方源码（submodule pinned）
-scripts/onlyoffice/
-  desktop/grunt-build.sh          # 官方构建 + 装配唯一入口（--no-upstream 仅装配）
-  desktop/make_ascshim.py         # ascshim.js 拼装（src/*.js → rawfile）
-  desktop/src/*.js                # 页面适配层（桥/打开/保存/欢迎页）
-  make_empty_templates.py         # 新建空模板（empty.docx/xlsx/pptx）
-  build_editors_ohos.py           # 装配：webapps/sdkjs/fonts/index.html/smoke/version.json
-  deploy_ohos.sh                  # 一键增量：装配(ascshim/模板/注入) + 打包 + 安装 + 重启
-  smoke/                          # 验收样本与诊断脚本（samples/ 子目录）
-docs/                             # 设计/关键点/功能矩阵/合规方案（见下表）
-```
+**文档会被上传到网上吗？**
 
-## 常用命令
+不会。打开、编辑、保存全部在本机完成，不需要联网也没有服务器。只有当你自己配置了 AI 接口并主动使用时，你选中的内容才会发送到**你指定的那个接口**。
 
-```bash
-# 构建 HAP（严禁 clean——会清掉 build/core3d native 产物）
-/apps/harmony/bin/hvigorw assembleHap -p product=default --mode module --no-daemon
+**文档里的字体和设备上不一样？**
 
-# 真机（多设备必须 -t <ip:port>）
-hdc list targets
-hdc -t <ip:port> install -r entry/build/default/outputs/default/entry-default-signed.hap
-hdc -t <ip:port> shell "aa force-stop app.fuqidian.pureoffice; aa start -a EntryAbility -b app.fuqidian.pureoffice"
-hdc -t <ip:port> shell snapshot_display -f /data/local/tmp/s.jpeg && hdc -t <ip:port> file recv /data/local/tmp/s.jpeg /tmp/s.jpeg   # 截图（必须 .jpeg 后缀）
-```
+应用自带常用的中文字体，并会使用设备上已安装的字体。如果文档用到了设备上没有的字体，会用相近的字体代替显示，排版可能与原文档略有出入。
 
-## 踩坑速查
+**为什么有的文件打不开？**
 
-1. **hvigor 严禁 clean**——会删 build/core3d 的 libx2t.a，native 链接失败，重建 10+ 分钟。
-2. **改动未见效**：先确认进包（`strings HAP | grep <新字符串>`）——.ets 增量可能不刷新。
-3. **openDocument 字节必须 Uint8Array**——string 传入得到空模型或卡死。
-4. **ArkTS→页面传二进制必须 base64 信封**——runJavaScript 走字符串会损坏 NUL 字节。
-5. **产物不入库**：rawfile 运行时资源（webapps/sdkjs/fonts/ascshim.js/index.html/…）
-   全是构建产物，`grunt-build.sh` / `deploy_ohos.sh` 重生成；仅空模板与样本保留跟踪。
-6. **sdkjs 双清单**：核心（sdk-all-min.js）与 common（sdk-all.js）由官方 loadSdk 自动加载，
-   勿手工预载/向清单加类文件（加载顺序错误 = 字体链崩溃/打开静默失败）。
+支持上表列出的 9 种格式，其它格式（例如 WPS 专有格式）暂时打不开。
 
-## 文档索引
+**卸载重装会丢文档吗？**
 
-| 文档 | 内容 |
-|---|---|
-| docs/ONLYOFFICE_OHOS_PORT_DESIGN.md | 总设计：B 架构决策依据、阶段路线图 |
-| docs/ONLYOFFICE_OHOS_PORT_KEYPOINTS.md | 关键点：DOCY v5/v10、打开/保存链、探针体系 |
-| docs/ONLYOFFICE_SAVE_CHAIN_REVISED.md | 保存链源码依据（不依赖服务器） |
-| docs/ONLYOFFICE_OHOS_FEATURE_MATRIX.md | 功能支持矩阵：已实现/降级/未实现 + 升级路线 |
-| docs/ONLYOFFICE_OHOS_PRODUCT_ROADMAP.md | 产品路线：P0-P2 差距清单 |
-| docs/OPENSOURCE_COMPLIANCE_PLAN.md | 开源合规整改方案（AGPL） |
+不会。文档保存在你自己选择的位置（比如系统「文档」目录），卸载应用不影响它们。应用内的设置会重置。
+
+## 开源与许可
+
+本应用基于 ONLYOFFICE DesktopEditors（AGPL-3.0）开发，**是修改版**，与 Ascensio System SIA 没有隶属关系，也未获得其背书。
+
+- 完整源代码：<https://github.com/hackeris/PureOffice>
+- 应用内「关于」可查看许可全文与第三方声明
+- 仓库根目录的 `LICENSE` 与 `NOTICE` 为完整许可与归属说明
+
+开发者：从源码构建的步骤见 `scripts/onlyoffice/` 下的脚本（每个脚本头部有用法说明）。
