@@ -2294,6 +2294,11 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
       return;
     }
     this.fsMode = on;
+    // 同步到各 tab ctx（DocTabHost 的 onInterceptKeyboardAttach 回调运行时读它——
+    // Pad 放映中拦截系统软键盘，见该回调注释）
+    for (const p of this.docTabs) {
+      p.ctx.fsMode = on;
+    }
     this.arkLog('LSO_FULLSCREEN ' + (on ? '1' : '0'));
     this.applyFsWindow(on);
   }

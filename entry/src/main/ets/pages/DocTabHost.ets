@@ -68,6 +68,9 @@ export class DocTabCtx {
   title: string;
   url: string;
   attached: boolean = false;
+  /** 放映全屏态副本（EditorPage 随放映同步；buildDocWeb 的 @Builder 拿不到组件 @Link，
+   *  而 onInterceptKeyboardAttach 回调在运行时读它决定是否放行系统软键盘） */
+  fsMode: boolean = false;
   /** per-tab 文档身份（home 实例空态——不使用） */
   state: DocTabState = new DocTabState();
   controller: webview.WebviewController = new webview.WebviewController();
@@ -261,6 +264,15 @@ function buildDocWeb(ctx: DocTabCtx) {
     })
     .onControllerAttached(() => {
       ctx.onAttached();
+    })
+    // Pad 放映中不放行系统软键盘：放映（含点击切页）会让页面内可编辑元素拿到焦点，
+    // 系统随之拉起键盘、挤压放映画面（2026-09-18 1.6 真机现象）。此处按放映态拦截。
+    // PC 不拦（无软键盘语义，且放映外仍需正常输入）。
+    .onInterceptKeyboardAttach((_info: WebKeyboardCallbackInfo): WebKeyboardOptions => {
+      if (!IS_PC && ctx.fsMode) {
+        return { useSystemKeyboard: false };
+      }
+      return { useSystemKeyboard: true };
     })
     .onPageEnd(() => {
       ctx.log('[' + ctx.kind + ctx.id + '] PAGE_END ' + ctx.controller.getUrl());
