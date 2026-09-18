@@ -2597,7 +2597,13 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
               this.arkLog('CLOSE_DOC_PAIR_NULL id=' + id);
             }
           },
-          onSwitch: (idx: number) => this.onSwitchTab(idx)
+          onSwitch: (idx: number) => this.onSwitchTab(idx),
+          // tab 条「+」新建：类型菜单 → 与 create:new 同一条通路（openNewFile →
+          // 空模板 → openNewTabEntry 开新 tab 并聚焦），不新增任何新建逻辑
+          onNewDoc: (ext: string) => {
+            this.arkLog('TAB_NEW_MENU ext=' + ext);
+            this.openNewFile(ext);
+          }
         })
       }
       // —— 未保存守卫弹框（自绘覆盖层；Stack 顶层压住全部组件）——

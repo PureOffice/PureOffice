@@ -327,6 +327,29 @@ export struct DocTabHost {
   };
   onSwitch: (index: number) => void = () => {
   };
+  /** + 菜单选中（新建文档）：EditorPage 注入 → openNewFile（唯一新建通路） */
+  onNewDoc: (ext: string) => void = () => {
+  };
+
+  /** 是否已有文档 tab（+ 的显示条件——只有主页时不显示） */
+  private hasDocTab(): boolean {
+    for (let i = 0; i < this.tabs.length; i++) {
+      if (this.tabs[i].ctx.kind === 'doc') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** + 菜单项（数据驱动：系统渲染菜单，点击回调 action）。措辞取自官方中文
+   *  语言包同族词条（Controllers/LeftMenu.newDocumentTitle 去掉「未命名的」）。 */
+  private newMenuItems(): MenuElement[] {
+    return [
+      { value: '文档', action: () => { this.onNewDoc('docx'); } },
+      { value: '电子表格', action: () => { this.onNewDoc('xlsx'); } },
+      { value: '演示', action: () => { this.onNewDoc('pptx'); } }
+    ];
+  }
 
   build() {
     Column() {
@@ -416,6 +439,23 @@ export struct DocTabHost {
           // minWidth 与 flexShrink 并存时以收缩结果为准；不承诺下限，标题省略号兜底）
           .constraintSize({ minWidth: item.ctx.kind === 'home' ? 72 : 96, maxWidth: 320 })
         }, (item: DocTabPair) => item.ctx.kind + '-' + item.ctx.id.toString())
+        // ——「+」新建文档（有 doc tab 时才在）：点开系统菜单选类型 ——
+        // 位置紧跟最后一个 chip（浏览器 tab 条同款）；不固定到条右端——PC 的右内衬
+        // 150 是系统三键避让区，固定右端会与 chips 割裂。菜单用 ArkUI 官方
+        // bindMenu：MenuElement 是数据描述、由系统渲染并回调 action，不经组件树
+        // 事件分发（与 CustomDialog 那个「自定义按钮点击到不了 ArkTS」不同机制）。
+        // 设计依据见 docs/superpowers/specs/2026-09-18-tab-new-button-design.md
+        if (this.hasDocTab()) {
+          SymbolGlyph($r('sys.symbol.plus'))
+            .fontSize(16)
+            .fontColor(['#2B3B4D'])
+            // 触区：宽 = 16 + 10×2 = 36vp，高给满条高（SymbolGlyph 无 textAlign，
+            // 宽度只能由左右内衬撑出——与 × 同款做法）
+            .padding({ left: 10, right: 10 })
+            .height(TAB_BAR_H)
+            .hoverEffect(HoverEffect.Scale)
+            .bindMenu(this.newMenuItems())
+        }
         // —— 系统三键区说明（2026-09-10 用户纠正+UI dump 实证）——
         // setWindowDecorVisible(false) **只隐藏标题栏，系统 −□✕ 三键仍在窗口
         // 右上角**（1.4 实测：三键 [2370,297]-[2560,335]，原生 38px 键距）。
