@@ -35,6 +35,29 @@
   var IS_SYS = {'HYQiHeiL3.ttf': 1,
                 'NotoSansBengaliUI-Regular.ttf': 1,
                 'NotoSansDevanagariUI-Regular.ttf': 1};
+  // 用户自导入字体（2026-09-18）：URL 参数 lsofonts 同时驱动本清单——注册行由
+  //   20_bridge 追加（该段早于 sdk 加载执行，本段的装填在 g_font_files 建好后轮询
+  //   触发，两段时序天然错开）。元素 [file, family, weight, italic]，装填按 file
+  //   名（ID 即 __fonts_files 里的文件名）。
+  //   **装填是刻意的**（同随包 CJK 的方块修复动机）：保证首帧即有字形。曾一度改为
+  //   "不装填、走 sdkjs 原生按需加载"，理由是"装填置 Status=0 会短路加载链、致
+  //   浏览器侧 @font-face 不建立"——真机实测下拉项**依旧空白**，证实空白与
+  //   @font-face 无关（字体下拉每项显示的是构建期精灵格图片，运行时字体没有格子），
+  //   已回归装填。下拉名字另由 46_fontimg 画（见该段）。
+  //   **用户字体并入本清单、与随包字体同批装填**：曾试过不并入（只留引擎的按需
+  //   加载链），真机表现为整段中文落回宋体——按需请求晚于选字。
+  var USER_IDS = {};
+  try {
+    var _ufm = /[?&]lsofonts=([^&]+)/.exec(window.location.search || '');
+    if (_ufm) {
+      var _ufa = JSON.parse(decodeURIComponent(atob(decodeURIComponent(_ufm[1]))));
+      for (var _ufi = 0; _ufi < _ufa.length; ++_ufi) {
+        var _uff = String(_ufa[_ufi][0] || '');
+        if (_uff && IDS.indexOf(_uff) < 0) { IDS.push(_uff); USER_IDS[_uff] = 1; }
+      }
+      console.error('LSO_UFONT_IDS n=' + IDS.length + ' user=' + _ufa.length);
+    }
+  } catch (_ufe) { console.error('LSO_UFONT_IDS_ERR ' + String(_ufe)); }
   function xorDecode(u8) {
     var n = Math.min(32, u8.length);
     for (var i = 0; i < n; ++i) u8[i] ^= GUID[i % 16];
@@ -48,7 +71,12 @@
     // rawfile 字体在构建时被 pre_xor_font 加密（前 32B XOR guidOdttf）——装填时还原。
     (function prefetch() {
       var urls = [
-        (IS_SYS[ID] ? 'http://localhost/onlyoffice/systemfonts/' : 'http://localhost/onlyoffice/fonts/') + ID,
+        // 用户字体必须走 userfonts/：该前缀拦截层按 xor=true 返回**加密态**，与本链的
+        // xorDecode 配对。取成 fonts/（浏览器明文通道）会让字体头被再异或一次而报废，
+        // 且日志上毫无异常（FONT_WARM_FILLED status=0 照常打印）。
+        (USER_IDS[ID] ? 'http://localhost/onlyoffice/userfonts/'
+          : (IS_SYS[ID] ? 'http://localhost/onlyoffice/systemfonts/'
+            : 'http://localhost/onlyoffice/fonts/')) + ID,
         '../../../../fonts/' + ID                    // 相对兜底（仅 rawfile；系统字体 miss）
       ];
       (function tryNext(i) {

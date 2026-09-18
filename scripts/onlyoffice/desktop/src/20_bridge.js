@@ -12,6 +12,51 @@
   // 无字形字符的 fallback 永远失败 → 方块（2026-09-05 最后根因，见
   // build_editors_ohos.py FONT_RANGES 注释）。
   window["__fonts_ranges"] = @@FONT_RANGES_JSON@@;
+  // ---- 0.2 用户自导入字体（2026-09-18）：URL 参数 lsofonts = base64(URI 编码的
+  //      JSON 数组)，元素 [file, family, weight, italic]（ArkTS 侧
+  //      common/userFonts.encodeUrlParam 编码）。此刻三表刚注入、sdk-all.js 尚未
+  //      加载（checkAllFonts 未跑）——这是唯一能改注册表的时机（跑完即删表）。
+  //      注册行四槽同索引（单文件通吃；先例 OpenSymbol 行）；行名 = 字体内部
+  //      family 名（引擎契约：行名必须等于 face 内部名，故导入侧从 name 表读，
+  //      见 common/sfnt.ets）。与内置行重名者跳过（导入侧已拦，此处兜底）。
+  (function _userFonts() {
+    try {
+      var _m = /[?&]lsofonts=([^&]+)/.exec(window.location.search || '');
+      if (!_m) { return; }
+      var _arr = JSON.parse(decodeURIComponent(atob(decodeURIComponent(_m[1]))));
+      var _files = window["__fonts_files"];
+      var _infos = window["__fonts_infos"];
+      var _n = 0;
+      var _skip = 0;
+      // 名字清单供字体下拉 wrap（30_open sync_InitEditorFonts）使用——用户字体
+      // 不参与族归一：它没有随包缩略图，会与内置字体并入同一 thumbnail 组被丢弃
+      // （1.6 真机实测：注册/装填全成功，下拉里却没有）。
+      window.__lso_user_font_names = window.__lso_user_font_names || [];
+      // 空白缩略图槽位索引 = 追加前的内置行数（精灵图尾部多留的一格，见
+      // build_editors_ohos.make_fonts_sprites）——用户字体统一指向它，否则
+      // thumbnail=行号越界会让下拉列表渲染中断（真机实测）。
+      window.__lso_font_blank_thumb = _infos.length;
+      for (var _i = 0; _i < _arr.length; ++_i) {
+        var _it = _arr[_i];
+        var _file = String(_it[0] || '');
+        var _fam = String(_it[1] || '');
+        if (!_file || !_fam) { continue; }
+        var _dup = false;
+        for (var _j = 0; _j < _infos.length; ++_j) {
+          if (_infos[_j][0] === _fam) { _dup = true; break; }
+        }
+        if (_dup) { _skip++; continue; }
+        _files.push(_file);
+        var _idx = _files.length - 1;
+        _infos.push([_fam, _idx, 0, _idx, 0, _idx, 0, _idx, 0]);
+        window.__lso_user_font_names.push(_fam);
+        _n++;
+      }
+      console.error('LSO_UFONT_REG n=' + _n + ' skip=' + _skip + ' total=' + _arr.length);
+    } catch (_e) {
+      console.error('LSO_UFONT_REG_ERR ' + String(_e));
+    }
+  })();
   // （0.3 已回滚，2026-09-05）字族下拉「精灵缺失」修复走**资源侧**：官方 web 语义
   // （Common.Controllers.Desktop.isActive=false → CThumbnailLoader XHR
   //    sdkjs/common/Images/fonts_thumbnail_ea@*.png.bin）由构建链生成精灵产物
@@ -203,4 +248,56 @@
         else { console.error('LSO_WAITFULL_GIVEUP'); }
       })();
     }
+
+  // ---- 用户字体进「字体名字典」（2026-09-18）----
+  // 引擎的字体名解析链是：g_fontApplication.GetFontFileWeb(name)
+  //   → FD_FontDictionary.GetFontIndex(oSelect, g_fontSelections.List, ...)
+  // **它根本不查 __fonts_infos**，而是遍历 g_fontSelections.List —— 那张表由
+  // CFontSelectList.Init() 从构建期静态数据建立（类内嵌 base64 / g_fonts_selection_bin），
+  // 用户字体名不在其中 → 请求名解析失败 → 静默落到默认 Arial。真机探针实证：
+  //     FONT_PICK FontPicker: LXGW WenKai => Arial
+  // 此时字体字节装填得再好也不会被用上：装填链只负责「按文件名喂字节」，而
+  // 「名字 → 哪个文件」由这张字典决定（上面两条 push 只填了后半程）。
+  // 修法：等表建好（IsInit）后把用户字体条目补进去，并清 FontPickerMap 缓存——
+  // 解析结果按名缓存，首次失败（→Arial）会一直沿用，不清则整页都错。
+  // 条目从表里现成对象复制、只改名字：GetPenalty 要读 Panose/CodePage 等字段，
+  // 自造空对象会在那里出错。
+  (function _userFontIntoDictionary() {
+    var _tries = 0;
+    (function _wait() {
+      try {
+        var _names = window.__lso_user_font_names || [];
+        if (!_names.length) { return; }                 // 没导入过字体：本段不参与
+        var _A = window.AscFonts;
+        var _app = _A && _A.g_fontApplication;
+        var _sel = _app && _app.g_fontSelections;
+        if (!_sel || _sel.IsInit !== true || !_sel.List || !_sel.List.length) {
+          if (++_tries < 600) { setTimeout(_wait, 200); }
+          else { console.error('LSO_UFONT_DICT_GIVEUP'); }
+          return;
+        }
+        var _list = _sel.List;
+        var _tpl = _list[0];
+        var _added = 0;
+        for (var i = 0; i < _names.length; ++i) {
+          var _nm = String(_names[i] || '');
+          if (!_nm) { continue; }
+          var _hit = false;
+          for (var j = 0; j < _list.length; ++j) {
+            if (_list[j] && _list[j].m_wsFontName === _nm) { _hit = true; break; }
+          }
+          if (_hit) { continue; }
+          var _o = Object.create(Object.getPrototypeOf(_tpl));
+          for (var _k in _tpl) { _o[_k] = _tpl[_k]; }
+          _o.m_wsFontName = _nm;
+          if (_o.m_names && _o.m_names.length) { _o.m_names = [_nm]; }
+          _list.push(_o);
+          if (_sel.ListMap) { _sel.ListMap[_nm] = _list.length - 1; }
+          _added++;
+        }
+        if (_added > 0) { _app.FontPickerMap = {}; }    // 清缓存（见上）
+        console.error('LSO_UFONT_DICT added=' + _added + ' total=' + _list.length);
+      } catch (_e) { console.error('LSO_UFONT_DICT_ERR ' + String(_e)); }
+    })();
+  })();
 

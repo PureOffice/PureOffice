@@ -35,6 +35,9 @@ entry/src/main/resources/rawfile/onlyoffice/plugins.json
 entry/src/main/resources/rawfile/onlyoffice/licenses/
 # 版本号（构建期内容哈希生成——阶段3，替代手改 VERSION_BUMP）
 entry/src/main/resources/rawfile/onlyoffice/version.json
+# 内置字体行名清单（build_editors_ohos.write_font_rows 由 FONT_INFOS 生成；userFonts.ets
+# 读它做导入时的内置重名拦截——缺失=不拦，不阻断导入）
+entry/src/main/resources/rawfile/onlyoffice/fontrows.json
 # ascshim.js（make_ascshim.py 由 src/*.js 拼接生成）与 index.html（欢迎页，来自
 # third_party/desktop-apps loginpage deploy）同为生成产物，与 webapps/fonts 等一并
 # 不入库——fresh clone 编译 HAP 前本就必须先跑 grunt-build.sh（其余 rawfile 全在

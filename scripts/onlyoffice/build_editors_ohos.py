@@ -457,6 +457,13 @@ def make_fonts_sprites(count):
             dr = ImageDraw.Draw(img)
             fsize = int(20 * ratio)
             for i in range(count):
+                # 尾部空白格（count = FONT_INFOS 行数 + 1）：留给用户自导入字体。
+                # CFontInfo 的 thumbnail 参数 = __fonts_infos 行号（checkAllFonts 传 i），
+                # 用户字体行追加在内置行之后必然越界——真机实测 UI getImage 越界抛异常，
+                # 下拉列表渲染到该项即中断（字体"消失"）。用户字体统一指向这格空白
+                # （30_open wrap 重建 CFont，见其 LSO_FONT_USER_KEEP 段）。
+                if i >= len(FONT_INFOS):
+                    break
                 row = FONT_INFOS[i]
                 # CFontInfo indexR → 字体文件。**系统字体**（SYSTEM_FONT_FILES，
                 # indexR >= len(FONT_FILES)）构建机无源文件（设备 /system/fonts
@@ -693,6 +700,20 @@ def install_licenses():
         print('  %s → %s/%s (%d bytes)'
               % (src_name, dst_dir, dst_name,
                  os.path.getsize(os.path.join(dst_dir, dst_name))))
+
+
+def write_font_rows():
+    """内置字体行名清单 → rawfile/onlyoffice/fontrows.json。
+
+    为什么单独出这份数据：引擎注册行名（FONT_INFOS 第 0 列）只在构建期知道，而
+    ArkTS 导入侧要在用户选完文件的当下判断「这个家族名已被内置占用」——不导出
+    就只能硬编码或漏检。含随包字体行与系统字体行。
+    """
+    out = os.path.join(DST, 'fontrows.json')
+    names = [row[0] for row in FONT_INFOS]
+    with open(out, 'w', encoding='utf-8') as f:
+        json.dump(names, f, ensure_ascii=False)
+    print('fontrows.json: %d 行 → %s' % (len(names), out))
 
 
 def patch_about_brand():
@@ -1146,7 +1167,8 @@ def main():
     # 5.5 字体缩略图精灵（官方 web 语义 CThumbnailLoader 消费——字族下拉真源，
     #     详见 make_fonts_sprites 注释；缺失=404 字节当 RLE 头→createImageData
     #     OOM→菜单渲染崩，真机 ComboBoxFonts.js:243 实证）
-    n_spr = make_fonts_sprites(len(FONT_INFOS))
+    # +1 = 尾部空白格（用户自导入字体的缩略图槽位，见 make_fonts_sprites 内注释）
+    n_spr = make_fonts_sprites(len(FONT_INFOS) + 1)
     print('  字体精灵 → sdkjs/common/Images (%d files)' % n_spr)
 
     # 6. 欢迎页 loginpage → rawfile/onlyoffice/index.html
@@ -1167,6 +1189,9 @@ def main():
 
     # 7.55 随包许可证（AGPL 全文+官方附款 → licenses/；About「许可信息」链接指向）
     install_licenses()
+
+    # 7.56 内置字体行名清单（用户导入字体的重名检查数据源；common/userFonts.ets 读）
+    write_font_rows()
 
     # 7.6 关于面板双品牌（Pure Office 主 + ONLYOFFICE 辅行 + 公司信息隐藏 + 许可入口；
     #     须在 gen_version_json 前——patch 内容算进资源哈希，编排内无自愈版本号漂移）

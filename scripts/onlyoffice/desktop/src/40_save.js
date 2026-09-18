@@ -466,6 +466,80 @@
     } catch (wx) { console.error('LSO_WELNAV_ERR ' + String(wx)); }
   })();
 
+  // ---- 3.11 欢迎页「字体管理」入口（2026-09-18 用户需求）----
+  // loginpage 侧栏是官方静态模板（panels.js），无插件位——clone 一个已存在的
+  // .menu-item（用被 3.10 隐藏的「模板」项）保住官方样式与图标位，改文本与
+  // action 后插到「关于」项之前。点击 → AscNative.execCommand('font:manage')
+  // → EditorPage 打开字体管理弹层（查看/导入/删除；生效在**新打开的文档**
+  // ——字体表经 URL 参数在页面加载时注册，见 common/userFonts）。
+  (function _injectFontImport() {
+    try {
+      var _fp = (window.location || {}).pathname || '';
+      if (_fp.indexOf('/onlyoffice/index.html') < 0) { return; }
+      var _fins = function() {
+        if (document.getElementById('lso-import-font')) { return; }
+        var _ftpl = document.querySelector('.tool-menu a[action="templates"]');
+        if (!_ftpl || !_ftpl.closest) { return; }
+        var _fli = _ftpl.closest('.menu-item');
+        if (!_fli || !_fli.parentNode) { return; }
+        var _fclone = _fli.cloneNode(true);
+        _fclone.style.display = '';
+        var _fa = _fclone.querySelector('a');
+        if (!_fa) { return; }
+        _fa.setAttribute('action', 'lsofonts');
+        _fa.id = 'lso-import-font';
+        // 文本替换：官方项结构是 图标 + 标签（标签可能嵌在更深的元素里，1.6 真机
+        // 实测直接子级遍历改不到——侧栏显示成「模板」）。递归收集文本节点，替换
+        // 「去空白后最长」的那个——图标字符（字体图标私用区或 svg）通常 1 字符，
+        // 标签更长，据此避开误改图标。
+        var _fbest = null;
+        var _fbestLen = 0;
+        var _fwalk = function(_fnode) {
+          for (var _fk = 0; _fk < _fnode.childNodes.length; ++_fk) {
+            var _fc = _fnode.childNodes[_fk];
+            if (_fc.nodeType === 3) {
+              var _fv = String(_fc.nodeValue || '').replace(/\s/g, '');
+              if (_fv.length > _fbestLen) { _fbestLen = _fv.length; _fbest = _fc; }
+            } else if (_fc.nodeType === 1) {
+              _fwalk(_fc);
+            }
+          }
+        };
+        _fwalk(_fa);
+        if (_fbest) { _fbest.nodeValue = '字体管理'; }
+        _fa.addEventListener('click', function(_ev) {
+          _ev.preventDefault();
+          _ev.stopPropagation();
+          try {
+            if (window.AscNative && typeof window.AscNative._call === 'function') {
+              window.AscNative._call('execCommand', ['font:manage']);
+            }
+          } catch (_fe) { console.error('LSO_UFONT_ENTRY_CALL_ERR ' + String(_fe)); }
+        });
+        // 位置：插到「关于」项之前（官方项 action="about"；找不到就退回追加到末尾
+        // ——位置是观感问题，不值得为它中断注入）。
+        var _flabout = document.querySelector('.tool-menu a[action="about"]');
+        var _flaboutLi = (_flabout && _flabout.closest) ? _flabout.closest('.menu-item') : null;
+        if (_flaboutLi && _flaboutLi.parentNode) {
+          _flaboutLi.parentNode.insertBefore(_fclone, _flaboutLi);
+        } else {
+          _fli.parentNode.appendChild(_fclone);
+        }
+        console.error('LSO_UFONT_ENTRY ok');
+        (window.__lsoShim = window.__lsoShim || []).push('userfonts');
+      };
+      var _fobs = new MutationObserver(_fins);
+      if (document.body) {
+        _fobs.observe(document.body, {childList: true, subtree: true});
+      } else {
+        document.addEventListener('DOMContentLoaded', function() {
+          _fobs.observe(document.body, {childList: true, subtree: true});
+        });
+      }
+      _fins();
+    } catch (_fe2) { console.error('LSO_UFONT_ENTRY_ERR ' + String(_fe2)); }
+  })();
+
   // ---- 3.8.5 官方 Header X 重定向（未保存关闭守卫，2026-09-09）----
   //     官方链：Header.js:383 btnClose → NotificationCenter 'close' → Main.js:250
   //     closeEditor → onRequestClose（Main.js:693）——asc_isDocumentModified 时弹

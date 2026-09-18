@@ -32,6 +32,20 @@
 2. **字节可以异步**（装填链本身就是异步的：预取 + 轮询装填）→ 走既有装填模式即可。
 3. **行名取自字体内部名 → 契约自动满足**，无需构建期的 `rewrite_font_name` 同款重写。
 
+### 1.3 引擎约束（实施中实测确认，限定 1.2 结论 1 的适用范围）
+
+1.2 的结论 1 只覆盖**后半程**。字体真正生效要接通两段，各有独立的表与时机：
+
+| 段落 | 表 / 对象 | 时机 | 由谁接通 |
+|---|---|---|---|
+| 名字 → 文件 | `g_fontSelections.List`（构建期内嵌的字体名字典） | **运行时**，须在 `CFontSelectList.Init()` 之后追加 | 20_bridge 字典段（§4.5） |
+| 文件 → 字节 | **预装填**：并入 `__fonts_files` / `g_fonts_streams` 清单 | 页面加载期，`g_font_files` 建好后轮询触发 | 09_fonts 装填段（字节走 `userfonts/` 前缀=**加密态**，`xorDecode` 还原） |
+| 字形 → 渲染 | 引擎按 run 的 fontName 取字体 | — | — |
+
+- **字体名解析不查 `__fonts_infos`**：`g_fontApplication.GetFontFileWeb` → `FD_FontDictionary.GetFontIndex(oSelect, g_fontSelections.List, ...)` 遍历的是 `g_fontSelections.List`，该表由 `CFontSelectList.Init()` 从构建期静态数据（类内嵌 base64 字典）建立。用户字体名不在其中 → **静默落到默认 Arial**。真机探针实证：`FontPicker: LXGW WenKai => Arial`。修法 = 等 `IsInit` 后补条目（从表内现成对象复制、只改 `m_wsFontName`——`GetPenalty` 要读 Panose/CodePage）+ 清 `FontPickerMap`（解析结果按名缓存，失败会一直沿用）。
+- **字节走预装填、与随包字体同批**：引擎按 run 取字形时就需要有流；只留引擎按需链时其请求（`userfont(fonts) hit`）晚于选字 → 整段中文落回宋体。故并入装填清单（§4.5）。字节形态：装填链要**加密态**（`userfonts/` 前缀返回，`xorDecode` 异或前 32B 还原）；而 `fonts/` 前缀回退给的是**明文**（FreeType 直接吃）——**两者相反，取错即毁字体头且日志无异常**（`FONT_WARM_FILLED status=0` 照常打印）。曾据"三轮对比"（无用户字体 PASS 17s｜仅 297KB PASS 20s｜+24.7MB 超时）把 open-ppt 超时归因于装填阻塞并改为按需——2026-09-18 复测**证伪**（立即装填 + 24.7MB：open-ppt PASS 27s，`FONT_WARM_FILLED ... bytes=24744500` 确实发生、耗约 14ms）。
+- **判据只能是引擎的答案**：`FONT_WARM_FILLED` 只证明"字节喂进去了"，下拉里有名字只证明"注册表有这一行"。要证明字体真被用上，用引擎自带探针 `window.onLogPickFont`（`m7auto=1` 时安装，打印 `FontPicker: <请求名> => <命中名>`），或做像素级字形对比（同一段文字换字体对照——不同大小的文字"对比"会得出错误结论）。
+
 ## 2. 目标与非目标
 
 **目标（本次）**
@@ -142,7 +156,7 @@ export function encodeUrlParam(): string;           // 清单 → URL 参数值�
 
 ## 6. 错误处理与日志
 
-- **JS 侧**：`LSO_UFONT_REG n=<个数> ok`（20_bridge 注册）、`LSO_UFONT_LOAD id=<id> st=<状态>` / `LSO_UFONT_FILLED id=<id> bytes=<n>`（09_fonts 装填，沿用现有 `FONT_WARM_*` 风格并在其外补用户字体专属标签以便判据）。
+- **JS 侧**：`LSO_UFONT_IDS n=<总数> user=<个数>`（09_fonts 解析 URL 参数）、`LSO_UFONT_REG n=<个数> ok`、`LSO_UFONT_DICT added=<n> total=<n>`（20_bridge 注册 / 补字典）、装填沿用既有 `FONT_WARM_BYTES` / `FONT_WARM_FILLED id=<id> bytes=<n>` 标签（不另造）。
 - **ArkTS 侧**：`LSO_UFONT_IMPORT ok=<n> skip=<n> err=<原因>`；`arkLog` 统一出口（落 `web_console.txt`）。
 - 任一环节失败**不得阻断**页面加载与既有字体：桥解析失败 → 跳过用户字体；单字体读取失败 → 该字体不装填，其余照常。
 

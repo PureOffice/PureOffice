@@ -20,6 +20,15 @@ const MEDIA_DIR = 'media';
 // 返回前 XOR 前 32B（guidOdttf 循环，同构建机 pre_xor_font 加密态）→ 页面
 // 09_fonts.js xorDecode 统一还原装填（装填链零分支）。
 const SYSTEM_FONT_PREFIX = 'onlyoffice/systemfonts/';
+// 用户导入字体（2026-09-18）：http://localhost/onlyoffice/userfonts/<file>
+// → 沙箱 filesDir/userFonts/<file>（导入段落盘，见 common/userFonts.ets）。
+// 与系统字体桥同构（读出的字节在 ArkTS 侧 XOR 前 32B）——页面 09_fonts 装填链
+// 对"随包/系统/用户"三类字体零分支。
+const USER_FONT_PREFIX = 'onlyoffice/userfonts/';
+// UI 侧字体名预览的 web 语义字体路径（sdkjs GlobalLoaders.js:53 = ../../../../fonts/
+// → onlyoffice/fonts/）：字体下拉每项的名字用**该字体本身**渲染，浏览器按这个 URL
+// 取字节建 @font-face。用户导入字体不在 rawfile → 本前缀需回退沙箱（见 loadRaw）。
+const FONTS_PREFIX = 'onlyoffice/fonts/';
 const FONT_GUID: number[] = [0xA0, 0x66, 0xD6, 0x20, 0x14, 0x96, 0x47, 0xFA,
   0x95, 0x69, 0xB8, 0x50, 0xB0, 0x41, 0x49, 0x48];
 
@@ -44,6 +53,44 @@ function loadSystemFont(rel: string, log: (m: string) => void): ArrayBuffer | nu
     u8[i] ^= FONT_GUID[i % 16];
   }
   return ab;
+}
+
+/**
+ * 用户导入字体：沙箱 filesDir/userFonts/<file> → ArrayBuffer（加密态）。
+ * 文件名仅纯名（同 loadSystemFont 的防穿越校验）。
+ */
+function loadUserFont(filesDir: string, rel: string, xor: boolean,
+  log: (m: string) => void): ArrayBuffer | null {
+  if (rel.length === 0 || rel.indexOf('/') >= 0 || rel.indexOf('\\') >= 0
+    || rel.indexOf('..') >= 0) {
+    log('userfont bad path: ' + rel);
+    return null;
+  }
+  const fp = filesDir + '/userFonts/' + rel;
+  try {
+    const st = fs.statSync(fp);
+    if (st.isDirectory()) {
+      log('userfont dir: ' + fp);
+      return null;
+    }
+    const o = fs.openSync(fp, fs.OpenMode.READ_ONLY);
+    const ab = new ArrayBuffer(st.size);
+    fs.readSync(o.fd, ab);
+    fs.closeSync(o);
+    // xor=true：装填链（页面 09_fonts 统一 xorDecode，走 userfonts/ 前缀）；
+    // xor=false：UI 侧 @font-face（浏览器直接解析，须明文，走 fonts/ 回退）。
+    if (xor) {
+      const u8 = new Uint8Array(ab);
+      const n = Math.min(32, u8.length);
+      for (let i = 0; i < n; i++) {
+        u8[i] ^= FONT_GUID[i % 16];
+      }
+    }
+    return ab;
+  } catch (e) {
+    log('userfont miss: ' + fp + ' ' + String(e));
+    return null;
+  }
 }
 
 function mimeTypeFor(path: string): string {
@@ -243,6 +290,18 @@ export function loadRaw(
     resp.setResponseData(ab);
     return readyResp(resp);
   }
+  if (p.startsWith(USER_FONT_PREFIX)) {
+    const ab = loadUserFont(filesDir, p.substring(USER_FONT_PREFIX.length), true, _log);
+    if (ab === null) {
+      return notFoundResp(url);
+    }
+    _log('userfont hit: ' + p + ' bytes=' + ab.byteLength);
+    const resp = new WebResourceResponse();
+    resp.setResponseMimeType('font/ttf');
+    resp.setResponseEncoding('utf-8');
+    resp.setResponseData(ab);
+    return readyResp(resp);
+  }
   if (p.startsWith(USERFILE_PREFIX)) {
     const ab = loadUserFile(filesDir, p.substring(USERFILE_PREFIX.length), _log);
     if (ab === null) {
@@ -271,6 +330,20 @@ export function loadRaw(
     resp.setResponseEncoding('utf-8');
     resp.setResponseData(ab);
     return readyResp(resp);
+  }
+  // 字体下拉的名字预览（web 语义 @font-face = onlyoffice/fonts/<file>）：随包字体
+  // 走下方 rawfile 通用分支；用户导入字体不在 rawfile → 这里回退沙箱（**明文**，
+  // 浏览器直接解析）。miss 则继续落到 rawfile 分支。
+  if (p.startsWith(FONTS_PREFIX)) {
+    const abf = loadUserFont(filesDir, p.substring(FONTS_PREFIX.length), false, _log);
+    if (abf !== null) {
+      _log('userfont(fonts) hit: ' + p + ' bytes=' + abf.byteLength);
+      const respf = new WebResourceResponse();
+      respf.setResponseMimeType('font/ttf');
+      respf.setResponseEncoding('utf-8');
+      respf.setResponseData(abf);
+      return readyResp(respf);
+    }
   }
   const rawPath = pathToRawFile(url);
   try {

@@ -822,6 +822,14 @@
                 }
                 return false;
               };
+              // 用户自导入字体名（20_bridge 从 URL 参数登记，见 __lso_user_font_names）
+              var _lsoUserFont = function(n) {
+                var _uf = window.__lso_user_font_names || [];
+                for (var ui = 0; ui < _uf.length; ui++) {
+                  if (_uf[ui] === n) { return true; }
+                }
+                return false;
+              };
               _m.api.sync_InitEditorFonts = function(fonts) {
                 var _prev = '';
                 try {
@@ -839,6 +847,7 @@
                   window.__lsoInjSig = _sig;
                   // 族归一（两轮）：候选名 → 选中文优先 → 输出
                   var _byThumb = {};
+                  var _keep = [];
                   for (var k = 0; k < (fonts || []).length; k++) {
                     var _ft = fonts[k];
                     var _nm = String(_ft && _ft.asc_getFontName ? _ft.asc_getFontName() : '');
@@ -846,10 +855,21 @@
                     if (!_nm || /\.(ttf|otf|eot|woff2?)$/i.test(_nm)) { continue; }
                     // 内部字体行（构建期清单）：留引擎候选列表供映射，但不进用户下拉
                     if (_uiHidden(_nm)) { console.error('LSO_FONT_HIDDEN name=' + _nm); continue; }
+                    // 用户自导入字体：**不参与族归一**——它没有随包缩略图，会与内置
+                    // 字体并进同一 thumbnail 组被丢掉（1.6 真机实测的「注册成功却
+                    // 不在下拉里」根因），直接保留。
+                    if (_lsoUserFont(_nm)) {
+                      var _dupU = false;
+                      for (var qu = 0; qu < _keep.length; qu++) {
+                        if (_keep[qu].name === _nm) { _dupU = true; break; }
+                      }
+                      if (!_dupU) { _keep.push({thumb: _th, name: _nm}); }
+                      console.error('LSO_FONT_USER_KEEP name=' + _nm);
+                      continue;
+                    }
                     if (!_byThumb[_th]) { _byThumb[_th] = []; }
                     _byThumb[_th].push(_nm);
                   }
-                  var _keep = [];
                   for (var _tk in _byThumb) {
                     var _names2 = _byThumb[_tk];
                     var _pick = '';
@@ -870,9 +890,26 @@
                     for (var kk = 0; kk < _keep.length; kk++) {
                       if (_keep[kk].thumb === _th3 && _keep[kk].name === _nm3) { _isKeep = true; break; }
                     }
-                    if (_isKeep) { _out.push(_fo2); }
+                    if (_isKeep) {
+                      // 用户字体：重建 CFont 并指向空白缩略图槽位——它原本的
+                      // thumbnail = 行号 i，追加在末尾必然越界，UI getImage 抛异常
+                      // 导致下拉列表渲染到该项即中断（真机实测的"字体消失"）。
+                      if (_lsoUserFont(_nm3)) {
+                        var _blankTh = (typeof window.__lso_font_blank_thumb === 'number')
+                          ? window.__lso_font_blank_thumb : 0;
+                        _out.push(new window.AscFonts.CFont(_nm3, "", _blankTh));
+                      } else {
+                        _out.push(_fo2);
+                      }
+                    }
                   }
-                  console.error('LSO_FONT_INJ n=' + ((fonts || []).length) + ' out=' + _out.length);
+                  var _dbgOut = [];
+                  for (var dz = 0; dz < _out.length; dz++) {
+                    _dbgOut.push(String(_out[dz] && _out[dz].asc_getFontName
+                      ? _out[dz].asc_getFontName() : '?'));
+                  }
+                  console.error('LSO_FONT_INJ n=' + ((fonts || []).length) + ' out=' + _out.length
+                    + ' names=' + _dbgOut.join(','));
                   return _oriI.call(this, _out);
                 } catch (iwx) {
                   console.error('LSO_FONT_INJ_ERR ' + String(iwx));

@@ -86,6 +86,50 @@ export function readFileBuf(path: string): ArrayBuffer | null {
   }
 }
 
+/**
+ * 异步读（Promise 版 fs.read）。与 readFileBuf 的区别只有一个：**不占住调用线程**。
+ * UI 链上的大文件（导入用户字体，24.7MB 级）必须用这个——同步版会把主线程按住，
+ * 期间界面完全不响应，连"正在导入"的状态更新都渲染不出来。
+ */
+export async function readFileBufAsync(path: string): Promise<ArrayBuffer | null> {
+  try {
+    const st = await fs.stat(path);
+    if (st.isDirectory()) {
+      return null;
+    }
+    const f = await fs.open(path, fs.OpenMode.READ_ONLY);
+    try {
+      const buf = new ArrayBuffer(st.size);
+      await fs.read(f.fd, buf);
+      return buf;
+    } finally {
+      await fs.close(f);
+    }
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 异步写（Promise 版 fs.write）；返回值语义同 writeFileBuf */
+export async function writeFileBufAsync(path: string,
+  data: ArrayBuffer | Uint8Array): Promise<boolean> {
+  try {
+    const f = await fs.open(path, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
+    try {
+      // 同 writeFileBuf：writeSync 只收 ArrayBuffer | string（POC-2 实测拒 Uint8Array）
+      const buf = data instanceof Uint8Array
+        ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+        : data;
+      await fs.write(f.fd, buf);
+      return true;
+    } finally {
+      await fs.close(f);
+    }
+  } catch (e) {
+    return false;
+  }
+}
+
 /** 覆盖写文件（open/write/close 三连，close 保证执行；成功返回 true） */
 export function writeFileBuf(path: string, data: ArrayBuffer | Uint8Array): boolean {
   let f: fs.File | null = null;

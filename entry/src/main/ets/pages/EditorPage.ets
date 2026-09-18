@@ -9,6 +9,8 @@ import { Smoke } from '../common/smoke';
 import { getLaunchOptions, setWindowCloseHandler, setWantUriHandler, takeLaunchUri } from '../entryability/EntryAbility';
 import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, x2tXmlFont, u8ToStr } from '../common/bytes';
 import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } from '../common/recents';
+import { encodeUrlParam, pickFontFile, importFontFile, listFontItems, removeFont,
+  MAX_FONTS, FontListItem } from '../common/userFonts';
 import { specOf, pickerSuffixes, pickerFilterOption, editorAppOf, needsSaveAsPrompt, isLossySave, checkSaveOut } from '../common/formats';
 import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
 import { DocTabHost, DocTabCtx, DocTabPair } from './DocTabHost';
@@ -213,6 +215,15 @@ struct EditorPage {
   private pwdDialogRetry: boolean = false;
   private pwdDialogCb: ((pwd: string | null) => void) | null = null;
 
+  /** 字体管理弹层（自绘覆盖层，同守卫框；欢迎页侧栏「字体管理」入口）。
+   *  rows 每次刷新**整体重建**——@State 只观测数组自身的增删，不观测数组内对象的
+   *  属性变更，就地改字段不会重渲染。 */
+  @State fontMgrOn: boolean = false;
+  @State fontMgrRows: FontListItem[] = [];
+  @State fontMgrBusy: boolean = false;
+  /** 导入阶段：'' 空闲 / 'pick' 系统选择器在途 / 'import' 读+落盘（按钮文案跟着走） */
+  @State fontMgrStage: string = '';
+
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
    *  lang=zh-CN：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
    *  未传时回退英文——2026-09-05 用户目标「默认中文」） */
@@ -275,6 +286,14 @@ struct EditorPage {
         // 插入图片验收门控（m7img）：模型就绪后走上传汇合点插入内置小图（见 47_img/30_open）
         + (Smoke.img.length > 0 ? '&m7img=' + Smoke.img : '');
     }
+    // 用户自导入字体清单（common/userFonts.encodeUrlParam；空清单不拼）。
+    // 字体注册表必须在 sdk-all.js 的 checkAllFonts() 之前就位（之后表被删），
+    // 页面加载时同步可得的通道只有 URL——故走参数而非桥或异步请求（对应解析见
+    // ascshim 20_bridge / 09_fonts 的 lsofonts 段）。
+    const uf = encodeUrlParam(this.hostFilesDir);
+    if (uf.length > 0) {
+      url = url + '&lsofonts=' + encodeURIComponent(uf);
+    }
     return url;
   }
 
@@ -302,6 +321,13 @@ struct EditorPage {
       const isSlide = param.indexOf('slide') >= 0;
       const ext = isSlide ? 'pptx' : isCell ? 'xlsx' : 'docx';
       return this.openNewFile(ext);
+    }
+    if (cmd === 'font:manage') {
+      // 欢迎页侧栏「字体管理」（40_save 注入项 → AscNative.execCommand）：打开弹层，
+      // 查看/导入/删除都在里面。增删只落沙箱与清单，生效在**新打开的文档**
+      // （URL 参数注册，见 editorUrl）。
+      this.openFontManager();
+      return 'true';
     }
     if (cmd === 'open:folder') {
       // M7：loginpage「Open local file」→ sdk.command('open:folder', path)（欢迎页按钮/拖放区
@@ -966,6 +992,115 @@ struct EditorPage {
         // 回填失败（页面已销毁等）——页面按取消处理
       }
     }
+  }
+
+  /** 打开字体管理弹层。入口只在欢迎页侧栏，但弹层是页面级状态、与 tab 无关
+   *  （文档页被触发也照常显示）。 */
+  private openFontManager(): void {
+    this.refreshFontRows();
+    this.fontMgrOn = true;
+    this.arkLog('FONT_MGR_OPEN n=' + this.fontMgrRows.length);
+  }
+
+  private closeFontManager(): void {
+    this.fontMgrOn = false;
+    this.arkLog('FONT_MGR_CLOSE');
+  }
+
+  /** 重建列表（打开弹层时、导入后、删除后各调一次）。 */
+  private refreshFontRows(): void {
+    this.fontMgrRows = listFontItems(this.hostFilesDir);
+  }
+
+  /**
+   * 删除前的确认：**系统原生 AlertDialog**，不是自绘列表内确认条。
+   * 删除是不可逆动作，这里正好只要两个键（取消/删除），落在 AlertDialog 的能力内——
+   * 项目里"原生弹层别用"的记录只针对 CustomDialog 的**自定义按钮**（真机点击失效）
+   * 和 AlertDialog 的键数上限（三键场景才不够），不等于原生弹窗整体不可用。
+   */
+  private fontMgrDeleteConfirm(id: string, family: string): void {
+    AlertDialog.show({
+      title: '删除字体',
+      message: '将删除「' + family + '」。\n用该字体排版的文档再打开时会回退为宋体。',
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '取消',
+        action: () => {
+          this.arkLog('FONT_MGR_DEL_CANCEL id=' + id);
+        }
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: '#C0392B',
+        action: () => {
+          this.fontMgrDelete(id);
+        }
+      }
+    });
+  }
+
+  /** 确认后的删除：清单与磁盘由 removeFont 收敛，结果 toast 需要交代生效时机
+   *  （字体表在页面加载时经 URL 参数注册，故只影响新打开的文档）。 */
+  private fontMgrDelete(id: string): void {
+    const r = removeFont(this.hostFilesDir, id);
+    this.arkLog('FONT_MGR_DEL id=' + id + ' ok=' + r.ok + ' ' + r.msg);
+    this.refreshFontRows();
+    promptAction.showToast({
+      message: r.ok ? (r.msg + '，新打开的文档将不再包含该字体') : r.msg,
+      duration: 3000
+    });
+  }
+
+  /**
+   * 弹层内的导入，两段分明：**选择**（系统 picker 在途）与**导入**（读+落盘）。
+   * 拆开是为了按钮文案如实——合成一段时按钮只能一路显示「导入中」，而那段里
+   * 用户其实还停在系统选择器里，什么都没开始导。busy 全程禁点（选择器在途重复
+   * 点会叠起多个）。
+   */
+  private async fontMgrImport(): Promise<void> {
+    if (this.fontMgrBusy) {
+      return;
+    }
+    const aCtx = getContext(this) as common.UIAbilityContext;
+    const rm = this.resourceManager;
+    if (rm === undefined) {
+      promptAction.showToast({ message: '导入失败：资源未就绪', duration: 3000 });
+      return;
+    }
+    this.fontMgrBusy = true;
+    try {
+      this.fontMgrStage = 'pick';
+      this.arkLog('FONT_MGR_STAGE pick');
+      const uri = await pickFontFile(aCtx);
+      if (uri.length === 0) {
+        this.arkLog('LSO_UFONT_IMPORT ok=false msg=已取消导入');
+        promptAction.showToast({ message: '已取消导入', duration: 3000 });
+        return;
+      }
+      this.fontMgrStage = 'import';
+      this.arkLog('FONT_MGR_STAGE import');
+      // 导入整段走异步 IO + native 哈希（见 userFonts / bytes），调用线程不阻塞：
+      // 状态照常渲染、界面照常响应，不需要「让出一帧」之类的补丁。
+      const r = await importFontFile(this.hostFilesDir, rm, uri);
+      this.arkLog('LSO_UFONT_IMPORT ok=' + r.ok + ' msg=' + r.msg);
+      promptAction.showToast({ message: r.msg, duration: 3000 });
+    } finally {
+      this.fontMgrStage = '';
+      this.fontMgrBusy = false;
+      this.refreshFontRows();
+    }
+  }
+
+  /** 导入按钮文案（跟着阶段走，见 fontMgrImport） */
+  private fontMgrBtnText(): string {
+    if (this.fontMgrStage === 'pick') {
+      return '选择字体文件…';
+    }
+    if (this.fontMgrStage === 'import') {
+      return '导入中…';
+    }
+    return '导入字体';
   }
 
   /**
@@ -2611,6 +2746,89 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
         .borderRadius(12)
         .onClick(() => {
           // 吞掉卡片内点击（不穿透蒙层取消）
+        })
+      }
+      // —— 字体管理弹层（自绘覆盖层，同守卫框；欢迎页侧栏「字体管理」入口）——
+      if (this.fontMgrOn) {
+        // 蒙层=关闭（管理界面无未保存数据，不需要守卫语义）
+        Column()
+          .width('100%').height('100%')
+          .backgroundColor('rgba(0,0,0,0.35)')
+          .onClick(() => {
+            this.closeFontManager();
+          })
+        Column({ space: 4 }) {
+          // 标题行：左标题 + 右关闭。蒙层点击也能关，但**显式出口不能省**——只靠
+          // 点空白处关闭是常见疑惑点（用户会盯着卡片找关闭按钮）。
+          Row() {
+            Text('字体管理')
+              .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
+              .layoutWeight(1)
+            Text('×')
+              .fontSize(22).fontColor('#7A8794')
+              .padding({ left: 12, right: 4, top: 2, bottom: 6 })
+              .onClick(() => {
+                this.closeFontManager();
+              })
+          }
+          .width('100%')
+          if (this.fontMgrRows.length === 0) {
+            Text('还没有导入字体')
+              .fontSize(14).fontColor('#5A6572')
+              .margin({ top: 32, bottom: 32 })
+          } else {
+            List({ space: 0 }) {
+              ForEach(this.fontMgrRows, (r: FontListItem) => {
+                ListItem() {
+                  Column({ space: 2 }) {
+                    Row({ space: 10 }) {
+                      Text(r.family)
+                        .fontSize(15).fontColor('#2B3B4D')
+                        .layoutWeight(1).maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      Button('删除')
+                        .fontSize(13).height(30)
+                        .backgroundColor('#F7F7F7').fontColor('#C0392B')
+                        .onClick(() => {
+                          this.fontMgrDeleteConfirm(r.id, r.family);
+                        })
+                    }
+                    .width('100%')
+                    Text(r.sub)
+                      .fontSize(12).fontColor('#7A8794')
+                      .width('100%').maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                  .width('100%')
+                  .padding({ top: 10, bottom: 10, left: 4, right: 4 })
+                }
+              }, (r: FontListItem) => r.id)
+            }
+            .width('100%')
+            .height(260)
+            .margin({ top: 12 })
+          }
+          Button(this.fontMgrBtnText())
+            .width('100%').height(38)
+            .enabled(!this.fontMgrBusy && this.fontMgrRows.length < MAX_FONTS)
+            .backgroundColor(this.fontMgrRows.length < MAX_FONTS ? '#0064E7' : '#C9D2DC')
+            .fontColor(Color.White)
+            .margin({ top: 16 })
+            .onClick(() => {
+              this.fontMgrImport();
+            })
+          if (this.fontMgrRows.length >= MAX_FONTS) {
+            Text('已达上限 ' + MAX_FONTS + ' 个')
+              .fontSize(12).fontColor('#7A8794')
+              .margin({ top: 6 })
+          }
+        }
+        .padding(24)
+        .width(520)
+        .backgroundColor(Color.White)
+        .borderRadius(12)
+        .onClick(() => {
+          // 吞掉卡片内点击（不穿透蒙层关闭）
         })
       }
     }

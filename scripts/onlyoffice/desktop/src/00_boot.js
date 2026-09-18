@@ -75,7 +75,9 @@
         theme: 'both', bridge: 'both',                      // 两页共用
         fonts: 'editor', engine: 'editor', open: 'editor',  // 编辑器页
         save: 'editor', print: 'editor', modal: 'editor',   // （modal 不在欢迎页：那儿没有 Common）
-        about: 'home'                                       // 欢迎页（app:version 补发）
+        fontimg: 'editor',                                  // 用户字体名字图（canvas 复刻）
+        about: 'home',                                      // 欢迎页（app:version 补发）
+        userfonts: 'home'                                   // 欢迎页（侧栏「字体管理」注入）
       };
       var _isEditor = ((window.location || {}).pathname || '').indexOf('/main/index.html') >= 0;
       var _want = [];
