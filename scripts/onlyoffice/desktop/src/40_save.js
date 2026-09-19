@@ -501,6 +501,8 @@
     try {
       var _fp = (window.location || {}).pathname || '';
       if (_fp.indexOf('/onlyoffice/index.html') < 0) { return; }
+      // 入口暂时下架（功能链保留：font:manage 命令与弹层均可用），恢复=删除下行
+      return;
       var _fins = function() {
         if (document.getElementById('lso-import-font')) { return; }
         var _ftpl = document.querySelector('.tool-menu a[action="templates"]');

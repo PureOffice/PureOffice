@@ -317,7 +317,8 @@ function buildHomePhone(ctx: DocTabCtx) {
         Column({ space: 2 }) {
           ForEach([
             new PhoneHomeCard('open', '', '打开本地文件', '#446995'),
-            new PhoneHomeCard('fontmgr', '', '字体管理', '#3D8B62'),
+            // 字体管理入口暂时下架（功能链保留在 EditorPage，恢复=恢复本行）：
+            // new PhoneHomeCard('fontmgr', '', '字体管理', '#3D8B62'),
             new PhoneHomeCard('about', '', '关于', '#C4552F'),
           ], (item: PhoneHomeCard) => {
             Row() {
