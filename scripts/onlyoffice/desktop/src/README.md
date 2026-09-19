@@ -12,6 +12,7 @@
 | `30_open.js` | m7 自动验收（`?m7auto=1`/`?m7open=`，URL 显式带参才触发）、3.4 DI 打开链（loadConfig 补发/asc_CDocInfo/权限三刀） |
 | `40_save.js` | 保存链管控（asc_Save 重写/nativeGetFileData → save:bin）、saveDocument 落盘、requestClose 覆写、错误拦截（sendEvent -25 单点） |
 | `50_init.js` | 初始化尾：AscNative 等待循环（ASC_BOOT/ASC_FOUND） |
+| `51_scrollpad.js` | 触摸拖拽滚动条（ArkWeb touch target 判定跳过窄条 canvas 且分界随状态波动，capture 层按坐标接管：pointer 流转发引擎处理器、touch 流仅拦截） |
 
 动态内容占位符（由 make_ascshim.py 替换）：
 `@@METHOD_JS@@` / `@@SHIM@@` / `@@FONT_FILES_JSON@@` / `@@FONT_INFOS_JSON@@`。
