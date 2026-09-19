@@ -286,6 +286,13 @@ struct EditorPage {
         // 插入图片验收门控（m7img）：模型就绪后走上传汇合点插入内置小图（见 47_img/30_open）
         + (Smoke.img.length > 0 ? '&m7img=' + Smoke.img : '');
     }
+    // 输入焦点抑制（ascshim 29_inputfocus 段）：非 PC 形态关掉 sdkjs「界面事件把焦点
+    // 拉回隐藏输入代理」的副作用——它在 ArkWeb 上会拉起系统软键盘（点工具栏即弹）。
+    // PC 保留原行为：那边靠它维持物理键盘输入，且不弹软键盘。
+    const dtFocus = deviceInfo.deviceType;
+    if (dtFocus !== '2in1' && dtFocus !== 'pc') {
+      url = url + '&nofocus=1';
+    }
     // 用户自导入字体清单（common/userFonts.encodeUrlParam；空清单不拼）。
     // 字体注册表必须在 sdk-all.js 的 checkAllFonts() 之前就位（之后表被删），
     // 页面加载时同步可得的通道只有 URL——故走参数而非桥或异步请求（对应解析见
@@ -1795,6 +1802,19 @@ struct EditorPage {
             c2.js(aiTest.replace('__AI_KEY__', Smoke.key), '');
           }
         }, 15000);
+      }
+      // 焦点链路取证探针（纯观测、不触发动作，与插件链验收无关）：排查「点工具栏 /
+      // 切 tab 后系统软键盘被唤起」类问题看 LSO_FOCUS 前缀判据（见 focus-probe.js）。
+      const fprobe = Smoke.readScript(this.resourceManager, 'focus-probe.js');
+      if (fprobe === null) {
+        this.arkLog('SMOKE_FOCUSPROBE_MISSING');
+      } else {
+        const c3 = docC;
+        setTimeout(() => {
+          if (!closedTab()) {
+            c3.js(fprobe, '');
+          }
+        }, 8000);
       }
     }
   }
