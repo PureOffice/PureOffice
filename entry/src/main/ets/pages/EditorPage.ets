@@ -1,5 +1,5 @@
 import { BusinessError, deviceInfo, print } from '@kit.BasicServicesKit';
-import { common } from '@kit.AbilityKit';
+import { bundleManager, common } from '@kit.AbilityKit';
 import { promptAction, window } from '@kit.ArkUI';
 import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs, picker, fileUri } from '@kit.CoreFileKit';
@@ -223,6 +223,14 @@ struct EditorPage {
   @State fontMgrBusy: boolean = false;
   /** 导入阶段：'' 空闲 / 'pick' 系统选择器在途 / 'import' 读+落盘（按钮文案跟着走） */
   @State fontMgrStage: string = '';
+
+  /** 手机原生主页「关于」弹层（自绘覆盖层）：合规内容与 Web 版 About 一致
+   *  （品牌/版本/AGPL 行/源码与声明行——CREDIT、SOURCE_LINE 同源文案的 ArkTS 版）。
+   *  licText 非空=正在查看对应文本（LICENSE/NOTICE 全文，点行进入、返回键/关闭出）。 */
+  @State phoneAboutOn: boolean = false;
+  @State phoneAboutVer: string = '';
+  @State phoneAboutLicKind: string = '';
+  @State phoneAboutLicText: string = '';
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
    *  lang=zh-CN：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
@@ -1017,6 +1025,36 @@ struct EditorPage {
   /** 重建列表（打开弹层时、导入后、删除后各调一次）。 */
   private refreshFontRows(): void {
     this.fontMgrRows = listFontItems(this.hostFilesDir);
+  }
+
+  /** 手机原生主页「关于」弹层：版本号取自包信息（与 57_about 发的 app:version
+   *  同源——AppScope versionName）。 */
+  private phoneAboutOpen(): void {
+    if (this.phoneAboutVer.length === 0) {
+      try {
+        const bi = bundleManager.getBundleInfoForSelfSync(
+          bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+        this.phoneAboutVer = bi.versionName;
+      } catch (e) {
+        this.arkLog('PHONE_ABOUT_VER_ERR ' + String(e));
+      }
+    }
+    this.phoneAboutLicKind = '';
+    this.phoneAboutLicText = '';
+    this.phoneAboutOn = true;
+  }
+
+  /** 查看 LICENSE / NOTICE 全文（随包 rawfile/onlyoffice/licenses/，与 Web 版
+   *  About 许可行同一事实源——55_lic.js 弹层语义的原生版）。 */
+  private phoneAboutShowLic(kind: string): void {
+    try {
+      const raw = this.resourceManager!.getRawFileContentSync(
+        'onlyoffice/licenses/' + kind + '.txt') as Uint8Array;
+      this.phoneAboutLicText = u8ToStr(raw);
+      this.phoneAboutLicKind = kind;
+    } catch (e) {
+      this.arkLog('PHONE_ABOUT_LIC_ERR ' + kind + ' ' + String(e));
+    }
   }
 
   /**
@@ -1918,6 +1956,20 @@ struct EditorPage {
         // 与 doc 实例同款注入（欢迎页的上传入口若有 <input type=file> 同样接管）
         homeCtx.onPickFile = ((r: FileSelectorResult, a: string[]) =>
           this.pickFileForWeb(homeCtx, r, a));
+        // 手机原生主页入口（buildHomePhone 仅 phone 的 home tab 渲染；Web 欢迎页
+        // 形态不触发）。全部复用现有链：新建/打开/字体管理与 Web 入口同一落点。
+        homeCtx.onNewFile = ((ext: string) => {
+          this.openNewFile(ext);
+        });
+        homeCtx.onOpenLocal = (() => {
+          this.openLocalFile();
+        });
+        homeCtx.onFontMgr = (() => {
+          this.openFontManager();
+        });
+        homeCtx.onAbout = (() => {
+          this.phoneAboutOpen();
+        });
         this.docTabs = [new DocTabPair(homeCtx)];
         this.docTitles = ['主页'];
         this.docAccents = [''];
@@ -2675,7 +2727,8 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           .margin({ top: 20 })
         }
         .padding(24)
-        .width(420)
+        .width('92%')
+        .constraintSize({ maxWidth: 420 })
         .backgroundColor(Color.White)
         .borderRadius(12)
         .onClick(() => {
@@ -2726,7 +2779,8 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           .margin({ top: 20 })
         }
         .padding(24)
-        .width(420)
+        .width('92%')
+        .constraintSize({ maxWidth: 420 })
         .backgroundColor(Color.White)
         .borderRadius(12)
         .onClick(() => {
@@ -2776,7 +2830,8 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           .margin({ top: 20 })
         }
         .padding(24)
-        .width(420)
+        .width('92%')
+        .constraintSize({ maxWidth: 420 })
         .backgroundColor(Color.White)
         .borderRadius(12)
         .onClick(() => {
@@ -2859,7 +2914,86 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           }
         }
         .padding(24)
-        .width(520)
+        .width('92%')
+        .constraintSize({ maxWidth: 520 })
+        .backgroundColor(Color.White)
+        .borderRadius(12)
+        .onClick(() => {
+          // 吞掉卡片内点击（不穿透蒙层关闭）
+        })
+      }
+      // —— 手机原生主页「关于」弹层（自绘覆盖层）——
+      // 合规内容与 Web 版 About 同一事实源（build_editors_ohos CREDIT/SOURCE_LINE
+      // 的 ArkTS 复刻）：AGPL-3.0 行 + 「完整源码与第三方声明」行，点行看随包全文。
+      if (this.phoneAboutOn) {
+        Column()
+          .width('100%').height('100%')
+          .backgroundColor('rgba(0,0,0,0.35)')
+          .onClick(() => {
+            if (this.phoneAboutLicKind !== '') {
+              this.phoneAboutLicKind = '';
+              this.phoneAboutLicText = '';
+            } else {
+              this.phoneAboutOn = false;
+            }
+          })
+        Column({ space: 12 }) {
+          Row() {
+            Text(this.phoneAboutLicKind !== '' ? this.phoneAboutLicKind : '关于')
+              .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
+              .layoutWeight(1)
+            Text('×')
+              .fontSize(22).fontColor('#7A8794')
+              .padding({ left: 12, right: 4, top: 2, bottom: 6 })
+              .onClick(() => {
+                if (this.phoneAboutLicKind !== '') {
+                  this.phoneAboutLicKind = '';
+                  this.phoneAboutLicText = '';
+                } else {
+                  this.phoneAboutOn = false;
+                }
+              })
+          }
+          .width('100%')
+          if (this.phoneAboutLicKind === '') {
+            Column({ space: 10 }) {
+              Text('Pure Office')
+                .fontSize(20).fontWeight(FontWeight.Bold).fontColor('#2B3B4D')
+              Text('版本 ' + this.phoneAboutVer)
+                .fontSize(13).fontColor('#7A8794')
+              Text('基于 ONLYOFFICE DesktopEditors（AGPL-3.0）')
+                .fontSize(13).fontColor('#5A6572')
+                .width('100%')
+              Row({ space: 16 }) {
+                Text('许可全文')
+                  .fontSize(13).fontColor('#0064E7')
+                  .onClick(() => {
+                    this.phoneAboutShowLic('LICENSE');
+                  })
+                Text('完整源码与第三方声明')
+                  .fontSize(13).fontColor('#0064E7')
+                  .onClick(() => {
+                    this.phoneAboutShowLic('NOTICE');
+                  })
+              }
+              .width('100%')
+            }
+            .alignItems(HorizontalAlign.Start)
+            .width('100%')
+            .margin({ top: 8 })
+          } else {
+            Scroll() {
+              Text(this.phoneAboutLicText)
+                .fontSize(12).fontColor('#2B3B4D')
+                .width('100%')
+            }
+            .height(360)
+            .width('100%')
+          }
+        }
+        .padding(24)
+        .width('92%')
+        .constraintSize({ maxWidth: 520 })
         .backgroundColor(Color.White)
         .borderRadius(12)
         .onClick(() => {

@@ -12,6 +12,9 @@ import { specOf } from '../common/formats';
  */
 const IS_PC: boolean = deviceInfo.deviceType === '2in1' || deviceInfo.deviceType === 'pc';
 const TAB_BAR_H: number = IS_PC ? 37 : 32;
+/** 手机形态：主页 tab 不渲染 Web 欢迎页（桌面 loginpage 双栏排版在窄屏装不下——
+ *  2026-09-19 用户确认专设原生页），改渲染原生单栏欢迎页 buildHomePhone */
+const IS_PHONE: boolean = deviceInfo.deviceType === 'phone';
 
 /** PC 文档页整体放大倍数（ArkUI 渲染层缩放，见 buildDocWeb 注）。主页不放大。
  *  2026-09-18 用户拍板 1.2——倍数越大清晰度与可视区代价越高（渲染按缩小后的尺寸算）。 */
@@ -92,6 +95,20 @@ export class DocTabCtx {
   onPickFile: (result: FileSelectorResult, acceptTypes: string[]) => void = () => {
   };
 
+  /**
+   * 手机原生主页（buildHomePhone）的入口回调（EditorPage 注入，模式同 onPickFile；
+   * 缺省空实现=无操作）。仅 phone 的 home tab 生效——Web 欢迎页形态走各自的
+   * 页面内入口，不经此。
+   */
+  onNewFile: (ext: string) => void = (ext: string) => {
+  };
+  onOpenLocal: () => void = () => {
+  };
+  onFontMgr: () => void = () => {
+  };
+  onAbout: () => void = () => {
+  };
+
   constructor(id: number, kind: string, title: string, url: string,
     resMgr: resourceManager.ResourceManager, filesDir: string, log: (m: string) => void,
     onReady: CtxReady | null, onPageEndCb: CtxReady | null = null) {
@@ -170,7 +187,14 @@ export class DocTabNode extends NodeController {
       return this.webNode.getFrameNode();
     }
     this.webNode = new BuilderNode(context);
-    this.webNode.build(wrapBuilder<[DocTabCtx]>(buildDocWeb), this.ctx);
+    // 手机主页=原生欢迎页（桌面 loginpage 双栏排版在窄屏装不下，见 IS_PHONE 注）；
+    // 其余 tab 与全部非 phone 形态仍走 Web。home 原生分支不建 Web 实例，
+    // onControllerAttached/装配回调天然不触发。
+    if (this.ctx.kind === 'home' && IS_PHONE) {
+      this.webNode.build(wrapBuilder<[DocTabCtx]>(buildHomePhone), this.ctx);
+    } else {
+      this.webNode.build(wrapBuilder<[DocTabCtx]>(buildDocWeb), this.ctx);
+    }
     return this.webNode.getFrameNode();
   }
 }
@@ -234,6 +258,105 @@ function accentOf(accent: string, state: DocTabState): string {
     return accent;
   }
   return accentColor(state);
+}
+
+/** 手机原生主页的格式卡数据（格式色对齐 web 欢迎页新建卡的官方配色） */
+class PhoneHomeCard {
+  ext: string;
+  label: string;
+  name: string;
+  color: string;
+
+  constructor(ext: string, label: string, name: string, color: string) {
+    this.ext = ext;
+    this.label = label;
+    this.name = name;
+    this.color = color;
+  }
+}
+
+/** 手机原生主页（单栏、大触控目标）。入口回调经 ctx（EditorPage 注入），本
+ *  Builder 只管排版——业务都在 EditorPage（与 onPickFile 同一分工）。 */
+@Builder
+function buildHomePhone(ctx: DocTabCtx) {
+  Column() {
+    Scroll() {
+      Column({ space: 20 }) {
+        Text('Pure Office')
+          .fontSize(30).fontWeight(FontWeight.Bold).fontColor('#2B3B4D')
+          .margin({ top: 28 })
+          .width('100%').textAlign(TextAlign.Center)
+
+        Row({ space: 12 }) {
+          ForEach([
+            new PhoneHomeCard('docx', 'DOCX', '文档', '#446995'),
+            new PhoneHomeCard('xlsx', 'XLSX', '电子表格', '#3D8B62'),
+            new PhoneHomeCard('pptx', 'PPTX', '演示文稿', '#C4552F'),
+          ], (card: PhoneHomeCard) => {
+            Column({ space: 10 }) {
+              Text(card.label)
+                .fontSize(17).fontWeight(FontWeight.Bold).fontColor(Color.White)
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .backgroundColor(card.color)
+                .borderRadius(8)
+              Text(card.name)
+                .fontSize(14).fontColor('#2B3B4D')
+            }
+            .justifyContent(FlexAlign.Center)
+            .layoutWeight(1)
+            .height(120)
+            .backgroundColor(Color.White)
+            .borderRadius(14)
+            .onClick(() => {
+              ctx.onNewFile(card.ext);
+            })
+          }, (card: PhoneHomeCard) => card.ext)
+        }
+        .width('100%')
+
+        Column({ space: 2 }) {
+          ForEach([
+            new PhoneHomeCard('open', '', '打开本地文件', '#446995'),
+            new PhoneHomeCard('fontmgr', '', '字体管理', '#3D8B62'),
+            new PhoneHomeCard('about', '', '关于', '#C4552F'),
+          ], (item: PhoneHomeCard) => {
+            Row() {
+              Text(item.name)
+                .fontSize(17).fontColor('#2B3B4D')
+                .layoutWeight(1)
+              Text('›')
+                .fontSize(20).fontColor('#9AA6B2')
+            }
+            .height(56)
+            .padding({ left: 18, right: 14 })
+            .backgroundColor(Color.White)
+            .borderRadius(12)
+            .onClick(() => {
+              if (item.ext === 'open') {
+                ctx.onOpenLocal();
+              } else if (item.ext === 'fontmgr') {
+                ctx.onFontMgr();
+              } else if (item.ext === 'about') {
+                ctx.onAbout();
+              }
+            })
+          }, (item: PhoneHomeCard) => item.ext)
+        }
+        .width('100%')
+      }
+      .padding({ left: 18, right: 18, bottom: 24 })
+      .width('100%')
+      // 整体最大宽：折叠屏展开/宽屏上内容居中定宽，不随屏幕无限拉伸
+      //（2026-09-19 用户：三卡撑满展开大屏反而难看；520 与弹层上限一致）
+      .constraintSize({ maxWidth: 520 })
+    }
+    .layoutWeight(1)
+    .align(Alignment.Center)
+    .scrollBar(BarState.Off)
+  }
+  .width('100%')
+  .height('100%')
+  .backgroundColor('#F7F7F7')
 }
 
 /** Web 内容构建（文件级 @Builder——BuilderNode/wrapBuilder 要求） */
@@ -362,7 +485,16 @@ export struct DocTabHost {
       // 不滚动/不 overflow——chip 以 flexShrink 收缩（见 chip 链），总宽恒≤可用
       // 宽→右 padding（150 避让三键区）常驻生效（Scroll/fit-content/固定宽溢出
       // 三种方案均被 ArkUI 溢出绘制击败，2026-09-09 用户实证）
+      // 无文档 tab 时的条内容按形态分（2026-09-19 用户）：PC/Pad=条上以
+      // 「Pure Office」品牌字替代主页 chip（窗口骨架保留品牌位）；手机=整条
+      // 隐藏、内容区吸顶（见条级 visibility）。有文档时全形态正常显示 chips。
       Row() {
+        if (!this.hasDocTab()) {
+          Text('Pure Office')
+            .fontSize(14).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
+            .padding({ left: 14 })
+            .height(TAB_BAR_H)
+        }
         ForEach(this.tabs, (item: DocTabPair, index: number) => {
           Row({ space: 2 }) {
             // 标题区恒占满「剩余宽 − ×」——用户 2026-09-10 方案 B（标题左对齐、
@@ -438,6 +570,8 @@ export struct DocTabHost {
           // 收缩下限为**建议值**（实测 flexShrink 收缩可到 ≈73vp——constraintSize
           // minWidth 与 flexShrink 并存时以收缩结果为准；不承诺下限，标题省略号兜底）
           .constraintSize({ minWidth: item.ctx.kind === 'home' ? 72 : 96, maxWidth: 320 })
+          .visibility(item.ctx.kind === 'home' && !this.hasDocTab()
+            ? Visibility.None : Visibility.Visible)
         }, (item: DocTabPair) => item.ctx.kind + '-' + item.ctx.id.toString())
         // ——「+」新建文档（有 doc tab 时才在）：点开系统菜单选类型 ——
         // 位置紧跟最后一个 chip（浏览器 tab 条同款）；不固定到条右端——PC 的右内衬
@@ -477,10 +611,12 @@ export struct DocTabHost {
       // 条底恒定=官方 --background-normal #F7F7F7（2026-09-09 用户决策：不随
       // 激活文档换色——只有 chip 染色；与欢迎页侧栏同色，上下贯通无分界）
       .backgroundColor('#F7F7F7')
-      // 放映全屏（2026-09-11）：Visibility.None = 隐藏且**不参与布局**（不占位）
-      // ——与 if 条件渲染等价，但保持本段组件树结构稳定（放映进出不重建 chip）。
-      // 条消失后 Tabs（layoutWeight 1）自动吸顶铺满整个窗口。
-      .visibility(this.fsMode ? Visibility.None : Visibility.Visible)
+      // 放映全屏（2026-09-11）/ 手机无文档（2026-09-19 用户）：Visibility.None =
+      // 隐藏且**不参与布局**（不占位）——与 if 条件渲染等价，但保持本段组件树
+      // 结构稳定（放映进出、开关文档不重建 chip）。条消失后 Tabs（layoutWeight
+      // 1）自动吸顶铺满整个窗口。
+      .visibility(this.fsMode || (IS_PHONE && !this.hasDocTab())
+        ? Visibility.None : Visibility.Visible)
 
       // —— 内容切换容器（barHeight 0；保活 = NodeContainer 节点复用）——
       Tabs({ barPosition: BarPosition.Start, index: this.focus, controller: this.tabsCtr }) {

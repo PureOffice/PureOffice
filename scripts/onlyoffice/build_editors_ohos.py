@@ -962,6 +962,22 @@ def patch_about_brand():
             s = s.replace(del_line, '')
             wpatched += n
             print('  about品牌: 欢迎页 删官网行 ×%d' % n)
+        # viewport meta 注入：loginpage 是桌面起始页，官方 HTML 无 viewport meta——
+        # 手机等移动形态的 WebView 按 980px 默认虚拟视口渲染再整体缩到组件宽度，
+        # 欢迎页（桌面排版）被缩小显示（手机上约为编辑器页的一半——编辑器页有官方
+        # viewport meta 按 device-width 1:1 渲染，2026-09-19 phone 真机实证；PC/2in1
+        # 不解析 meta 故无此问题）。meta 写法对齐编辑器 main/index.html 官方行。
+        VP_META = ('<meta name="viewport" content="width=device-width, '
+                   'initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, '
+                   'user-scalable=no">')
+        if 'name="viewport"' not in s:
+            anchor = '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">'
+            if anchor not in s:
+                raise SystemExit('欢迎页 viewport 注入未命中锚点（Content-Type meta）'
+                                 '——请检查 loginpage 结构')
+            s = s.replace(anchor, anchor + VP_META, 1)
+            wpatched += 1
+            print('  welcome: viewport meta 注入')
         if wpatched:
             with open(WELCOME, 'w', encoding='utf-8') as f:
                 f.write(s)
