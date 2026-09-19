@@ -1545,6 +1545,15 @@ struct EditorPage {
       // 仅守卫消费路径清不够——另存为取消后用户**手动** Ctrl+S 保存成功的场景，
       // saveAborted 残留会导致下次关闭误弹框；落盘终点统一复位，幂等）
       ctx.state.saveAborted = false;
+      // 完成提示只给用户主动保存：官方桌面语义保存完成是静默的（协同链的反馈=
+      // 「正在保存」mask），而本地链是同步桥——官方 mask 建立即销毁（同一帧内），
+      // 用户全程看不到任何反馈。三类不弹：autosave（官方语义，不打扰）；关闭守卫
+      // 触发的保存（tab 即将关闭，toast 会残留到下一个界面造成误导）；uri 写失败
+      // （上方已有「请另存为」告知，再弹「已保存」自相矛盾）。
+      if (userSaved && !uriFailed
+        && !(this.closeGuardDefer !== null && this.closeGuardDefer.ctx === ctx)) {
+        promptAction.showToast({ message: '已保存', duration: 3000 });
+      }
       return 'true';
     } catch (e) {
       this.arkLog('SAVE_BIN_LOCAL_ERR ' + String(e));

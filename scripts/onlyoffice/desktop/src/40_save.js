@@ -141,39 +141,64 @@
             return;
           }
           this.canSave = false;
-          try {
-            // 偏差声明（2026-09-05）：askSaveChanges 回调不等待——离线单机同文件覆盖
-            // 保存无取消语义；官方 _onSaveCallback（apiBase.js:1657）会复位 canSave，
-            // 本适配在序列化完成后自行复位（LSO_NATIVE_SAVE_ERR 路径亦复位）。
-            if (this.CoAuthoringApi && typeof this.CoAuthoringApi.askSaveChanges === 'function') {
-              this.CoAuthoringApi.askSaveChanges(function(e) { _t._onSaveCallback(e); });
-            }
-            var _nbin = window.__lsoNativeSaveEnd(function() {
-              return _t.asc_nativeGetFileData();
-            });
-            var _r2 = '';
-            if (_nbin && _nbin.byteLength) {
-              // 2026-09-05：第三参 = 用户保存标志（isNoUserSave 取反）——引擎桌面语义
-              // autosave（打开/变更自动保存，isNoUserSave=true）不触发「最近使用」补录
-              //（新建窗口未保存也从列表干净）；用户主动保存（Ctrl+S/保存按钮）才补录。
-              var _userSave = true === isNoUserSave ? 0 : 1;
-              _r2 = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_nbin), _userSave]));
-              console.error('LSO_NATIVE_SAVE len=' + _nbin.byteLength + ' user=' + _userSave + ' ret=' + _r2);
-              // 复位官方「正在保存文档…」状态（2026-09-05 用户反馈：状态栏永久停留——
-              // askSaveChanges 建立保存中状态，官方服务器链由 saveDocument 完成回调驱动
-              // _onSaveCallback 复位；本地链无完成通道 → 同步落盘返回后直接复位）。
-              try {
-                if (typeof _t._onSaveCallback === 'function') { _t._onSaveCallback(null); }
-              } catch (scx) {}
-            } else {
-              console.error('LSO_NATIVE_SAVE_EMPTY');
-            }
-          } catch (nsv) {
-            console.error('LSO_NATIVE_SAVE_ERR ' + String(nsv));
-            this.canSave = true;
-            return;
+          // 「正在保存」状态栏提示（官方协同语义文案 saveTextText；官方离线单机把
+          // 文案置空即静默，这里按用户语义补上）。必须在序列化**之前**让出一帧
+          //（setTimeout）——整条保存链是同步的（序列化与 x2t 转换都阻塞页面主线程，
+          // 同步桥还阻塞宿主线程），不让出渲染机会提示一帧都出不来（官方原版
+          // LongAction 提示在本地链上建立即销毁，同一根因）。autosave 不打扰。
+          var _sb = null;
+          var _userSave = true === isNoUserSave ? 0 : 1;
+          if (0 !== _userSave) {
+            try {
+              _sb = (window.SSE || window.DE || window.PE);
+              _sb = _sb && _sb.controllers && _sb.controllers.Statusbar;
+              if (_sb && typeof _sb.setStatusCaption !== 'function') { _sb = null; }
+            } catch (sbx) { _sb = null; }
           }
-          this.canSave = true;
+          var _saving = function(on) {
+            try { if (_sb) { _sb.setStatusCaption(on ? '正在保存文档...' : '', true, 0); } } catch (scx) {}
+          };
+          var _t2 = this;
+          // 偏差声明（2026-09-05）：askSaveChanges 回调不等待——离线单机同文件覆盖
+          // 保存无取消语义；官方 _onSaveCallback（apiBase.js:1657）会复位 canSave，
+          // 本适配在序列化完成后自行复位（LSO_NATIVE_SAVE_ERR 路径亦复位）。
+          // （在 _saving(true) 之前执行：它内部 sync_StartAction 会以空文案刷一次
+          // 状态栏，后调会把提示清掉。）
+          if (_t2.CoAuthoringApi && typeof _t2.CoAuthoringApi.askSaveChanges === 'function') {
+            _t2.CoAuthoringApi.askSaveChanges(function(e) { _t2._onSaveCallback(e); });
+          }
+          _saving(true);
+          var _runSave = function() {
+            try {
+              var _nbin = window.__lsoNativeSaveEnd(function() {
+                return _t2.asc_nativeGetFileData();
+              });
+              var _r2 = '';
+              if (_nbin && _nbin.byteLength) {
+                // 2026-09-05：第三参 = 用户保存标志（isNoUserSave 取反）——引擎桌面语义
+                // autosave（打开/变更自动保存，isNoUserSave=true）不触发「最近使用」补录
+                //（新建窗口未保存也从列表干净）；用户主动保存（Ctrl+S/保存按钮）才补录。
+                _r2 = String(window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_nbin), _userSave]));
+                console.error('LSO_NATIVE_SAVE len=' + _nbin.byteLength + ' user=' + _userSave + ' ret=' + _r2);
+                // 复位官方「正在保存文档…」状态（2026-09-05 用户反馈：状态栏永久停留——
+                // askSaveChanges 建立保存中状态，官方服务器链由 saveDocument 完成回调驱动
+                // _onSaveCallback 复位；本地链无完成通道 → 同步落盘返回后直接复位）。
+                try {
+                  if (typeof _t2._onSaveCallback === 'function') { _t2._onSaveCallback(null); }
+                } catch (scx) {}
+              } else {
+                console.error('LSO_NATIVE_SAVE_EMPTY');
+              }
+            } catch (nsv) {
+              console.error('LSO_NATIVE_SAVE_ERR ' + String(nsv));
+              _saving(false);
+              _t2.canSave = true;
+              return;
+            }
+            _saving(false);
+            _t2.canSave = true;
+          };
+          if (0 !== _userSave) { setTimeout(_runSave, 50); } else { _runSave(); }
         } catch (gv) {
           console.error('LSO_SAVE_WRAP_ERR ' + String(gv));
           return _s0.apply(this, arguments);
