@@ -40,10 +40,12 @@ if [ "${1:-}" = "--no-upstream" ]; then UPSTREAM=0; fi
 
 if [ "$UPSTREAM" = "1" ]; then
   # 子模块补丁前置：sdkjs 的 desktop 构建适配直接决定本次产物（configs/*.json 清单），
-  # core 的 OHOS 补丁决定 native 链编译（core3d）；两者均幂等，已应用即跳过。
-  echo "== 0/6 子模块补丁（core OHOS + sdkjs desktop）=="
+  # core 的 OHOS 补丁决定 native 链编译（core3d），web-apps 补丁修 ColorPaletteExt 的
+  # AMD 依赖缺失（偶发卡骨架屏根因，见该 patch 文件头注释）；三者均幂等，已应用即跳过。
+  echo "== 0/6 子模块补丁（core OHOS + sdkjs desktop + webapps desktop）=="
   bash "$ROOT/scripts/onlyoffice/patch_core_ohos.sh"
   bash "$ROOT/scripts/onlyoffice/patch_sdkjs_desktop.sh"
+  bash "$ROOT/scripts/onlyoffice/patch_webapps_desktop.sh"
 
   echo "== 1/6 web-apps grunt (deploy) =="
   (cd "$ROOT/third_party/web-apps/build" && npx grunt) 2>&1 | tail -3

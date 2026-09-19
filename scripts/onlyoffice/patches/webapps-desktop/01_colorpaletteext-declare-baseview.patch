@@ -1,0 +1,21 @@
+# web-apps 桌面工程补丁：ColorPaletteExt 显式声明 BaseView 依赖
+#
+# 背景（2026-09-19 骨架屏偶发卡死根因，详见记忆 onlyoffice-open-skeleton-hang）：
+# 官方该文件用 define([], ...) 零依赖声明，工厂里却直接用全局 Common.UI.BaseView
+# ——执行顺序全靠文件到达顺序。官方生产是打包单文件不暴露；本工程 dev/src 多文件
+# 加载 + ArkWeb 拦截层并发供给字节，顺序偶发颠倒 → BaseView 未定义 → Uncaught
+# TypeError → AMD 模块链死 → app 启动中断 → 偶发卡骨架屏（回归 open-ppt 偶发 FAIL
+# 同根，5 份 FAIL 现场全含该 JSERR）。写法对齐姊妹文件 ColorPalette.js（显式依赖）。
+#
+# 幂等应用：scripts/onlyoffice/patch_webapps_desktop.sh（grunt-build.sh 步骤 0/6 调用）。
+--- a/apps/common/main/lib/component/ColorPaletteExt.js
++++ b/apps/common/main/lib/component/ColorPaletteExt.js
+@@ -42,7 +42,7 @@
+ if (Common === undefined)
+     var Common = {};
+
+-define([], function () { 'use strict';
++define(['common/main/lib/component/BaseView'], function () { 'use strict';
+
+     Common.UI.ColorPaletteExt = Common.UI.BaseView.extend({
+         options: {
