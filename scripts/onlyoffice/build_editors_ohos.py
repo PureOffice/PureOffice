@@ -1127,6 +1127,29 @@ def main():
         if os.path.isfile(p) and inject_ascshim(p):
             injected += 1
             print('  注入 ascshim.js → apps/%s/main/index.html' % app)
+    # 4.5 编辑器页 viewport meta 补注入（幂等）：官方三个 main/index.html 源码均带
+    #     viewport meta，但 deploy 产物部分页面缺失（实测 presentationeditor 被剥）——
+    #     缺失时手机 WebView 按 980px 默认虚拟视口渲染，与触摸输入按 devicePixelRatio
+    #     的坐标换算不一致，滚动条等窄目标的触摸命中系统性错位。meta 写法同欢迎页注入。
+    VP_META = ('<meta name="viewport" content="width=device-width, '
+               'initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, '
+               'user-scalable=no">')
+    VP_ANCHOR = re.compile(r'<meta http-equiv="Content-Type"[^>]*/?>')
+    for app in APP_MAIN:
+        p = os.path.join(W3D, 'apps', app, 'main', 'index.html')
+        if not os.path.isfile(p):
+            continue
+        with open(p, encoding='utf-8') as f:
+            s = f.read()
+        if 'name="viewport"' in s:
+            continue
+        m = VP_ANCHOR.search(s)
+        if not m:
+            raise SystemExit('apps/%s/main/index.html viewport 补注入未命中锚点'
+                             '（Content-Type meta）——请检查页面结构' % app)
+        with open(p, 'w', encoding='utf-8') as f:
+            f.write(s[:m.end()] + VP_META + s[m.end():])
+        print('  viewport meta 补注入 → apps/%s/main/index.html' % app)
     # api/documents 外壳页（编辑 iframe 宿主）
     p = os.path.join(W3D, 'apps', 'api', 'documents', 'index.html')
     if os.path.isfile(p) and inject_ascshim(p):
