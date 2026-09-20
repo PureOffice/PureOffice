@@ -104,6 +104,9 @@ def build() -> str:
 
 
 JS = build()
+# 输出目录自建：毁灭性重建演练（rm rawfile/onlyoffice 后全链）暴露的缺陷——
+# 目录被清后本脚本不自愈（FileNotFoundError），必须先 mkdir（2026-09-21 阶段 0）
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 with open(OUT, 'w', encoding='utf-8') as f:
     f.write(JS)
 
