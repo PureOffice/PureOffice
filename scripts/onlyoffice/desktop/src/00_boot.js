@@ -60,7 +60,7 @@
   //   隐患是「静默失效」（官方改了对象名/时序，hook 悄悄不生效，没人发现），本段把
   //   它变成可见。
   // 机制：各段 hook 就位处 `(window.__lsoShim = window.__lsoShim || []).push('<tag>')`。
-  //   **用数组 push 而非函数调用**：00_theme / 09_fonts 排在本段之前执行，那时本段的
+  //   **用数组 push 而非函数调用**：09_fonts 等段排在本段之前执行，那时本段的
   //   函数还没定义——数组由首个调用者自建，任何执行顺序都成立。
   // 输出：页面加载后轮询期望项，齐了立即打 `LSO_SHIM_STATUS ok=N/N [...]`；超时 20s 打
   //   `MISSING [...]` 并列出已就位项（缺失=该段没挂上，或该段还在等对象）。
@@ -72,11 +72,11 @@
   (function _shimSelfCheck() {
     try {
       var EXPECT = {
-        theme: 'both', bridge: 'both',                      // 两页共用
+        // 已 fork 化退役段的登记项（theme/modal/print/fontimg/about 等）随段删除——
+        // 功能转进 fork 源码后 ascshim 侧不再有 hook 就位点，留着只会永久 MISSING 误报
+        bridge: 'both',                                     // 两页共用
         fonts: 'editor', engine: 'editor', open: 'editor',  // 编辑器页
-        save: 'editor', print: 'editor', modal: 'editor',   // （modal 不在欢迎页：那儿没有 Common）
-        fontimg: 'editor',                                  // 用户字体名字图（canvas 复刻）
-        about: 'home',                                      // 欢迎页（app:version 补发）
+        save: 'editor',
         userfonts: 'home'                                   // 欢迎页（侧栏「字体管理」注入）
       };
       var _isEditor = ((window.location || {}).pathname || '').indexOf('/main/index.html') >= 0;

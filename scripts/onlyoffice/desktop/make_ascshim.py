@@ -77,6 +77,11 @@ SHIM_INDENTED = '\n'.join('    ' + ln for ln in SHIM.split('\n'))
 SRC_DIR = os.path.join(HERE, 'src')
 # 00_theme 必须在首位：RendererProcessVariable.theme 必须早于官方 desktopinit 内联段
 # （index.html 同步一次性消费——误放 AscNative 等待之后= 注入执行≠生效，2026-09-08 教训）
+# （00_theme 已于 2026-09-21 fork 化阶段 2 整段退役：0.9 主题默认预写/0.11 导出
+#   PDF 菜单隐藏先期源码化进 themeinit.js 默认值 + RPV 兜底 + common.less
+#   （1-i）；0.10 tab 主题色上报进 web-apps fork controller/Themes.js
+#   [OHOS: theme] 块——ohos_report_theme_color 在 apply_theme 尾部（切换路径）
+#   与 init 尾部（初始路径）各挂一次，取代 readyState 轮询 + MutationObserver）
 # 55_lic 之后追加 57_about（欢迎页 About 入口的 app:version 补发；仅欢迎页 URL 生效）
 # （44_modalguard 已于 2026-09-21 fork 化阶段 1 退役：Desktop.js 八处裸调 native 的
 #   壳层事件 handler 已在 web-apps fork 加 [OHOS: native-guard] 源码守卫——比 trigger
@@ -125,7 +130,7 @@ SRC_DIR = os.path.join(HERE, 'src')
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
 # 29_inputfocus 紧跟 20_bridge（同为宿主↔页面基础能力，与前后段无依赖）
 # 58_pastebtn 追加于 57_about 后（工具栏「粘贴」宿主桥；自包含段、外层 IIFE 之外）
-PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js']
+PARTS = ['09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 

@@ -86,7 +86,9 @@
 
     // 主题注入不在本段（2026-09-08 教训：INSTALL 在 AscNative 就绪后才执行——官方
     // desktopinit 内联段同步一次性消费 RPV，那时官方兜底 theme-system 已走完且无人
-    // 重放→注入执行≠生效）。已移到 ascshim 同步头部 00_theme.js——见该文件头注释。
+    // 重放→注入执行≠生效）。原 ascshim 头部段已于 fork 化阶段退役：默认值/RPV 兜底
+    // 进 web-apps fork themeinit.js（1-i），tab 主题色上报进 controller/Themes.js
+    // [OHOS: theme]（2-b）。
     // ---- 2. window.AscDesktopEditor 就绪（引用已由 0.2 占位固化；此处维持原引用） ----
     window.AscDesktopEditor = obj;
     window.desktop = obj;
