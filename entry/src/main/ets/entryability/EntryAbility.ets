@@ -1,6 +1,6 @@
-import { AbilityConstant, Want, UIAbility } from '@kit.AbilityKit';
+import { AbilityConstant, Want, UIAbility, abilityAccessCtrl, bundleManager, Permissions } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /**
@@ -81,6 +81,64 @@ export default class EntryAbility extends UIAbility {
     collect(want);
   }
 
+  /** 权限申请只做一次（loadContent 回调与 WINDOW_SHOWN 双路径防漏，二选一触发） */
+  private permRequested: boolean = false;
+
+  /**
+   * 启动即申请剪贴板读取权限（2026-09-21 工具栏粘贴链，用户决策）。
+   * READ_PASTEBOARD = user_grant 受限权限（ACL 管资格、用户管授予）：module.json5
+   * 声明 + 签名 profile acl 只是「有资格申请」，授予必须用户点头。若等到首次点
+   * 「粘贴」再弹，用户先见点击无反应再见弹窗，体验割裂——故启动即申请：
+   * 已授予（checkAccessToken）静默跳过；未授予弹系统授权框，一次授权长期有效。
+   * 拒绝后系统自身限频（不再反复骚扰）；宿主 clip:paste 分支对未授权态另有
+   * toast 引导（EditorPage.pasteClipboard）。
+   * 时机（1.6 实测教训）：必须在**窗口内容就绪后**（loadContent 回调/WINDOW_SHOWN）
+   * ——onCreate 阶段窗口未建，requestPermissionsFromUser 无处挂弹窗，系统静默
+   * 返回 auth=-1（拒绝）且不显示任何 UI；且该次结果会被记账为「已拒绝」，
+   * 后续真窗口期的申请也可能被限频，勿改回 onCreate。
+   */
+  private requestClipboardPermission(): void {
+    if (this.permRequested) {
+      return;
+    }
+    this.permRequested = true;
+    try {
+      const atm = abilityAccessCtrl.createAtManager();
+      bundleManager.getBundleInfoForSelf(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION)
+        .then((info: bundleManager.BundleInfo) => {
+          if (info.appInfo === undefined || info.appInfo === null) {
+            hilog.warn(0x0000, 'OfficePerm', 'no appInfo, skip');
+            return;
+          }
+          const tokenId = info.appInfo.accessTokenId;
+          return atm.checkAccessToken(tokenId, 'ohos.permission.READ_PASTEBOARD');
+        })
+        .then((st: abilityAccessCtrl.GrantStatus | void) => {
+          if (st !== undefined && st === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED) {
+            hilog.info(0x0000, 'OfficePerm', 'pasteboard already granted');
+            return;
+          }
+          const perms: Array<Permissions> = ['ohos.permission.READ_PASTEBOARD'];
+          atm.requestPermissionsFromUser(this.context, perms)
+            .then((res) => {
+              // res 类型由 Promise 泛型推断（PermissionRequestResult 为模块内部
+              // 声明，不在 abilityAccessCtrl 命名空间下，无法显式标注）
+              hilog.info(0x0000, 'OfficePerm',
+                'pasteboard request auth=' + JSON.stringify(res.authResults));
+            })
+            .catch((e: BusinessError) => {
+              hilog.warn(0x0000, 'OfficePerm', 'pasteboard request err ' + JSON.stringify(e));
+            });
+        })
+        .catch((e: BusinessError) => {
+          hilog.warn(0x0000, 'OfficePerm', 'checkAccessToken err ' + JSON.stringify(e));
+        });
+    } catch (e) {
+      hilog.warn(0x0000, 'OfficePerm', 'pasteboard precheck err ' + JSON.stringify(e));
+    }
+  }
+
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     // 应用运行中再次启动（aa start 更新参数）：刷新参数；EditorPage 只在 aboutToAppear
     // 读取一次（2026-09-05 审查更正注释：新参数对运行中的实例下次冷启动生效）
@@ -110,11 +168,15 @@ export default class EntryAbility extends UIAbility {
       // wineohos 是窗口 SHOWN 事件后才隐藏系统栏（WineWindowAbility WINDOW_SHOWN 段），
       // 改为事件驱动重试（幂等，双保险）。
       this.applyWindowMode(windowStage);
+      // 剪贴板权限申请（loadContent 回调=窗口内容就绪；permRequested 守卫使
+      // WINDOW_SHOWN 路径只做漏触发兜底，不会重复弹窗）
+      this.requestClipboardPermission();
       try {
         const mw = windowStage.getMainWindowSync();
         mw.on('windowEvent', (event) => {
           if (event === window.WindowEventType.WINDOW_SHOWN) {
             this.applyWindowMode(windowStage);
+            this.requestClipboardPermission();
           }
         });
       } catch (e) {

@@ -1,5 +1,6 @@
-import { BusinessError, deviceInfo, print } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo, print, pasteboard } from '@kit.BasicServicesKit';
 import { bundleManager, common } from '@kit.AbilityKit';
+import { buffer } from '@kit.ArkTS';
 import { promptAction, window } from '@kit.ArkUI';
 import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs, picker, fileUri } from '@kit.CoreFileKit';
@@ -377,6 +378,13 @@ struct EditorPage {
       // （引擎 CDocumentRenderer 产物，非 PDF 文件格式）→ x2t bin2pdf 转真 PDF
       // → @ohos.print 调起系统打印。
       return this.printBin(ctx, param);
+    }
+    if (cmd === 'clip:paste') {
+      // 工具栏「粘贴」（58_pastebtn.js Button_Paste 覆写）：宿主读系统剪贴板
+      // → base64 回调页面 __lsoPasteIn。读取异步（getData Promise），命令先行
+      // 受理；空剪贴板由页面状态栏提示，权限被拒由本分支 toast 引导设置。
+      this.pasteClipboard(ctx);
+      return 'true';
     }
     if (cmd === 'media:put') {
       // 插入图片链：47_img.js 覆写 AscCommon.UploadImageFiles 后发来（官方 web 形态
@@ -857,6 +865,48 @@ struct EditorPage {
     } catch (e) {
       this.arkLog('PRINT_BIN_ERR ' + String(e));
       return 'false';
+    }
+  }
+
+  /**
+   * 读系统剪贴板并回传页面（工具栏「粘贴」宿主端，58_pastebtn.js 配对）。
+   * 记录选取：遍历 getData() 全部 records——htmlText 优先（保真：加粗/颜色/
+   * 表格结构），plainText 兜底（纯文本场景）；系统剪贴板为唯一真源（页面侧
+   * 已刻意不用引擎 LastCopyBinary 内部缓存——跨应用复制后它已过期）。
+   * 编码：buffer（@kit.ArkTS 平级导出，非 util 命名空间）UTF-8 → base64（标准
+   * 字母表，无引号/换行——runJavaScript 内联字符串安全）；页面 atob +
+   * TextDecoder 还原（atob 直得 latin1，多字节必须经 TextDecoder）。
+   * 权限被拒（code 201，启动申请被用户拒绝时的路径）：toast 引导系统设置，
+   * 不回调页面——无内容可贴，toast 已给反馈，避免双重提示。
+   */
+  private pasteClipboard(ctx: DocTabCtx): void {
+    try {
+      pasteboard.getSystemPasteboard().getData().then((data: pasteboard.PasteData) => {
+        let html = '';
+        let text = '';
+        const cnt = data.getRecordCount();
+        for (let i = 0; i < cnt; i++) {
+          const r: pasteboard.PasteDataRecord = data.getRecord(i);
+          if (html === '' && r.mimeType === pasteboard.MIMETYPE_TEXT_HTML
+            && typeof r.htmlText === 'string') {
+            html = r.htmlText;
+          } else if (text === '' && r.mimeType === pasteboard.MIMETYPE_TEXT_PLAIN
+            && typeof r.plainText === 'string') {
+            text = r.plainText;
+          }
+        }
+        this.arkLog('CLIP_PASTE html=' + html.length + ' text=' + text.length);
+        const bh = html.length > 0 ? buffer.from(html, 'utf-8').toString('base64') : '';
+        const bt = text.length > 0 ? buffer.from(text, 'utf-8').toString('base64') : '';
+        ctx.js(`window.__lsoPasteIn&&window.__lsoPasteIn('${bh}','${bt}')`, 'clip:paste:cb');
+      }).catch((e: BusinessError) => {
+        this.arkLog('CLIP_PASTE_ERR ' + e.code + ' ' + e.message);
+        if (e.code === 201) {
+          promptAction.showToast({ message: '未授予剪贴板权限，请在系统设置中开启后重试', duration: 3000 });
+        }
+      });
+    } catch (e) {
+      this.arkLog('CLIP_PASTE_ERR ' + String(e));
     }
   }
 

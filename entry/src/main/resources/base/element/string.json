@@ -1,6 +1,7 @@
 {
   "string": [
     { "name": "EntryAbility_desc", "value": "本地办公文档编辑器" },
-    { "name": "EntryAbility_label", "value": "Pure Office" }
+    { "name": "EntryAbility_label", "value": "Pure Office" },
+    { "name": "clipboard_usage_desc", "value": "用于文档编辑时从剪贴板粘贴内容" }
   ]
 }

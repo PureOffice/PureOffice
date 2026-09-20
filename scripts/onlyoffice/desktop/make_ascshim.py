@@ -88,7 +88,8 @@ SRC_DIR = os.path.join(HERE, 'src')
 # 注意：00_boot.js 的 `(function() {` 是**故意不闭合**的「外层头」（其后各段都在它内部），
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
 # 29_inputfocus 紧跟 20_bridge（同为宿主↔页面基础能力，与前后段无依赖）
-PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '29_inputfocus.js', '30_open.js', '40_save.js', '44_modalguard.js', '45_print.js', '46_fontimg.js', '47_img.js', '48_mediaunpack.js', '49_doclang.js', '50_init.js', '51_scrollpad.js', '55_lic.js', '57_about.js']
+# 58_pastebtn 追加于 57_about 后（工具栏「粘贴」宿主桥；自包含段、外层 IIFE 之外）
+PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '29_inputfocus.js', '30_open.js', '40_save.js', '44_modalguard.js', '45_print.js', '46_fontimg.js', '47_img.js', '48_mediaunpack.js', '49_doclang.js', '50_init.js', '51_scrollpad.js', '55_lic.js', '57_about.js', '58_pastebtn.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 
