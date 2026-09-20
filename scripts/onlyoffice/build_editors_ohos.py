@@ -1232,9 +1232,10 @@ def main():
     # 7.56 内置字体行名清单（用户导入字体的重名检查数据源；common/userFonts.ets 读）
     write_font_rows()
 
-    # 7.6 关于面板双品牌（Pure Office 主 + ONLYOFFICE 辅行 + 公司信息隐藏 + 许可入口；
-    #     须在 gen_version_json 前——patch 内容算进资源哈希，编排内无自愈版本号漂移）
-    patch_about_brand()
+    # 7.6 【已源码化，2026-09-21 fork 化阶段 1】关于面板双品牌 + 欢迎页品牌/viewport/
+    #     PDF 卡——全部迁入 web-apps fork（About.js/LeftMenu×5/about.less）与
+    #     desktop-apps fork（panelabout 模板/panelrecent PDF 卡/index.html viewport），
+    #     patch_about_brand() 不再调用（函数体留档，阶段 4 清理后处理段时统一删除）
 
     # 8. 版本号 version.json（资源内容哈希 → 编辑页 ?v=）
     v = gen_version_json()
