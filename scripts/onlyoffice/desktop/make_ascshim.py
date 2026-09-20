@@ -78,18 +78,17 @@ SRC_DIR = os.path.join(HERE, 'src')
 # 00_theme 必须在首位：RendererProcessVariable.theme 必须早于官方 desktopinit 内联段
 # （index.html 同步一次性消费——误放 AscNative 等待之后= 注入执行≠生效，2026-09-08 教训）
 # 55_lic 之后追加 57_about（欢迎页 About 入口的 app:version 补发；仅欢迎页 URL 生效）
-# 44_modalguard 紧跟 40_save（同为壳层语义补丁）：Desktop.js 的 native 依赖事件
-#   （modal:* / uitheme:changed / hints:show / quickaccess:changed / app:face）抛错会
-#   中断 Backbone 的同步 trigger → 后续 handler 被跳过（弹窗空白 / 主题只切一半；
-#   2026-09-11 扩展，详见该文件注释）
-# 45_print 紧跟其后（编辑器页序列化链，顺序仅为可读性——与前面各段无依赖）
+# （44_modalguard 已于 2026-09-21 fork 化阶段 1 退役：Desktop.js 八处裸调 native 的
+#   壳层事件 handler 已在 web-apps fork 加 [OHOS: native-guard] 源码守卫——比 trigger
+#   层兜底更彻底，同名后续 handler 不再被跳过）
+# 45_print 紧随 40_save 之后（编辑器页序列化链，顺序仅为可读性——与前面各段无依赖）
 # 09_fontpick 紧贴 09_fonts（同为字体域；它是 smoke 专用映射探针，须在 00_boot 之前
 #   的**独立段**里尽早装钩子——见该文件注释）
 # 注意：00_boot.js 的 `(function() {` 是**故意不闭合**的「外层头」（其后各段都在它内部），
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
 # 29_inputfocus 紧跟 20_bridge（同为宿主↔页面基础能力，与前后段无依赖）
 # 58_pastebtn 追加于 57_about 后（工具栏「粘贴」宿主桥；自包含段、外层 IIFE 之外）
-PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '29_inputfocus.js', '30_open.js', '40_save.js', '44_modalguard.js', '45_print.js', '46_fontimg.js', '47_img.js', '48_mediaunpack.js', '49_doclang.js', '50_init.js', '51_scrollpad.js', '55_lic.js', '57_about.js', '58_pastebtn.js']
+PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '29_inputfocus.js', '30_open.js', '40_save.js', '45_print.js', '46_fontimg.js', '47_img.js', '48_mediaunpack.js', '49_doclang.js', '50_init.js', '51_scrollpad.js', '55_lic.js', '57_about.js', '58_pastebtn.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 
