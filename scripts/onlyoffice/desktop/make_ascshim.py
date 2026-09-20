@@ -81,6 +81,10 @@ SRC_DIR = os.path.join(HERE, 'src')
 # （44_modalguard 已于 2026-09-21 fork 化阶段 1 退役：Desktop.js 八处裸调 native 的
 #   壳层事件 handler 已在 web-apps fork 加 [OHOS: native-guard] 源码守卫——比 trigger
 #   层兜底更彻底，同名后续 handler 不再被跳过）
+# （29_inputfocus 同日退役：焦点抑制三件套进 sdkjs fork text_input2.js——
+#   isGlobalDisableFocus 按 URL 参数 nofocus=1 初始化（替代轮询）、document focus
+#   监听器早退条件扩展、点文档区补聚焦监听器进 InitBrowserInputContext；
+#   HTMLElement.prototype.focus 全局原型覆写（trick 中副作用最大者）不再保留）
 # 45_print 紧随 40_save 之后（编辑器页序列化链，顺序仅为可读性——与前面各段无依赖）
 # 09_fontpick 紧贴 09_fonts（同为字体域；它是 smoke 专用映射探针，须在 00_boot 之前
 #   的**独立段**里尽早装钩子——见该文件注释）
@@ -88,7 +92,7 @@ SRC_DIR = os.path.join(HERE, 'src')
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
 # 29_inputfocus 紧跟 20_bridge（同为宿主↔页面基础能力，与前后段无依赖）
 # 58_pastebtn 追加于 57_about 后（工具栏「粘贴」宿主桥；自包含段、外层 IIFE 之外）
-PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '29_inputfocus.js', '30_open.js', '40_save.js', '45_print.js', '46_fontimg.js', '47_img.js', '48_mediaunpack.js', '49_doclang.js', '50_init.js', '51_scrollpad.js', '55_lic.js', '57_about.js', '58_pastebtn.js']
+PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '45_print.js', '46_fontimg.js', '47_img.js', '48_mediaunpack.js', '49_doclang.js', '50_init.js', '51_scrollpad.js', '55_lic.js', '57_about.js', '58_pastebtn.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 
