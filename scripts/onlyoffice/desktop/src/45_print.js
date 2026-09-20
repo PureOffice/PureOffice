@@ -1,70 +1,9 @@
-  // ---- 3.8.5 打印链（2026-09-10）：官方 asc_Print → 元文件流 → x2t bin2pdf → 系统打印 ----
-  //      官方桌面语义：引擎 asc_Print → 逐页把绘图指令（元文件流）交壳层原生侧落地。
-  //      本壳的落地方式 = asc_nativeGetPDF（引擎内置 CDocumentRenderer，产出**多页
-  //      拼接的元文件指令流**——注意不是 PDF 文件格式）+ x2t 的 bin2pdf 转换
-  //      （纯 C++ 的 NSOnlineOfficeBinToPdf，**不依赖 doctrenderer/V8**）+ 系统打印
-  //      （@ohos.print，ArkTS 侧 printBin）。
-  //
-  //      入口（三处全部汇入本覆写点）：工具栏打印按钮 / 文件菜单「打印」（→ 30_open
-  //      置 canPreviewPrint=false 后 word/slide 直通 asc_Print，cell 经打印面板）。
-  //      ArkTS 侧只认「元文件流」这一件事，不关心它从哪个入口来。
-  //
-  //      截断（关键）：CMemory 构造即预分配 5MB（sdkjs common/Drawings/Metafile.js
-  //      532-545），asc_nativeGetPDF 返回的是**整块预分配数组**（尾部全 0），而 C++
-  //      侧 bin2pdf 的解析器是 `while (oReader.Check())` 读到 buffer 末尾——零字节会
-  //      落进 default 分支且游标不前进 → 死循环。官方 CEF 靠引擎在返回前调
-  //      window.native.Save_End(header, len) 报告真实长度再截断（doctrenderer.cpp:
-  //      459 同款语义），此处照做：调用期临时挂桩捕获 len，finally 还原（同 3.8.4
-  //      的 __lsoNativeSaveEnd——但那个桩不回报长度，故打印链单独一份）。
-  (function _hookPrint() {
-    try {
-      // 页门控：仅编辑器页（欢迎页无 Asc 对象）
-      var _pp = (window.location || {}).pathname || '';
-      if (_pp.indexOf('/main/index.html') < 0) { return; }
-      if (!window.Asc || !(window.Asc.asc_docs_api || window.Asc.spreadsheet_api || window.Asc.presentation_api)) {
-        if ((window.__lsoPrintWaitN = (window.__lsoPrintWaitN || 0) + 1) < 300) setTimeout(_hookPrint, 200);
-        return;
-      }
-      var _proto = (window.Asc.asc_docs_api || window.Asc.spreadsheet_api || window.Asc.presentation_api).prototype;
-      // 两个前置都在才可挂钩：asc_Print（覆写对象）+ asc_nativeGetPDF（word 内置
-      // CDocumentRenderer；cell/slide 各自 api.js 同款实现）
-      if (typeof _proto.asc_Print !== 'function' || typeof _proto.asc_nativeGetPDF !== 'function') {
-        if ((window.__lsoPrintWaitN = (window.__lsoPrintWaitN || 0) + 1) < 300) setTimeout(_hookPrint, 200);
-        return;
-      }
-
-      _proto.asc_Print = function(options) {
-        try {
-          // 取元文件流：临时挂 Save_End 桩捕获真实长度（参数 2；参数 1 是 header 不用）
-          var _len = 0;
-          var _oldNative = window.native;
-          var _bin = null;
-          window.native = { Save_End: function(header, l) { _len = l || 0; } };
-          try {
-            _bin = this.asc_nativeGetPDF(options);
-          } finally {
-            window.native = _oldNative;
-          }
-          if (!_bin || !_bin.byteLength) {
-            console.error('LSO_PRINT_EMPTY');
-            return;
-          }
-          // 截断到引擎报告的长度；len 异常（0 或超界）时退回全长——ArkTS 侧有兜底
-          var _n = (_len > 0 && _len <= _bin.byteLength) ? _len : _bin.byteLength;
-          var _cut = _bin.subarray(0, _n);   // subarray 零拷贝（后续只读）
-          var _b64 = window.__lsoB64(_cut);
-          var _ret = String(window.AscNative && window.AscNative._call(
-            'execCommand', ['print:bin', _b64]) || '');
-          console.error('LSO_PRINT_CALL len=' + _n + '/' + _bin.byteLength
-            + ' b64=' + _b64.length + ' ret=' + _ret);
-        } catch (e) {
-          console.error('LSO_PRINT_HOOK_ERR ' + String(e));
-        }
-      };
-      console.error('LSO_PRINT_HOOKED');
-      (window.__lsoShim = window.__lsoShim || []).push('print');  // 自检登记
-    } catch (cbx) { console.error('LSO_PRINT_HOOK_HOOK_ERR ' + String(cbx)); }
-  })();
+  // ---- 打印链（2026-09-10）：官方 asc_Print → 元文件流 → x2t bin2pdf → 系统打印 ----
+  // 【迁移注记】本段原含 asc_Print 覆写（元文件流+Save_End 截断+print:bin），已于
+  // 2026-09-21 fork 化源码化进 sdkjs fork apiBase.js asc_Print 头部 [OHOS: print]
+  // 分支（三编辑器单点）。本段仅余两块 web-apps 侧适配，待随后迁移后整段退役：
+  //   ① 打印面板打印机列表注入（cell 打印面板按钮解禁）
+  //   ② 快速打印入口修复（onPrintQuick 死按钮）
 
   // ---- 打印面板打印机列表注入（2026-09-10）----
   // 官方语义（common/lib/controller/Desktop.js:46 + 204-221）：壳层发 printer:config
@@ -74,7 +13,7 @@
   // 使 cell 打印面板的「打印」按钮恒灰（word/slide 直通 asc_Print，不经面板，故只有
   // cell 受影响）。我们作为壳层补发这份配置：HarmonyOS 上打印统一由系统对话框呈现
   // （@ohos.print），无法枚举具体型号，故只报一项「系统打印」占位——选中即解禁按钮，
-  // 点击仍汇入上面的 asc_Print 覆写 → 系统打印框。webapp 取值与官方同源
+  // 点击仍汇入 asc_Print（fork 分支）→ 系统打印框。webapp 取值与官方同源
   // （Desktop.js:46 window.DE||PE||SSE||PDFE||VE）。
   (function _hookPrinterConfig() {
     try {
@@ -150,7 +89,7 @@
               printopt.asc_setNativeOptions({ quickPrint: true });
               var opts = new window.Asc.asc_CDownloadOptions();
               opts.asc_setAdvancedOptions(printopt);
-              this.api.asc_Print(opts);   // → 上面的 asc_Print 覆写 → 系统打印框
+              this.api.asc_Print(opts);   // → asc_Print（fork [OHOS: print] 分支）→ 系统打印框
               console.error('LSO_QUICKPRINT_CALL');
             } catch (e5) { console.error('LSO_QUICKPRINT_ERR ' + String(e5)); }
           };
