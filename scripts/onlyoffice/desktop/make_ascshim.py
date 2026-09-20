@@ -93,6 +93,10 @@ SRC_DIR = os.path.join(HERE, 'src')
 # （58_pastebtn 同日退役：clipboard_base.js Button_Paste 头部 AscNative 分支 +
 #   __lsoPasteIn 回调入口（惰性取 g_clipboardBase）——宿主侧 clip:paste 命令与
 #   回调契约键名不变，轮询 300 次等 Button_Paste 的覆写不再需要）
+# （57_about 同日退役：desktop-apps fork loginpage/panelabout.js init 内自治
+#   fire on_native_message app:version（fetch version.json 单次）——消费链官方
+#   原样（panels.js 侧栏显示/panelabout 视图创建），高频轮询 unhide + fire
+#   重发×8 由「订阅先于 fire」的时序保证取代）
 # 45_print 紧随 40_save 之后（编辑器页序列化链，顺序仅为可读性——与前面各段无依赖）
 # 09_fontpick 紧贴 09_fonts（同为字体域；它是 smoke 专用映射探针，须在 00_boot 之前
 #   的**独立段**里尽早装钩子——见该文件注释）
@@ -100,7 +104,7 @@ SRC_DIR = os.path.join(HERE, 'src')
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
 # 29_inputfocus 紧跟 20_bridge（同为宿主↔页面基础能力，与前后段无依赖）
 # 58_pastebtn 追加于 57_about 后（工具栏「粘贴」宿主桥；自包含段、外层 IIFE 之外）
-PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '45_print.js', '46_fontimg.js', '47_img.js', '48_mediaunpack.js', '50_init.js', '55_lic.js', '57_about.js']
+PARTS = ['00_theme.js', '09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '45_print.js', '46_fontimg.js', '47_img.js', '48_mediaunpack.js', '50_init.js', '55_lic.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 
