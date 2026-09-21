@@ -1266,13 +1266,17 @@ def main():
             print('  ohos/bridge.js 展开完成（%d bytes，方法表+shim）' % _n)
         boots = [f for f in os.listdir(OHOS_DST) if f.endswith('.js')]
         assert 'boot.js' in boots, 'ohos 模块缺 boot.js（scripts/onlyoffice/ohos/）'
+        assert 'fonts.js' in boots, 'ohos 模块缺 fonts.js（字体流保供，原 ascshim 09_fonts）'
         for app in APP_MAIN:
             p = os.path.join(W3D, 'apps', app, 'main', 'index.html')
             # 注入调用序与最终加载序：inject_script_src 每次插 <head> 紧后（后插者
-            # 在前）→ 产物序 boot → bridge → ascshim。bridge 的 INSTALL 由 AscNative
-            # 出现异步触发，与 script 相对顺序无关（实测证实：注入序两种排法行为
-            # 一致）；引擎字体链 web 语义由 bridge.js INSTALL 体内的 3.7 删除块兜住，
-            # 不依赖本处顺序。
+            # 在前）→ 产物序 boot → bridge → fonts → ascshim。bridge 的 INSTALL 由
+            # AscNative 出现异步触发，与 script 相对顺序无关（实测证实：注入序两种
+            # 排法行为一致）；引擎字体链 web 语义由 bridge.js INSTALL 体内的 3.7
+            # 删除块兜住，不依赖本处顺序。fonts 只注编辑器页（欢迎页无 sdkjs 引擎，
+            # 装填永不发生——预取与轮询纯空转）。
+            if os.path.isfile(p) and inject_script_src(p, '../../../../ohos/fonts.js'):
+                print('  注入 ohos/fonts.js → apps/%s/main/index.html' % app)
             if os.path.isfile(p) and inject_script_src(p, '../../../../ohos/bridge.js'):
                 print('  注入 ohos/bridge.js → apps/%s/main/index.html' % app)
             if os.path.isfile(p) and inject_ohos_boot(p):

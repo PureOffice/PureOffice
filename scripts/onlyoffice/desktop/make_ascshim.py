@@ -91,6 +91,9 @@ SRC_DIR = os.path.join(HERE, 'src')
 # 45_print 紧随 40_save 之后（编辑器页序列化链，顺序仅为可读性——与前面各段无依赖）
 # 09_fontpick 紧贴 09_fonts（同为字体域；它是 smoke 专用映射探针，须在 00_boot 之前
 #   的**独立段**里尽早装钩子——见该文件注释）
+# （09_fonts 段已整段退役（2026-09-21 阶段 2-l）：CJK 字体流保供（0.94 XHR 取证
+#   + 预取/装填主体）→ 宿主装配域 ohos/fonts.js（装配链注入编辑器页；三表注册
+#   先行并入 AllFonts.js——2-j1。判据 FONT_WARM_* 随迁保留））
 # 注意：00_boot.js 的 `(function() {` 是**故意不闭合**的「外层头」（其后各段都在它内部），
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
 #   （外层 IIFE 的 `})();` 闭合由**末段**承担——现为 30_open.js 尾部）
@@ -101,7 +104,7 @@ SRC_DIR = os.path.join(HERE, 'src')
 #   getPanel left 槽隐藏=logo、elUserName 两分支保持 hidden、btnClose 两分支
 #   不创建）；3.7/3.7.1 前批已入 ohos/bridge.js，3.8 系此前已入 fork 源码。
 #   外层 IIFE 闭合由 30_open 尾部承接）
-PARTS = ['09_fonts.js', '09_fontpick.js', '00_boot.js', '30_open.js']
+PARTS = ['09_fontpick.js', '00_boot.js', '30_open.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 
