@@ -23,11 +23,18 @@ Upstream components (AGPL-3.0 + Additional Terms; baseline release/v9.4.0)
   desktop-apps  https://github.com/ONLYOFFICE/desktop-apps
   build_tools   https://github.com/ONLYOFFICE/build_tools
 
-Modifications to upstream source are recorded as patch sets in
-scripts/onlyoffice/patches/ (core-ohos/, sdkjs-desktop/) and applied by
-scripts/onlyoffice/patch_*.sh. The application shell, the ascshim runtime
-injection layer and the build scripts are original code of this project,
-licensed under AGPL-3.0.
+Modifications to upstream source:
+  core          patch set (scripts/onlyoffice/patches/core-ohos/, applied
+                by patch_core_ohos.sh)
+  sdkjs         "ohos" branch of a fork, pinned in third_party/sdkjs
+                (in-tree changes marked [OHOS])
+  web-apps      "ohos" branch of a fork, pinned in third_party/web-apps
+                (in-tree changes marked [OHOS])
+  desktop-apps  "ohos" branch of a fork, pinned in third_party/desktop-apps
+                (in-tree changes marked [OHOS])
+The application shell, the host-side assembly modules (ohos/, smoke/) and
+the build scripts are original code of this project, licensed under
+AGPL-3.0.
 
 Corresponding Source
 --------------------
