@@ -24,14 +24,13 @@ fi
 BUNDLE=app.fuqidian.pureoffice
 
 cd "$ROOT"
-# —— 增量资源装配（= grunt-build.sh --no-upstream 的 4/5/6 步，2026-09-06 合并）——
-# 必须三条都跑，只跑 assembleHap 是旧坑（2026-09-05 踩过）：
-#   make_ascshim：src/*.js → ascshim.js（生成产物勿手改）
+# —— 增量资源装配（= grunt-build.sh --no-upstream 的 4/5 步，2026-09-06 合并；
+#    make_ascshim 已于 2026-09-21 阶段 2-n 随 ascshim 退役删除——ohos 模块展开与
+#    smoke/inject-head.js 生成并入 build_editors_ohos.py）——
+# 必须都跑，只跑 assembleHap 是旧坑（2026-09-05 踩过）：
 #   make_empty_templates：模板源 → empty.{docx,xlsx,pptx}
-#   build_editors_ohos：ascshim **注入 webapps 各 index.html** + 字体/精灵/版本号——
-#     只跑 make_ascshim 时 webapps 里注入的还是旧版（本脚本 2026-09-06 补此步）
-echo "== assemble (ascshim + templates + inject) =="
-python3 "$ROOT/scripts/onlyoffice/desktop/make_ascshim.py" 2>&1 | tail -2
+#   build_editors_ohos：ohos 模块/smoke head **注入 webapps 各 index.html** + 字体/精灵/版本号
+echo "== assemble (templates + inject) =="
 python3 "$ROOT/scripts/onlyoffice/make_empty_templates.py" 2>&1 | tail -4
 python3 "$ROOT/scripts/onlyoffice/build_editors_ohos.py" 2>&1 | tail -4
 # 构建日志 tee 落盘（pipefail 保 rc；失败时 /tmp/deploy_build.log 留完整证据——2026-09-05 审查补）

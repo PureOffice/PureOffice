@@ -6,7 +6,7 @@
 #   bash scripts/onlyoffice/desktop/grunt-build.sh   # 全链（官方 grunt 产物重建→装配）
 #   bash scripts/onlyoffice/desktop/grunt-build.sh --no-upstream
 #                                                   # 跳过官方构建（grunt 产物已就位，
-#                                                   # 仅 make_ascshim + build_editors_ohos.py）
+#                                                   # 仅 build_editors_ohos.py 装配）
 #
 # 步骤与产物：
 #   1. web-apps 官方 grunt（build/ 内，default=deploy 各 app）
@@ -15,12 +15,11 @@
 #      → third_party/sdkjs/deploy/sdkjs/
 #   3. loginpage（desktop-apps common）官方 grunt（default=desktop startpage）
 #      → third_party/desktop-apps/common/loginpage/deploy/
-#   4. make_ascshim.py → entry/.../rawfile/onlyoffice/ascshim.js（node --check 硬校验）
-#   4.5 make_empty_templates.py → rawfile/onlyoffice/templates/empty.{docx,xlsx,pptx}
+#   4. make_empty_templates.py → rawfile/onlyoffice/templates/empty.{docx,xlsx,pptx}
 #      （新建卡片空模板；骨架在 scripts/onlyoffice/templates_src/。必须先于装配生成，
 #       否则 version.json 哈希不含模板内容 —— 2026-09-05 原为手工步骤，易忘跑）
 #   5. build_editors_ohos.py → rawfile/onlyoffice/{webapps,sdkjs,fonts,index.html,
-#      smoke,version.json}（注入 ascshim/字体/版本号）
+#      smoke,version.json}（注入 ohos 模块/smoke head/字体/版本号）
 # 之后组装 HAP 与上真机：bash scripts/onlyoffice/deploy_ohos.sh
 #
 # 正确目录：各官方工程在自己的 build/ 目录内运行 grunt（Gruntfile 相对路径假设）；
@@ -44,15 +43,15 @@ if [ "$UPSTREAM" = "1" ]; then
   # 2026-09-21 fork 化阶段 0）：checkout 即定制态，无需现场应用 patch——
   # patch_sdkjs_desktop.sh / patch_webapps_desktop.sh 与 patches/{sdkjs,webapps}-desktop
   # 已随之退役删除（git 历史可查）。
-  echo "== 0/6 子模块补丁（core OHOS）=="
+  echo "== 0/5 子模块补丁（core OHOS）=="
   bash "$ROOT/scripts/onlyoffice/patch_core_ohos.sh"
 
-  echo "== 1/6 web-apps grunt (deploy) =="
+  echo "== 1/5 web-apps grunt (deploy) =="
   (cd "$ROOT/third_party/web-apps/build" && npx grunt) 2>&1 | tail -3
   [ -f "$ROOT/third_party/web-apps/deploy/web-apps/apps/documenteditor/main/index.html" ] \
     || { echo "!! web-apps deploy 产物缺失" >&2; exit 1; }
 
-  echo "== 2/6 sdkjs build (--desktop) =="
+  echo "== 2/5 sdkjs build (--desktop) =="
   (cd "$ROOT/third_party/sdkjs" && python3 build/build.py --desktop) 2>&1 | tail -3
   # 断言取引擎主文件：deploy/sdkjs/common/ 里只有子目录（plugins.js 是**源树**
   # 文件 third_party/sdkjs/common/plugins.js，不进 deploy 产物——原断言指它属过时
@@ -60,19 +59,16 @@ if [ "$UPSTREAM" = "1" ]; then
   [ -f "$ROOT/third_party/sdkjs/deploy/sdkjs/word/sdk-all.js" ] \
     || { echo "!! sdkjs deploy 产物缺失（word/sdk-all.js）" >&2; exit 1; }
 
-  echo "== 3/6 loginpage grunt (desktop startpage) =="
+  echo "== 3/5 loginpage grunt (desktop startpage) =="
   (cd "$ROOT/third_party/desktop-apps/common/loginpage/build" && npx grunt) 2>&1 | tail -3
   [ -f "$ROOT/third_party/desktop-apps/common/loginpage/deploy/index.html" ] \
     || { echo "!! loginpage deploy 产物缺失" >&2; exit 1; }
 fi
 
-echo "== 4/6 ascshim (make_ascshim.py) =="
-python3 "$ROOT/scripts/onlyoffice/desktop/make_ascshim.py"
-
-echo "== 5/6 empty templates (make_empty_templates.py) =="
+echo "== 4/5 empty templates (make_empty_templates.py) =="
 python3 "$ROOT/scripts/onlyoffice/make_empty_templates.py"
 
-echo "== 6/6 assemble (build_editors_ohos.py) =="
+echo "== 5/5 assemble (build_editors_ohos.py) =="
 python3 "$ROOT/scripts/onlyoffice/build_editors_ohos.py"
 
 echo "== 完成（deploy: bash scripts/onlyoffice/deploy_ohos.sh）=="
