@@ -6,55 +6,10 @@
   //     [OHOS] 恒真、三家 api.js asc_DownloadAs [OHOS] 另存为重定向、三家
   //     sendEvent [OHOS] -25 拦截同批。判据日志字样 LSO_* 全部保留在源码分支）
 
-  // ---- 3.8.2b Gateway.requestClose 覆写（M5 方案 C「关闭」）：官方 web 链 onRequestClose
-  //      （文档已修改时先弹「放弃修改并离开」框）→ Common.Gateway.requestClose() —— web
-  //      语义为上报宿主壳关闭；本页即宿主 → 直接回官方欢迎页（与 goback 同构；不依赖
-  //      window.AscDesktopEditor，web 语义可用）。 ----
-  (function _hookGW() {
-    try {
-      // 页门控+重试上限（同 _hookSave：欢迎页空转处理，2026-09-05）
-      var _ppw = (window.location || {}).pathname || '';
-      if (_ppw.indexOf('/main/index.html') < 0) { return; }
-      var _g = window.Common && window.Common.Gateway;
-      if (!_g || typeof _g.requestClose !== 'function') {
-        if ((window.__lsoGWWaitN = (window.__lsoGWWaitN || 0) + 1) < 300) setTimeout(_hookGW, 200);
-        return;
-      }
-      if (!window.__lsoReqClose) {
-        window.__lsoReqClose = true;
-        _g.requestClose = function() {
-          console.error('LSO_REQUEST_CLOSE -> welcome');
-          // 欢迎页语言=URL lang 参数（缺省 en）——与 goback/homeUrl 同参，保持中文
-          try { window.location.href = 'http://localhost/onlyoffice/index.html?lang=zh-CN'; } catch (e) { console.error('LSO_RC_ERR ' + String(e)); }
-        };
-        console.error('LSO_RC_HOOKED');
-      }
-    } catch (gx) { console.error('LSO_RC_HOOK_ERR ' + String(gx)); }
-  })();
-
-  // ---- 3.8.3 Gateway.saveDocument 落盘（保存链 M4）：官方 asc_onSaveDocument →
-  //      Common.Gateway.saveDocument(data) （web 服务器链=上传）—— 无服务器下覆写为
-  //      base64 → 走与 asc_Save 覆写同一条链（execCommand('save:bin') → ArkTS x2t 落盘），
-  //      **不再调回原 saveDocument**（官方实现 postMessage 到父帧，顶层页无接收者；
-  //      调回=双通道，与注释"避免双通道"矛盾——2026-09-05 审查修复）。
-  //      上限 200MB 为不落盘的防护线（单机文档远小于此；超限仅日志，后续可加 UI 反馈）。
-  try {
-    if (window.Common && window.Common.Gateway && window.Common.Gateway.saveDocument && !window.__lsoSaveDoc) {
-      window.__lsoSaveDoc = true;
-      window.Common.Gateway.saveDocument = function(data) {
-        console.error('LSO_SAVEDOC len=' + (data && (data.byteLength || data.length)));
-        try {
-          var _u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
-          if (_u8.length > 200 * 1024 * 1024) { console.error('LSO_SAVEDOC_TOOBIG ' + _u8.length); return; }
-          var _r = window.AscNative && window.AscNative._call('execCommand', ['save:bin', window.__lsoB64(_u8), 1]); // 用户保存语义（recents 补录，2026-09-05）
-          console.error('LSO_SAVEDOC_CALL ret=' + String(_r).slice(0, 60));
-          try {
-            if (typeof window.editor && window.editor._onSaveCallback === 'function') { window.editor._onSaveCallback(null); }
-          } catch (scx2) {}
-        } catch (se) { console.error('LSO_SAVEDOC_ERR ' + String(se)); }
-      };
-    }
-  } catch (sdx) { console.error('LSO_SAVEDOC_HOOK_ERR ' + String(sdx)); }
+  // （3.8.2b Gateway.requestClose 覆写 + 3.8.3 Gateway.saveDocument 覆写已于
+  //   2026-09-21 fork 化阶段 2-g 源码化进 web-apps fork apps/common/Gateway.js
+  //   ——两方法体 [OHOS: close]/[OHOS: save] 分支（requestClose 回欢迎页 /
+  //   saveDocument 直连 save:bin）。实例覆写与轮询退役；判据日志字样保留）
 
   // （3.8.2 引擎级 -25(EditingError) 拦截已于 2026-09-21 fork 化阶段 2-f 源码化：
   //   三编辑器 api.js sendEvent 头部 [OHOS: save] 分支（分发前吞掉——sendEvent 层
@@ -167,56 +122,11 @@
   //   Desktop.js _extend_menu_file 头部 [OHOS: menu] 跳过注入——空入口不显示
   //   +官方无防重叠条问题一并消除；本侧 MutationObserver 删节点退役）
 
-  // ---- 3.8.5 官方 Header X 重定向（未保存关闭守卫，2026-09-09）----
-  //     官方链：Header.js:383 btnClose → NotificationCenter 'close' → Main.js:250
-  //     closeEditor → onRequestClose（Main.js:693）——asc_isDocumentModified 时弹
-  //     Common.UI.warning「放弃修改并离开/取消」**无「保存」项**（官方 web 语义假设
-  //     服务器已自动保存；离线单机 autosave=false 此假设不成立，点「确定」即丢数据）。
-  //     【UI 可达性实测（2026-09-09 真机）】本壳 targetApp='desktop'（isDesktopApp
-  //     =true）→ Header.js:969 canCloseEditor = customization.close.visible &&
-  //     canRequestClose && !isDesktopApp 为假 → **btnClose 不渲染**——UI 上无 X；
-  //     「文件→退出」同受 Common.Controllers.Desktop.isActive() 门控（isActive=false
-  //     → FileMenu.js:505 不注入 fm-btn-exit）——两个官方关闭入口当前 UI 均不可达，
-  //     本段与 ArkTS close-request 分支是**未来恢复 web 关闭档时的守卫一致性**（零
-  //     风险，UI 不触发即休眠）。当前真实可达关闭入口=tab ×（DocTabHost）+返回键
-  //     （onBackPress），均已接守卫。
-  //     【修正】覆写 app 主控制器实例的 closeEditor 方法：不再进官方弹框，转而向
-  //     ArkTS 上报 editor:event close-request → EditorPage.requestCloseDoc 统一
-  //     三按钮守卫（保存/不保存/取消——与 tab ×、文件菜单退出同框）。
-  //     三编辑器主控制器全局：**运行时命名空间 = window.SSE/DE/PE.controllers（小写）**
-  //     —— 词性关键坑（2026-09-09 实证）：源码写 `<NS>.Controllers.Main`（大写 C），
-  //     但打包后挂载在 `<NS>.controllers`（小写——LSO_KICK_SERVERID 链 10_engine
-  //     `window.SSE.controllers.Main.api` 真机打点证实为唯一可用句柄；用大写 C 的
-  //     hook 空转 60s 静默）。closeEditor 是实例方法（app 初始化后挂载），首次出现
-  //     即覆写——重试轮询模式同 _hookSave（offline 页空转可退避，不下死循环）。
-  (function _hookCloseEditor() {
-    try {
-      var _qc = (window.location || {}).pathname || '';
-      if (_qc.indexOf('/main/index.html') < 0) { return; }
-      var _ns = window.SSE || window.DE || window.PE;
-      var _m = _ns && _ns.controllers && _ns.controllers.Main;
-      if (!_m || typeof _m.closeEditor !== 'function') {
-        if ((window.__lsoCEWaitN = (window.__lsoCEWaitN || 0) + 1) < 300) { setTimeout(_hookCloseEditor, 200); }
-        return;
-      }
-      if (!_m.__lsoCEHooked) {
-        _m.__lsoCEHooked = true;
-        var _reqClose = function() {
-          try {
-            console.error('LSO_CLOSE_EDITOR -> close-request');
-            // AscNative 空值防御（页面注册于 onInstanceReady——注册前被点则丢弃+日志）
-            if (window.AscNative && typeof window.AscNative._call === 'function') {
-              window.AscNative._call('execCommand', ['editor:event', JSON.stringify({action: 'close-request'})]);
-            } else {
-              console.error('LSO_CLOSEREQ_NATIVE_MISSING');
-            }
-          } catch (e) { console.error('LSO_CLOSEREQ_ERR ' + String(e)); }
-        };
-        _m.closeEditor = _reqClose;
-        console.error('LSO_CE_HOOKED');
-      }
-    } catch (e) { console.error('LSO_CE_HOOK_ERR ' + String(e)); }
-  })();
+  // （3.8.5 closeEditor 实例覆写已于 2026-09-21 fork 化阶段 2-g 源码化：五编辑器
+  //   Main.js closeEditor 体 [OHOS: close] 分支（editor:event close-request →
+  //   宿主三按钮守卫）。词性坑注记随迁：运行时命名空间=window.<NS>.controllers
+  //   （小写 c）。UI 可达性现状见 3.8.5 原注释（两官方关闭入口 UI 均不可达，
+  //   本分支为未来恢复 web 关闭档时的守卫一致性）——轮询实例覆写退役）
 
   // ---- 3.8.6（诊断段，已删——2026-09-09 调查结论固化在 3.8.5 注释与 EditorPage
   //      requestCloseDoc 注释：接口句柄=window.<NS>.controllers.Main.api（小写
