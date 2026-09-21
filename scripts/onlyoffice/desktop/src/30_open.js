@@ -776,148 +776,12 @@
               }
             } catch (wp) {}
           })();
-          // 字族下拉数据源补发（2026-09-05 用户报修「字体列表无法下拉」）：
-          // UI 层 Common.Controllers.Fonts.setApi 注册 asc_onInitEditorFonts →
-          // onApiLoadFonts → cachedStore.add → trigger('fonts:load') →
-          // ComboBoxFonts 实例 fillFonts 填自身 store（Fonts.js:156/343）。事件
-          // 官方由 g_font_loader.LoadDocumentFonts → Api.sync_InitEditorFonts 发出
-          // （sdk-all.js:244037），真机此链未跑（同 LoadFontAsync 因：web 语义
-          // apiBase 不在路径）→ store 恒空 → ComboBoxFonts.onBeforeShowMenu
-          // （ComboBoxFonts.js:661）preventDefault → 下拉打不开。
-          // 补发判据（双条件轮询，勿改回一次性——实测一次性命中两个时机盲区：
-          //   ① _sendInit 时刻 28MB checkAllFonts（g_font_infos）未必已 eval；
-          //   ② 各 ComboBoxFonts 实例 init 时才订阅 fonts:load（Toolbar 晚建））：
-          //   A. AscFonts.g_font_infos 已建（28MB checkAllFonts 完成）
-          //   B. Common.NotificationCenter._events['fonts:load'] 已挂（订阅者就位）
-          //     ——与 Fonts.js:127 同判据。
-          // —— 字体注入源头归一（2026-09-06 数据取证定案）：官方链（#1/#3 各 18 条）
-          //    已跑通（v13 时代"官方链断、需补发"的结论被推翻）——lsoSendFonts 补发
-          //    整段删除（截图实证：补发的 CFont（type=''）与官方 18 条混排 → 空白行 +
-          //    simsun.ttf 等文件行 + 英中成对重复）；此处 wrap sync_InitEditorFonts
-          //    （apiBase.js:806 唯一入口）统一归一：
-          //    ① 同签名跳过（官方链重发同内容 → 第二次丢弃，杜绝双份）；
-          //    ② 族归一：按 Thumbnail（运行时字段——ROW 打点实证 Arial=0/Liberation=1/
-          //       SimHei=10 族号）为键，每族一条；
-          //    ③ 中文名优先（两轮处理：先选名再建列表——CFont.name 可能只读，不动原行，
-          //       按名重造 CFont 不可（无构造器类型），改「选择保留哪条」策略：
-          //       保留【中文名行】或【无中文名时的原行】）；
-          //    ④ 剔 .ttf/.otf 文件名行（构建表文件别名，非族名）。
-          //    渲染注册表 g_font_infos 不动：文档引用行名照常（宋体修复 name 契约）。
-          (function _wrapInj() {
-            try {
-              if (window.__lsoInjWrapped || !_m || !_m.api) { return; }
-              window.__lsoInjWrapped = true;
-              var _oriI = _m.api.sync_InitEditorFonts;
-              if (typeof _oriI !== 'function') {
-                console.error('LSO_FONT_WRAP_NOMETHOD');
-                return;
-              }
-              // 内部字体行判定（清单来自构建期注入，见 build_editors_ohos.py
-              // UI_HIDDEN_FONT_ROWS）：窗口属性在推送时才读——AllFonts.js 的注入会不会
-              // 早于本 wrap 安装不确定，缓存快照会漏。空清单 = 不过滤（安全缺省）。
-              var _uiHidden = function(n) {
-                var _hid = window.__lso_font_hidden || [];
-                for (var hi = 0; hi < _hid.length; hi++) {
-                  if (_hid[hi] === n) { return true; }
-                }
-                return false;
-              };
-              // 用户自导入字体名（20_bridge 从 URL 参数登记，见 __lso_user_font_names）
-              var _lsoUserFont = function(n) {
-                var _uf = window.__lso_user_font_names || [];
-                for (var ui = 0; ui < _uf.length; ui++) {
-                  if (_uf[ui] === n) { return true; }
-                }
-                return false;
-              };
-              _m.api.sync_InitEditorFonts = function(fonts) {
-                var _prev = '';
-                try {
-                  _prev = window.__lsoInjSig || '';
-                  var _names = [], _sig = [], _nmv = [];
-                  for (var ni = 0; ni < (fonts || []).length; ni++) {
-                    var _ff = fonts[ni];
-                    _nmv.push(String(_ff && _ff.asc_getFontName ? _ff.asc_getFontName() : ''));
-                  }
-                  _sig = _nmv.join('|');
-                  if (_prev && _prev === _sig) {
-                    console.error('LSO_FONT_SKIP_DUP n=' + _nmv.length);
-                    return undefined; // 同内容重发 → 丢弃（防双份）
-                  }
-                  window.__lsoInjSig = _sig;
-                  // 族归一（两轮）：候选名 → 选中文优先 → 输出
-                  var _byThumb = {};
-                  var _keep = [];
-                  for (var k = 0; k < (fonts || []).length; k++) {
-                    var _ft = fonts[k];
-                    var _nm = String(_ft && _ft.asc_getFontName ? _ft.asc_getFontName() : '');
-                    var _th = String(_ft && _ft.asc_getFontThumbnail ? _ft.asc_getFontThumbnail() : 'u');
-                    if (!_nm || /\.(ttf|otf|eot|woff2?)$/i.test(_nm)) { continue; }
-                    // 内部字体行（构建期清单）：留引擎候选列表供映射，但不进用户下拉
-                    if (_uiHidden(_nm)) { console.error('LSO_FONT_HIDDEN name=' + _nm); continue; }
-                    // 用户自导入字体：**不参与族归一**——它没有随包缩略图，会与内置
-                    // 字体并进同一 thumbnail 组被丢掉（1.6 真机实测的「注册成功却
-                    // 不在下拉里」根因），直接保留。
-                    if (_lsoUserFont(_nm)) {
-                      var _dupU = false;
-                      for (var qu = 0; qu < _keep.length; qu++) {
-                        if (_keep[qu].name === _nm) { _dupU = true; break; }
-                      }
-                      if (!_dupU) { _keep.push({thumb: _th, name: _nm}); }
-                      console.error('LSO_FONT_USER_KEEP name=' + _nm);
-                      continue;
-                    }
-                    if (!_byThumb[_th]) { _byThumb[_th] = []; }
-                    _byThumb[_th].push(_nm);
-                  }
-                  for (var _tk in _byThumb) {
-                    var _names2 = _byThumb[_tk];
-                    var _pick = '';
-                    for (var j = 0; j < _names2.length; j++) {
-                      if (/[一-龥]/.test(_names2[j])) { _pick = _names2[j]; break; } // 中文名优先
-                    }
-                    if (!_pick) { _pick = _names2[0]; }
-                    _keep.push({thumb: _tk, name: _pick});
-                  }
-                  // 从原列表挑选“被保留名字”的行（原 CFont 对象 + 不重复）
-                  var _out = [];
-                  for (var mm = 0; mm < (fonts || []).length; mm++) {
-                    var _fo2 = fonts[mm];
-                    var _nm3 = String(_fo2 && _fo2.asc_getFontName ? _fo2.asc_getFontName() : '');
-                    var _th3 = String(_fo2 && _fo2.asc_getFontThumbnail ? _fo2.asc_getFontThumbnail() : 'u');
-                    if (/\.(ttf|otf|eot|woff2?)$/i.test(_nm3)) { continue; }
-                    var _isKeep = false;
-                    for (var kk = 0; kk < _keep.length; kk++) {
-                      if (_keep[kk].thumb === _th3 && _keep[kk].name === _nm3) { _isKeep = true; break; }
-                    }
-                    if (_isKeep) {
-                      // 用户字体：重建 CFont 并指向空白缩略图槽位——它原本的
-                      // thumbnail = 行号 i，追加在末尾必然越界，UI getImage 抛异常
-                      // 导致下拉列表渲染到该项即中断（真机实测的"字体消失"）。
-                      if (_lsoUserFont(_nm3)) {
-                        var _blankTh = (typeof window.__lso_font_blank_thumb === 'number')
-                          ? window.__lso_font_blank_thumb : 0;
-                        _out.push(new window.AscFonts.CFont(_nm3, "", _blankTh));
-                      } else {
-                        _out.push(_fo2);
-                      }
-                    }
-                  }
-                  var _dbgOut = [];
-                  for (var dz = 0; dz < _out.length; dz++) {
-                    _dbgOut.push(String(_out[dz] && _out[dz].asc_getFontName
-                      ? _out[dz].asc_getFontName() : '?'));
-                  }
-                  console.error('LSO_FONT_INJ n=' + ((fonts || []).length) + ' out=' + _out.length
-                    + ' names=' + _dbgOut.join(','));
-                  return _oriI.call(this, _out);
-                } catch (iwx) {
-                  console.error('LSO_FONT_INJ_ERR ' + String(iwx));
-                  return _oriI.apply(this, arguments); // 异常降级原链
-                }
-              };
-            } catch (iwx) { console.error('LSO_FONT_WRAP_ERR ' + String(iwx)); }
-          })();
+          // （字族下拉归一 wrap 已于 2026-09-21 fork 化阶段 2-h2 源码化：
+          //   sdkjs apiBase.js sync_InitEditorFonts 头部 [OHOS: fonts] 分支 +
+          //   _ohosNormalizeFontList（同签名去重/族归一/中文名优先/剔文件名行/
+          //   __lso_font_hidden 过滤/用户字体保留+空白缩略图槽）。契约键
+          //   __lso_font_hidden/__lso_user_font_names/__lso_font_blank_thumb/
+          //   __lsoInjSig 原样保留（注入方不变））
         };
         // 应用命名空间随编辑器而异：DE(document)/SSE(spreadsheet)/PE(presentation)，
         // 不能用 window.DE（cell 页 DE=undefined → Main 永远找不到 → 不开文档）
@@ -942,44 +806,8 @@
       }
     } catch (nix) {}
 
-    // ---- 3.9 文件菜单「新建」：desktop:// 导航 → 桥命令（2026-09-11）----
-    // 现象：文件菜单 →「新建」→ **整页白屏**（真机 1.6:33363 实证）。日志链：
-    //   outer pass-through: desktop://create.new → Web error → PAGE_END desktop://create.new
-    // 根因：官方桌面语义里「新建」= window.open(config.createUrl, '_blank')
-    //   （word LeftMenu.js:592 onCreateNew；cell/slide/pdf 同款写法），而
-    //   createUrl='desktop://create.new'（本文件 3.x config 段所设）是**交给 CEF 原生层
-    //   的自定义协议**——我们的 WebView 当普通 URL 去导航 → 加载失败 → 白屏。
-    //   官方 web 档走不到这里：create:new 先被 native 分支拦下（Desktop.js:681-687），
-    //   本壳 native 已删（web 语义）→ Desktop.process('create:new') 返回 false → 落进
-    //   window.open 分支。
-    // 修法：包一层 window.open，**仅对 desktop:// 协议短路**——转成壳层命令
-    //   execCommand('create:new', '<type>')（ArkTS onTabCommand 既有通路，与欢迎页新建
-    //   卡片同源 → openNewFile → openNewTabEntry 开新 tab），返回 null 阻止导航
-    //   （官方调用点已判空：`if (newDocumentPage) newDocumentPage.focus()`，故 null 安全）。
-    //   其余 URL 一律透传（帮助/模板/外链不受影响）。类型判据与官方同：SSE=cell /
-    //   PE=slide / 其余=word。本段不依赖任何官方对象（覆写的是全局 window.open），
-    //   故同步执行、不轮询。
-    (function _hookCreateNew() {
-      try {
-        var _pp = (window.location || {}).pathname || '';
-        if (_pp.indexOf('/main/index.html') < 0) { return; }
-        if (window.__lsoOpenPatched) { return; }
-        window.__lsoOpenPatched = true;
-        var _oopen = window.open;
-        window.open = function (url) {
-          if (String(url || '').indexOf('desktop://') === 0) {
-            try {
-              var _t = window.SSE ? 'cell' : window.PE ? 'slide' : 'word';
-              var _r = (window.AscNative && window.AscNative._call)
-                ? String(window.AscNative._call('execCommand', ['create:new', _t]) || '')
-                : 'NO_BRIDGE';
-              console.error('LSO_CREATE_NEW url=' + url + ' type=' + _t + ' ret=' + _r);
-            } catch (e) { console.error('LSO_CREATE_NEW_ERR ' + String(e)); }
-            return null;
-          }
-          return _oopen.apply(window, arguments);
-        };
-        console.error('LSO_CREATENEW_HOOKED');
-      } catch (e) { console.error('LSO_CREATENEW_HOOK_ERR ' + String(e)); }
-    })();
+    // （3.9 文件菜单「新建」desktop:// 拦截已于 2026-09-21 fork 化阶段 2-h1
+    //   源码化：五编辑器 LeftMenu.js onCreateNew [OHOS: create] 分支——只拦
+    //   desktop:// 协议转壳层 create:new 命令，其余 URL 原样 window.open。
+    //   window.open 全局覆写退役）
 
