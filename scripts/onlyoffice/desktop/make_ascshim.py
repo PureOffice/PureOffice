@@ -7,7 +7,7 @@
                首次渲染到达 → LoadFont face=null → HB_ShapeString 失败方块；
                预取 + loader 喂字节，字体先于渲染就绪）
   00_boot.js   外层头/公共工具（__lsoB64；原 cell 剖面诊断已移除）
-  10_engine.js Gateway 踢闸（serverId/images 引擎闸门适配 + 字节打点）
+  10_engine.js 已退役（Gateway 踢闸进五编辑器 Main.js loadBinary [OHOS: engine]）
   20_bridge.js AscDesktopEditor 装配（方法表/官方 shim/字体注册表/就绪探针）
   30_open.js   DI 打开链（loadConfig 补发/CDocInfo/权限/m7 验收工具）
   40_save.js   保存/关闭链适配（SaveDocument 落盘/requestClose/错误拦截）
@@ -116,6 +116,11 @@ SRC_DIR = os.path.join(HERE, 'src')
 #   五编辑器 Main.js onPrintQuick 头部 [OHOS: print] 分支（canQuickPrint=false
 #   且桥在时直通 asc_Print）。原段三组轮询（等 api 原型/等 printSettings/等
 #   Main controller）全部消除）
+# （10_engine 同日退役（阶段 2-c）：0.95 Gateway 踢闸 wrap → 五编辑器 Main.js
+#   loadBinary [OHOS: engine] 源码分支（字节注入后直接补发 asyncServerIdEndLoaded/
+#   asyncImagesDocumentEndLoaded，this.api 即达——Gateway.on wrap 的 api 回退链与
+#   240×250ms 轮询全消）；0.94 字体 XHR 取证（纯诊断）挪 09_fonts 段首随字体域
+#   迁移时决策去留。判据 LSO_KICK_SERVERID/LSO_GW_BIN 字样保留在源码分支）
 # （47_img/48_mediaunpack 同日退役：UploadImageFiles 宿主供给进 editorscommon.js
 #   函数头 [OHOS: image] 分支（替代轮询覆写）；媒体预解包进同文件尾
 #   [OHOS: media-unpack] 块（引擎 bundle 执行早于文档注入与图片请求，时机等价
@@ -130,7 +135,7 @@ SRC_DIR = os.path.join(HERE, 'src')
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
 # 29_inputfocus 紧跟 20_bridge（同为宿主↔页面基础能力，与前后段无依赖）
 # 58_pastebtn 追加于 57_about 后（工具栏「粘贴」宿主桥；自包含段、外层 IIFE 之外）
-PARTS = ['09_fonts.js', '09_fontpick.js', '00_boot.js', '10_engine.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js']
+PARTS = ['09_fonts.js', '09_fontpick.js', '00_boot.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 

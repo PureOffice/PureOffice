@@ -72,10 +72,10 @@
   (function _shimSelfCheck() {
     try {
       var EXPECT = {
-        // 已 fork 化退役段的登记项（theme/modal/print/fontimg/about 等）随段删除——
+        // 已 fork 化退役段的登记项（theme/engine/modal/print/fontimg/about 等）随段删除——
         // 功能转进 fork 源码后 ascshim 侧不再有 hook 就位点，留着只会永久 MISSING 误报
         bridge: 'both',                                     // 两页共用
-        fonts: 'editor', engine: 'editor', open: 'editor',  // 编辑器页
+        fonts: 'editor', open: 'editor',                    // 编辑器页
         save: 'editor',
         userfonts: 'home'                                   // 欢迎页（侧栏「字体管理」注入）
       };

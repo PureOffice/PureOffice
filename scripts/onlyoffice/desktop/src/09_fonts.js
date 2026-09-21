@@ -1,3 +1,30 @@
+// ---- 0.94 字体文件加载取证（仅记录，原 10_engine 段首块随段拆解挪入：字体域归
+//      此）——hook XHR onload，记录 /fonts/ 请求的状态码与字节数（LSO_FONT_XHR）。
+//      2026-09-05 中文渲染排查：判断 CJK 字体是否真正进入引擎（成功应为
+//      status=200 len≈字体大小）。随 09_fonts 迁移时统一决策去留（纯诊断，
+//      候选外置 smoke）。
+(function() {
+  try {
+    if (!window.__lsoXhrHook) {
+      window.__lsoXhrHook = true;
+      var _xo = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function(m, u) {
+        this.__lsoU = u;
+        this.addEventListener('load', function() {
+          try {
+            if (String(u).indexOf('/fonts/') >= 0) {
+              console.error('LSO_FONT_XHR ' + String(u).split('/').pop()
+                + ' status=' + this.status
+                + ' len=' + (this.response ? (this.response.byteLength || this.response.length || 0) : 0));
+            }
+          } catch (e) {}
+        }, false);
+        return _xo.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+})();
+
 // ---- 0.5 CJK 字体流保供（2026-09-05 中文方块根因修复，方案 A：装填式）----
 // 根因：文档 run eastAsia=SimSun → LoadFont('SimSun') → 引擎「字体字节加载」仅发生于
 //   渲染期按需链（LoadDocumentFonts2 → CFontFileLoader.LoadFontAsync）——首帧渲染远早于
