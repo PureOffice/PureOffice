@@ -93,9 +93,15 @@ SRC_DIR = os.path.join(HERE, 'src')
 #   的**独立段**里尽早装钩子——见该文件注释）
 # 注意：00_boot.js 的 `(function() {` 是**故意不闭合**的「外层头」（其后各段都在它内部），
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
+#   （外层 IIFE 的 `})();` 闭合由**末段**承担——现为 30_open.js 尾部）
 # 29_inputfocus 紧跟 20_bridge（同为宿主↔页面基础能力，与前后段无依赖）
 # 58_pastebtn 追加于 57_about 后（工具栏「粘贴」宿主桥；自包含段、外层 IIFE 之外）
-PARTS = ['09_fonts.js', '09_fontpick.js', '00_boot.js', '30_open.js', '40_save.js']
+# （40_save 段已整段退役（2026-09-21 阶段 2-k）：3.9 头部装饰三处 DOM 隐藏 →
+#   web-apps fork common/Header.js [OHOS: header] 渲染点直改（五编辑器共用一份：
+#   getPanel left 槽隐藏=logo、elUserName 两分支保持 hidden、btnClose 两分支
+#   不创建）；3.7/3.7.1 前批已入 ohos/bridge.js，3.8 系此前已入 fork 源码。
+#   外层 IIFE 闭合由 30_open 尾部承接）
+PARTS = ['09_fonts.js', '09_fontpick.js', '00_boot.js', '30_open.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 

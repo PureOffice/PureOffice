@@ -396,3 +396,11 @@
     //   desktop:// 协议转壳层 create:new 命令，其余 URL 原样 window.open。
     //   window.open 全局覆写退役）
 
+    // （40_save 段已整段退役（2026-09-21 阶段 2-k）：最后一块实质内容 3.9 头部
+    //   装饰（btnClose/用户头像圈/左上 logo 三处 DOM 隐藏 MutationObserver）→
+    //   web-apps fork common/Header.js [OHOS: header] 渲染点直改（getPanel left
+    //   槽隐藏/elUserName 保持 hidden/btnClose 不创建——五编辑器共用一份）。
+    //   其余块（3.7/3.7.1/3.8 系）此前已分批迁 ohos/bridge.js 与 fork 源码）
+    //（外层 IIFE 闭合在此：40_save 整段退役后由本段收尾——原 50_init→40_save 链）
+})();
+
