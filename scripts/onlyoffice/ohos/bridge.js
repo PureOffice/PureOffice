@@ -332,4 +332,55 @@
     }
     setTimeout(wait, 50);
   })();
+
+  // ---- 壳层适配自检（原 ascshim 00_boot 段迁入，2026-09-21 阶段 2-m——自检检查的
+  //      注入点全在宿主装配域，bridge.js 两页皆注入，自检随迁即两页各查各自期望）----
+  // 目的：官方升级 / 资源改动后，**一行日志**判断哪些注入点没挂上——运行时注入最大的
+  //   隐患是「静默失效」（官方改了对象名/时序，hook 悄悄不生效，没人发现），本段把
+  //   它变成可见。
+  // 机制：各注入点 hook 就位处 `(window.__lsoShim = window.__lsoShim || []).push('<tag>')`。
+  //   **用数组 push 而非函数调用**：fonts.js 等文件可能排在本文件之前执行，那时本段
+  //   的函数还没定义——数组由首个调用者自建，任何执行顺序都成立。
+  // 输出：页面加载后轮询期望项，齐了立即打 `LSO_SHIM_STATUS ok=N/N [...]`；超时 20s 打
+  //   `MISSING [...]` 并列出已就位项（缺失=该段没挂上，或该段还在等对象）。
+  // 期望清单 EXPECT 的页值：'editor'=仅编辑器页 / 'home'=仅欢迎页 / 'both'=两页。
+  //   清单语义是「我认为必须挂上的注入点」——**新增注入点请顺手加一行**；漏登记只是
+  //   少检查一项，不会误报（自检只做减法，不猜）。
+  // 真机读法：hdc ... grep LSO_SHIM_STATUS web_console.txt → `ok=N/N` 即全绿。
+  //   两页各自独立自检，日志里两条各管各自页面。
+  (function _shimSelfCheck() {
+    try {
+      var EXPECT = {
+        bridge: 'both',                                     // 两页共用（本文件 INSTALL）
+        fonts: 'editor',                                    // ohos/fonts.js 装填
+        open: 'editor'                                      // ascshim 30_open m7 段（阶段 4 外置后同步调整）
+      };
+      var _isEditor = ((window.location || {}).pathname || '').indexOf('/main/index.html') >= 0;
+      var _want = [];
+      for (var _k in EXPECT) {
+        if (EXPECT[_k] === 'both' || (EXPECT[_k] === 'editor') === _isEditor) { _want.push(_k); }
+      }
+      var _t0 = Date.now();
+      function _tick() {
+        var _got = window.__lsoShim || [];
+        var _miss = [];
+        for (var _i = 0; _i < _want.length; ++_i) {
+          if (_got.indexOf(_want[_i]) < 0) { _miss.push(_want[_i]); }
+        }
+        var _el = Date.now() - _t0;
+        if (!_miss.length) {
+          console.error('LSO_SHIM_STATUS ok=' + _want.length + '/' + _want.length
+            + ' [' + _want.join(',') + '] in ' + _el + 'ms');
+          return;
+        }
+        if (_el > 20000) {
+          console.error('LSO_SHIM_STATUS ok=' + (_want.length - _miss.length) + '/' + _want.length
+            + ' MISSING [' + _miss.join(',') + '] got [' + _got.join(',') + ']');
+          return;
+        }
+        setTimeout(_tick, 500);
+      }
+      setTimeout(_tick, 500);
+    } catch (e) { console.error('LSO_SHIM_STATUS_ERR ' + String(e)); }
+  })();
 })();
