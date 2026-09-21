@@ -45,6 +45,9 @@ entry/src/main/resources/rawfile/onlyoffice/fontrows.json
 # 重新生成再提交（曾发生源码已改、产物忘记再生成的不一致）。
 entry/src/main/resources/rawfile/onlyoffice/ascshim.js
 entry/src/main/resources/rawfile/onlyoffice/index.html
+# ohos 宿主装配域产物（源 scripts/onlyoffice/ohos/，其中 bridge.js 由装配链展开
+# 模板生成——同上「源入库、产物勿跟踪」约定）
+entry/src/main/resources/rawfile/onlyoffice/ohos/
 # 样本（sample.*）是测试资产，保留跟踪；document.json/editor.html/document.docx 已退役删除
 # 回归测试产物（tests/regression.sh 每次跑出来的日志/截图/汇总，按 runid 分目录——诊断用，勿跟踪；
 # case 清单 cases.tsv 是源，保留跟踪）
