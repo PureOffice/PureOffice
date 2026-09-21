@@ -85,9 +85,9 @@
           // 配合轮询判据的缓冲，事件语义下不需要）。
           try {
             var _ap2 = _getApi();
-            // 与 40_save 共用 __lsoNativeSaveEnd（临时挂 Native.Save_End 换挂逻辑的单一点；
-            // 2026-09-05 审查：原内联换成 window.native 与其重复）
-            var _nb2 = window.__lsoNativeSaveEnd(function() {
+            // 与保存链共用 __ohosWithNativeSaveEnd（临时挂 Native.Save_End 换挂逻辑
+            // 的单一点；2026-09-21 fork 化后定义在 sdkjs apiBase.js [OHOS: save] 块）
+            var _nb2 = window.__ohosWithNativeSaveEnd(function() {
               return _ap2.asc_nativeGetFileData();
             });
             if (_nb2 && _nb2.byteLength) {

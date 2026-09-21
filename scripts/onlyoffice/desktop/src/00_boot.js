@@ -72,12 +72,11 @@
   (function _shimSelfCheck() {
     try {
       var EXPECT = {
-        // 已 fork 化退役段的登记项（theme/engine/modal/print/fontimg/about/
-        // userfonts 等）随段删除——功能转进 fork 源码后 ascshim 侧不再有 hook
-        // 就位点，留着只会永久 MISSING 误报
+        // 已 fork 化退役段的登记项（theme/engine/save/modal/print/fontimg/
+        // about/userfonts 等）随段删除——功能转进 fork 源码后 ascshim 侧不再有
+        // hook 就位点，留着只会永久 MISSING 误报
         bridge: 'both',                                     // 两页共用
-        fonts: 'editor', open: 'editor',                    // 编辑器页
-        save: 'editor'
+        fonts: 'editor', open: 'editor'                     // 编辑器页
       };
       var _isEditor = ((window.location || {}).pathname || '').indexOf('/main/index.html') >= 0;
       var _want = [];
