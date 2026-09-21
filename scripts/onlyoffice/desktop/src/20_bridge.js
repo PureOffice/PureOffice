@@ -1,62 +1,6 @@
-  // ---- 0. 字体注册表注入（早于 sdk-all.js 加载；Externals.js:636 checkAllFonts 唯一入口） ----
-  //      __fonts_files/__fonts_infos 契约（POC 实证）：Emumerator checkAllFonts 读
-  //      window["__fonts_files"]（undefined → 无字体 → 无法渲染）；官方 AllFonts.js 只
-  //      提供 g_fonts_selection_bin（apiBase.js:1535 消费），不提供 __fonts_files。
-  //      web 路径 LoadFontAsync → LoadFontArrayBuffer(basePath) XHR fontFilesPath
-  //      （GlobalLoaders.js:53 = ../../../../fonts/ = http://localhost/onlyoffice/fonts/）。
-  //      字体顺序须 R,I,B,BI（FONT_INFOS 中 indexI=1/indexB=2 即数组下标）。
-  window["__fonts_files"] = @@FONT_FILES_JSON@@;
-  window["__fonts_infos"] = @@FONT_INFOS_JSON@@;
-  // 第三张表：字符范围回退注册表（libfont character.js init 消费；[start, end,
-  // FONT_INFOS 行号] 展平三元组）。无它 → CFontByCharacter.Ranges 空 → 中文等
-  // 无字形字符的 fallback 永远失败 → 方块（2026-09-05 最后根因，见
-  // build_editors_ohos.py FONT_RANGES 注释）。
-  window["__fonts_ranges"] = @@FONT_RANGES_JSON@@;
-  // ---- 0.2 用户自导入字体（2026-09-18）：URL 参数 lsofonts = base64(URI 编码的
-  //      JSON 数组)，元素 [file, family, weight, italic]（ArkTS 侧
-  //      common/userFonts.encodeUrlParam 编码）。此刻三表刚注入、sdk-all.js 尚未
-  //      加载（checkAllFonts 未跑）——这是唯一能改注册表的时机（跑完即删表）。
-  //      注册行四槽同索引（单文件通吃；先例 OpenSymbol 行）；行名 = 字体内部
-  //      family 名（引擎契约：行名必须等于 face 内部名，故导入侧从 name 表读，
-  //      见 common/sfnt.ets）。与内置行重名者跳过（导入侧已拦，此处兜底）。
-  (function _userFonts() {
-    try {
-      var _m = /[?&]lsofonts=([^&]+)/.exec(window.location.search || '');
-      if (!_m) { return; }
-      var _arr = JSON.parse(decodeURIComponent(atob(decodeURIComponent(_m[1]))));
-      var _files = window["__fonts_files"];
-      var _infos = window["__fonts_infos"];
-      var _n = 0;
-      var _skip = 0;
-      // 名字清单供字体下拉 wrap（30_open sync_InitEditorFonts）使用——用户字体
-      // 不参与族归一：它没有随包缩略图，会与内置字体并入同一 thumbnail 组被丢弃
-      // （1.6 真机实测：注册/装填全成功，下拉里却没有）。
-      window.__lso_user_font_names = window.__lso_user_font_names || [];
-      // 空白缩略图槽位索引 = 追加前的内置行数（精灵图尾部多留的一格，见
-      // build_editors_ohos.make_fonts_sprites）——用户字体统一指向它，否则
-      // thumbnail=行号越界会让下拉列表渲染中断（真机实测）。
-      window.__lso_font_blank_thumb = _infos.length;
-      for (var _i = 0; _i < _arr.length; ++_i) {
-        var _it = _arr[_i];
-        var _file = String(_it[0] || '');
-        var _fam = String(_it[1] || '');
-        if (!_file || !_fam) { continue; }
-        var _dup = false;
-        for (var _j = 0; _j < _infos.length; ++_j) {
-          if (_infos[_j][0] === _fam) { _dup = true; break; }
-        }
-        if (_dup) { _skip++; continue; }
-        _files.push(_file);
-        var _idx = _files.length - 1;
-        _infos.push([_fam, _idx, 0, _idx, 0, _idx, 0, _idx, 0]);
-        window.__lso_user_font_names.push(_fam);
-        _n++;
-      }
-      console.error('LSO_UFONT_REG n=' + _n + ' skip=' + _skip + ' total=' + _arr.length);
-    } catch (_e) {
-      console.error('LSO_UFONT_REG_ERR ' + String(_e));
-    }
-  })();
+  // （0/0.2 三表注入+用户字体注册已于 2026-09-21 fork 化阶段 2-j1 并入装配产物
+  //   AllFonts.js（gen_allfonts 尾部生成）——官方链保证 AllFonts.js 早于
+  //   sdk-all.js（checkAllFonts 前）加载，注入时机等价；ascshim 头部注入退役）
   // （0.3 已回滚，2026-09-05）字族下拉「精灵缺失」修复走**资源侧**：官方 web 语义
   // （Common.Controllers.Desktop.isActive=false → CThumbnailLoader XHR
   //    sdkjs/common/Images/fonts_thumbnail_ea@*.png.bin）由构建链生成精灵产物
