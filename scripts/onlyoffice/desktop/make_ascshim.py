@@ -32,41 +32,8 @@ sys.path.insert(0, os.path.join(HERE, '..'))
 # 字体表唯一来源在 build_editors_ohos.py（FONT_INFOS/FONT_FILES/FONT_RANGES）——
 # 三表注入已随 fork 化阶段 2-j1 并入装配产物 AllFonts.js（gen_allfonts 尾部），
 # ascshim 不再注入字体注册表（2026-09-21）。
-METHODS = [l.strip() for l in open(os.path.join(HERE, 'asc_methods.txt')) if l.strip()]
-SHIM = open(os.path.join(HERE, 'ascdesktop_shim_raw.js'), encoding='utf-8').read()
-
-# 桥协议：AscNative._call 返回 JSON 编码字符串（对象/数组→JSON；纯字符串→带引号 JSON）。
-# JS 侧统一 JSON.parse 解包——保证页面拿到真值（如 GetExternalClouds → [] 而不是 '[]'）。
-method_lines = []
-# 需回灌 loginpage 面板的方法（官方 CEF：Recents_Dump → ExecuteJavaScript
-# window.onupdaterecents(json)；loginpage 面板订阅 sdk.on('onupdaterecents') → sdk.fire 桥接）
-FIRE_MAP = {
-    'LocalFileRecents': 'onupdaterecents',
-    'LocalFileRecovers': 'onupdaterecovers',
-}
-# RAW 方法：官方 CEF 返回 **JSON 文本字符串**，消费端自己 JSON.parse()（sdkjs
-# JSON.parse(AscDesktopEditor.GetInstallPlugins()) 等）—— 桥层不得解包。
-#   桥返回形式同时保持 JSON 文本（ascBridge.ets 对应 case 已按官方空态结构返回）。
-RAW_METHODS = {'GetInstallPlugins', 'GetBackupPlugins'}
-for m in METHODS:
-    if m in RAW_METHODS:
-        body = (' var r = window.AscNative && window.AscNative._call(' +
-                '"%s", Array.prototype.slice.call(arguments));' % m +
-                ' return r; };')
-        method_lines.append('  window.__ascDesktopEditorMethods["%s"] = function() {' % m + body)
-        continue
-    body = (' var r = window.AscNative && window.AscNative._call(' +
-            '"%s", Array.prototype.slice.call(arguments));' % m +
-            ' var v; try { v = r ? JSON.parse(r) : r; } catch(e) { v = r; }')
-    if m in FIRE_MAP:
-        body += (' try { window["%s"] && window["%s"](v); } catch(e) {}'
-                 % (FIRE_MAP[m], FIRE_MAP[m]))
-    body += ' return v; };'
-    method_lines.append('  window.__ascDesktopEditorMethods["%s"] = function() {' % m + body)
-
-METHOD_JS = '\n'.join(method_lines)
-SHIM_INDENTED = '\n'.join('    ' + ln for ln in SHIM.split('\n'))
-
+# 方法表/官方 shim 生成逻辑已随 20_bridge/50_init 退役挪入装配链
+# （build_editors_ohos.gen_method_js/expand_ohos_bridge，2026-09-21 2-j2）
 SRC_DIR = os.path.join(HERE, 'src')
 # 00_theme 必须在首位：RendererProcessVariable.theme 必须早于官方 desktopinit 内联段
 # （index.html 同步一次性消费——误放 AscNative 等待之后= 注入执行≠生效，2026-09-08 教训）
@@ -128,7 +95,7 @@ SRC_DIR = os.path.join(HERE, 'src')
 #   本文件之前各段均如此 —— 新增段放在 00_boot.js 之后即自动位于该外层 IIFE 内
 # 29_inputfocus 紧跟 20_bridge（同为宿主↔页面基础能力，与前后段无依赖）
 # 58_pastebtn 追加于 57_about 后（工具栏「粘贴」宿主桥；自包含段、外层 IIFE 之外）
-PARTS = ['09_fonts.js', '09_fontpick.js', '00_boot.js', '20_bridge.js', '30_open.js', '40_save.js', '50_init.js']
+PARTS = ['09_fonts.js', '09_fontpick.js', '00_boot.js', '30_open.js', '40_save.js']
 OUT = os.path.join(HERE, '..', '..', '..', 'entry', 'src', 'main', 'resources', 'rawfile', 'onlyoffice', 'ascshim.js')
 
 
@@ -139,8 +106,9 @@ def build() -> str:
     # 残留占位即拼接错误，显式断言拦截
     for _ph in ('@@FONT_FILES_JSON@@', '@@FONT_INFOS_JSON@@', '@@FONT_RANGES_JSON@@'):
         assert _ph not in js, '字体表占位 %s 残留（应只存在于 AllFonts.js 生成链）' % _ph
-    return (js.replace('@@METHOD_JS@@', METHOD_JS)
-               .replace('@@SHIM@@', SHIM_INDENTED))
+    for _ph in ('@@METHOD_JS@@', '@@SHIM@@'):
+        assert _ph not in js, '桥占位 %s 残留（应只存在于 ohos/bridge.js 模板）' % _ph
+    return js
 
 
 JS = build()
@@ -171,7 +139,5 @@ if shutil.which('node'):
 else:
     print('!! node 未安装：跳过 ascshim 语法校验（仅告警，不阻断）', file=sys.stderr)
 
-print(f'total methods: {len(METHODS)}')
-print(f'shim bytes: {len(SHIM)}')
 print(f'parts: {", ".join(PARTS)}')
 print(f'out: {OUT}')

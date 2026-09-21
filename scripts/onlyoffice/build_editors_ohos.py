@@ -1039,6 +1039,11 @@ def patch_about_brand():
                    + ([] if del_line not in s else ['官网行(删)']))
         if missing:
             raise SystemExit('欢迎页 About 品牌 patch 未命中: %s ——请检查 loginpage 结构' % ','.join(missing))
+        # ohos/bridge.js 注入欢迎页（2-j2：loginpage 的 sdk 链依赖 AscDesktopEditor
+        # 方法表——2.5 recents 桥/2.6 面板刷新都在欢迎页跑；INSTALL 内各编辑器页
+        # 专属块自带页判，欢迎页安全）。相对路径：rawfile/onlyoffice/index.html → ./ohos/
+        if inject_script_src(WELCOME, 'ohos/bridge.js'):
+            print('  注入 ohos/bridge.js → 欢迎页 index.html')
     else:
         print('  !! 欢迎页 index.html 不存在——跳过 welcome About 品牌化（loginpage 未部署）')
 
@@ -1105,6 +1110,64 @@ def inject_ohos_boot(html_path):
     耦合（boot 的启动调度是 setTimeout 轮询，等的是编辑器 app 对象而非 ascshim
     产物）；注入行位置在 ascshim 之前（两者都插在 <head> 首位，后插者在前）"""
     return inject_script_src(html_path, '../../../../ohos/boot.js')
+
+
+# —— ohos/bridge.js 模板展开（生成逻辑源自 make_ascshim.py，2026-09-21 阶段 2-j2
+#    挪入装配链：ascshim 侧同源逻辑已随 20_bridge/50_init 退役删除）——
+DESKTOP_SRC = os.path.join(ROOT, 'scripts', 'onlyoffice', 'desktop')
+
+# 桥协议：AscNative._call 返回 JSON 编码字符串（对象/数组→JSON；纯字符串→带引号 JSON）。
+# JS 侧统一 JSON.parse 解包——保证页面拿到真值（如 GetExternalClouds → [] 而不是 '[]'）。
+# 需回灌 loginpage 面板的方法（官方 CEF：Recents_Dump → ExecuteJavaScript
+# window.onupdaterecents(json)；loginpage 面板订阅 sdk.on('onupdaterecents') → sdk.fire 桥接）
+OHOS_FIRE_MAP = {
+    'LocalFileRecents': 'onupdaterecents',
+    'LocalFileRecovers': 'onupdaterecovers',
+}
+# RAW 方法：官方 CEF 返回 **JSON 文本字符串**，消费端自己 JSON.parse()（sdkjs
+# JSON.parse(AscDesktopEditor.GetInstallPlugins()) 等）—— 桥层不得解包。
+#   桥返回形式同时保持 JSON 文本（ascBridge.ets 对应 case 已按官方空态结构返回）。
+OHOS_RAW_METHODS = {'GetInstallPlugins', 'GetBackupPlugins'}
+
+
+def gen_method_js():
+    methods = [l.strip() for l in open(os.path.join(DESKTOP_SRC, 'asc_methods.txt')) if l.strip()]
+    shim = open(os.path.join(DESKTOP_SRC, 'ascdesktop_shim_raw.js'), encoding='utf-8').read()
+    lines = []
+    for m in methods:
+        if m in OHOS_RAW_METHODS:
+            body = (' var r = window.AscNative && window.AscNative._call('
+                    '"%s", Array.prototype.slice.call(arguments));' % m +
+                    ' return r; };')
+        else:
+            body = (' var r = window.AscNative && window.AscNative._call('
+                    '"%s", Array.prototype.slice.call(arguments));' % m +
+                    ' var v; try { v = r ? JSON.parse(r) : r; } catch(e) { v = r; }')
+            if m in OHOS_FIRE_MAP:
+                body += (' try { window["%s"] && window["%s"](v); } catch(e) {}'
+                         % (OHOS_FIRE_MAP[m], OHOS_FIRE_MAP[m]))
+            body += ' return v; };'
+        lines.append('  window.__ascDesktopEditorMethods["%s"] = function() {' % m + body)
+    method_js = '\n'.join(lines)
+    shim_indented = '\n'.join('    ' + ln for ln in shim.split('\n'))
+    return method_js, shim_indented
+
+
+def expand_ohos_bridge(tpl_path, dst_path):
+    """ohos/bridge.js 模板 → 产物（展开 @@METHOD_JS@@/@@SHIM@@；node --check 硬校验）"""
+    tpl = open(tpl_path, encoding='utf-8').read()
+    method_js, shim = gen_method_js()
+    out = tpl.replace('@@METHOD_JS@@', method_js).replace('@@SHIM@@', shim)
+    for _ph in ('@@METHOD_JS@@', '@@SHIM@@'):
+        assert _ph not in out, 'bridge.js 展开后仍含占位 %s' % _ph
+    with open(dst_path, 'w', encoding='utf-8') as f:
+        f.write(out)
+    import subprocess
+    rc = subprocess.run(['node', '--check', dst_path], capture_output=True, text=True)
+    if rc.returncode != 0:
+        raise SystemExit('node --check FAILED on %s:\n%s' % (dst_path, rc.stderr[:2000]))
+    return len(out)
+
 
 
 def inject_script_src(html_path, src_rel):
@@ -1196,10 +1259,22 @@ def main():
         if os.path.isdir(OHOS_DST):
             shutil.rmtree(OHOS_DST)
         copy_tree(OHOS_SRC, OHOS_DST)
+        # bridge.js 模板展开（含 node --check 硬校验）
+        _tpl = os.path.join(OHOS_SRC, 'bridge.js')
+        if os.path.isfile(_tpl):
+            _n = expand_ohos_bridge(_tpl, os.path.join(OHOS_DST, 'bridge.js'))
+            print('  ohos/bridge.js 展开完成（%d bytes，方法表+shim）' % _n)
         boots = [f for f in os.listdir(OHOS_DST) if f.endswith('.js')]
         assert 'boot.js' in boots, 'ohos 模块缺 boot.js（scripts/onlyoffice/ohos/）'
         for app in APP_MAIN:
             p = os.path.join(W3D, 'apps', app, 'main', 'index.html')
+            # 注入调用序与最终加载序：inject_script_src 每次插 <head> 紧后（后插者
+            # 在前）→ 产物序 boot → bridge → ascshim。bridge 的 INSTALL 由 AscNative
+            # 出现异步触发，与 script 相对顺序无关（实测证实：注入序两种排法行为
+            # 一致）；引擎字体链 web 语义由 bridge.js INSTALL 体内的 3.7 删除块兜住，
+            # 不依赖本处顺序。
+            if os.path.isfile(p) and inject_script_src(p, '../../../../ohos/bridge.js'):
+                print('  注入 ohos/bridge.js → apps/%s/main/index.html' % app)
             if os.path.isfile(p) and inject_ohos_boot(p):
                 print('  注入 ohos/boot.js → apps/%s/main/index.html' % app)
         print('  ohos 模块 %d 个 js → %s' % (len(boots), OHOS_DST))

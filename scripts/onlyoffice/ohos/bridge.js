@@ -1,20 +1,20 @@
-  // （0/0.2 三表注入+用户字体注册已于 2026-09-21 fork 化阶段 2-j1 并入装配产物
-  //   AllFonts.js（gen_allfonts 尾部生成）——官方链保证 AllFonts.js 早于
-  //   sdk-all.js（checkAllFonts 前）加载，注入时机等价；ascshim 头部注入退役）
-  // （0.3 已回滚，2026-09-05）字族下拉「精灵缺失」修复走**资源侧**：官方 web 语义
-  // （Common.Controllers.Desktop.isActive=false → CThumbnailLoader XHR
-  //    sdkjs/common/Images/fonts_thumbnail_ea@*.png.bin）由构建链生成精灵产物
-  //   （build_editors_ohos.make_fonts_sprites，官方 RLE 格式）——不注入/覆盖
-  //   Desktop 控制器（曾试用桩：官方 Desktop.js:786 在 requirejs 模块晚于本页
-  //   定义会覆盖桩；且 window.native 语义会使引擎 AscFonts.load 走 native 分支
-  //   （sdk-all-min.js 49957）——弃，谨记勿回退）。
-
-  // sdk-all.js（common 清单 = 引擎的另一半：Serialize2/Document/History/GlobalLoaders）
-  // 由官方链自动加载：api.js Init → apiBase.js:293 AscCommon.loadSdk(editorName)
-  // → editorscommon.js loadScript('../../../../sdkjs/<name>/sdk-all.js') 注入 script 标签。
-  // 不得人工预载：loadScript 的本地链只在 window.AscDesktopEditor && local_load_add(未定义)
-  // 时跳过 —— 本 shim 天然走普通 script 注入，官方时序（引擎 init 时先于文档打开）。
-
+// ============================================================================
+// ohos/bridge.js —— AscDesktopEditor 桥装配（原 ascshim 20_bridge INSTALL 主体
+// + 50_init AscNative 等待 + 40_save 3.7/3.7.1 web 语义开关/放映全屏，2026-09-21
+// fork 化阶段 2-j2 源码化：宿主装配域定制模块模板，装配链（build_editors_
+// ohos.py）复制时展开两占位符（方法表 METHOD_JS 与官方 shim SHIM，生成逻辑
+// 同源自 asc_methods.txt / ascdesktop_shim_raw.js；注：注释内勿写占位符原文，
+// 装配替换按子串全局匹配——注释里的提及同样会被展开）。
+//
+// 加载模型：本文件由编辑器 main/index.html <head> 注入（早于编辑器 app）；
+// INSTALL 在 AscNative（ArkWeb registerJavaScriptProxy）注入后执行——等待
+// 循环内置（ASC_BOOT/ASC_FOUND 区分「未加载」与「未注入」两种失败）。
+// INSTALL 体内尾部（_onReady 前）执行 3.7 编辑器页删除：AscDesktopEditor
+// 装上后立即删——引擎字体链检测窗口（sdk-all.js 加载/初始化期）内对象不
+// 存在 → web 分支（旧 ascshim 同语义：3.7 在 INSTALL 函数体内、闭合 }; 由
+// 50_init 提供；**INSTALL 的闭合边界必须包住 3.7**——切在它之前=装上无人删）。
+// ============================================================================
+(function() {
   var installed = false;
 
   var INSTALL = function() {
@@ -247,3 +247,89 @@
     })();
   })();
 
+
+    // ---- 3.7 编辑器页（/main/index.html）web 语义开关：删除 AscDesktopEditor ----
+    // **必须在 INSTALL 体内、紧随装配执行**——删的是刚装上的对象。若挪到本文件
+    // 同步体（IIFE 直下），执行时 INSTALL 尚未跑（wait 等 AscNative 异步触发），
+    // 删除变 no-op；随后 INSTALL 装上对象再无人删 → sdkjs/webapps 检测到对象 →
+    // isDesktopApp 桌面分支生效 → 字体 wasm/选择表切 native 通路（g_fonts_
+    // selection_bin 类缺失 → Base64.decode(undefined) 崩）+ 引擎桌面字体装载链
+    // 先行装满 g_fonts_streams（09_fonts 装填 idx 漂移）+ slide 域 m_pFaceInfo
+    // null 渲染崩。删除后引擎保持 web 分支（桌面语义启用=三条件：native 字体
+    // 供给 + LoadJS + allfonts 桌面装载，现阶段未齐）。
+    // "关闭/返回"能力用官方 web 机制：editorConfig.customization.goback.url →
+    // Main.js canBack=true → 头部/文件菜单"返回"按钮 → goback → location.href 回欢迎页。
+    // 欢迎页（loginpage）不删：sdk 面板链（Recents/Recovers）依赖桌面语义方法表。
+    try {
+      if (window.location && window.location.pathname && window.location.pathname.indexOf('/main/index.html') >= 0) {
+        try { delete window.AscDesktopEditor; } catch (d1) { window.AscDesktopEditor = undefined; }
+        try { delete window.desktop; } catch (d2) { window.desktop = undefined; }
+        console.error('LSO_WEB_SEMANTIC (editor page)');
+      }
+    } catch (nx) {}
+
+    // ---- 3.7.1 放映全屏通道（2026-09-11，PPT 放映「只在 webview 内播」修复）----
+    // 根因（真机 1.6 实证 + 时序日志）：sdkjs 放映引擎只在
+    //   `undefined !== window["AscDesktopEditor"]` 时才调 SetFullscreen
+    //   （Transitions.js:4075 开始 / :4555 结束）——官方桌面语义里放映全屏是 native 层
+    //   的事（web-apps Viewport.js:312 对 isDesktopApp 又显式跳过浏览器 Fullscreen
+    //   API，两条路只此一条）。而 3.7 为字体链 web 语义删除了该对象 → 放映时无任何
+    //   壳层全屏动作（用户现象：tab 栏与窗口都不动，画面只在 webview 内铺）。
+    // 修法=**放映期临时恢复**（web-apps 官方事件驱动；两事件都在 DocumentPreview 的
+    //   show/hide 内同步触发——show 早于引擎 StartDemonstration、hide 晚于引擎 End）：
+    //     preview:show → window.AscDesktopEditor = window.__lsoAscDE（上方装配的同份）
+    //     preview:hide → 再删除（回到 3.7 的 web 语义）
+    //   选"临时"而非"文档就绪后长期恢复"：3.7 注释警告的字体 native 分支按对象存在性
+    //   判定，放映期（文档已打开、字体链早已走完）恢复可完全避开该风险面。
+    // 判据日志：LSO_FS_BRIDGE on/off（HOOKED=钩子就位）。
+    (function _hookShowFullscreen() {
+      try {
+        if ((window.location || {}).pathname.indexOf('/main/index.html') < 0) { return; }
+        var _n = 0;
+        var _tick = function() {
+          _n++;
+          var NC = window.Common && window.Common.NotificationCenter;
+          if (NC && typeof NC.on === 'function' && !NC.__lsoFsBridge) {
+            NC.__lsoFsBridge = true;
+            NC.on('preview:show', function() {
+              try {
+                if (window.__lsoAscDE) {
+                  window.AscDesktopEditor = window.__lsoAscDE;
+                  console.error('LSO_FS_BRIDGE on');
+                }
+              } catch (e2) { console.error('LSO_FS_BRIDGE_ERR ' + String(e2)); }
+            });
+            NC.on('preview:hide', function() {
+              try {
+                delete window.AscDesktopEditor;
+                console.error('LSO_FS_BRIDGE off');
+              } catch (e3) {}
+            });
+            console.error('LSO_FS_BRIDGE_HOOKED');
+            return;
+          }
+          if (_n < 900) { setTimeout(_tick, 200); }
+        };
+        setTimeout(_tick, 500);
+      } catch (e) { console.error('LSO_FS_BRIDGE_ERR ' + String(e)); }
+    })();
+
+    if (window.AscNative && window.AscNative._onReady) window.AscNative._onReady();
+    // 自检登记：INSTALL 仅在 AscNative 注入后调用 → 走到这里=页面侧壳桥已就绪
+    (window.__lsoShim = window.__lsoShim || []).push('bridge');
+  };
+
+  //（3.7 web 语义删除 + 3.7.1 放映全屏钩子在 INSTALL 体内执行——见下方装配处）
+
+  // AscNative 由 ArkWeb registerJavaScriptProxy('AscNative', ...) 注入；等待它出现
+  //（等注入对象，非界面/时间判据——ArkWeb 注入时序所致）
+  try { console.error('ASC_BOOT ' + (window.location.pathname || '')); } catch (bx) {}
+  (function wait() {
+    if (window.AscNative) { try { console.error('ASC_FOUND native=' + (typeof window.AscNative._call)); } catch (bx) {} INSTALL(); return; }
+    if (!wait.__log && (window.__lsoWaitN = (window.__lsoWaitN || 0) + 1) === 20) {
+      wait.__log = true;
+      console.error('ASC_WAITING_ASC (1s, no AscNative)');
+    }
+    setTimeout(wait, 50);
+  })();
+})();

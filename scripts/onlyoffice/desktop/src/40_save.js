@@ -15,67 +15,8 @@
   //   三编辑器 api.js sendEvent 头部 [OHOS: save] 分支（分发前吞掉——sendEvent 层
   //   是唯一单点，Main.onError 层拦截时机不足）；实例 wrap 轮询退役）
 
-  // ---- 3.7 编辑器页（/main/index.html）web 语义开关：删除 AscDesktopEditor → sdkjs/
-  //      webapps 不进入 isDesktopApp 桌面分支（桌面分支把字体 wasm/字体选择表切到
-  //      native 通路，g_fonts_selection_bin 类缺失 → Base64.decode(undefined) 崩 →
-  //      "打开文件时发生错误"）。桌面语义启用=三条件（native 字体供给 + LoadJS + allfonts
-  //      桌面装载），现阶段未齐 —— 保持 web 语义。
-  //      "关闭/返回"能力用官方 web 机制：editorConfig.customization.goback.url →
-  //      Main.js canBack=true → 头部/文件菜单"返回"按钮 → goback → location.href 回欢迎页。
-  try {
-    if (window.location && window.location.pathname && window.location.pathname.indexOf('/main/index.html') >= 0) {
-      try { delete window.AscDesktopEditor; } catch (d1) { window.AscDesktopEditor = undefined; }
-      try { delete window.desktop; } catch (d2) { window.desktop = undefined; }
-      console.error('LSO_WEB_SEMANTIC (editor page)');
-    }
-  } catch (nx) {}
-
-  // ---- 3.7.1 放映全屏通道（2026-09-11，PPT 放映「只在 webview 内播」修复）----
-  // 根因（真机 1.6 实证 + 时序日志）：sdkjs 放映引擎只在
-  //   `undefined !== window["AscDesktopEditor"]` 时才调 SetFullscreen
-  //   （Transitions.js:4075 开始 / :4555 结束）——官方桌面语义里放映全屏是 native 层
-  //   的事（web-apps Viewport.js:312 对 isDesktopApp 又显式跳过浏览器 Fullscreen
-  //   API，两条路只此一条）。而 3.7 为字体链 web 语义删除了该对象 → 放映时无任何
-  //   壳层全屏动作（用户现象：tab 栏与窗口都不动，画面只在 webview 内铺）。
-  // 修法=**放映期临时恢复**（web-apps 官方事件驱动；两事件都在 DocumentPreview 的
-  //   show/hide 内同步触发——show 早于引擎 StartDemonstration、hide 晚于引擎 End）：
-  //     preview:show → window.AscDesktopEditor = window.__lsoAscDE（INSTALL 装配的同份）
-  //     preview:hide → 再删除（回到 3.7 的 web 语义）
-  //   选"临时"而非"文档就绪后长期恢复"：3.7 注释警告的字体 native 分支按对象存在性
-  //   判定，放映期（文档已打开、字体链早已走完）恢复可完全避开该风险面。
-  // 判据日志：LSO_FS_BRIDGE on/off（HOOKED=钩子就位）。
-  (function _hookShowFullscreen() {
-    try {
-      if ((window.location || {}).pathname.indexOf('/main/index.html') < 0) { return; }
-      var _n = 0;
-      var _tick = function() {
-        _n++;
-        var NC = window.Common && window.Common.NotificationCenter;
-        if (NC && typeof NC.on === 'function' && !NC.__lsoFsBridge) {
-          NC.__lsoFsBridge = true;
-          NC.on('preview:show', function() {
-            try {
-              if (window.__lsoAscDE) {
-                window.AscDesktopEditor = window.__lsoAscDE;
-                console.error('LSO_FS_BRIDGE on');
-              }
-            } catch (e2) { console.error('LSO_FS_BRIDGE_ERR ' + String(e2)); }
-          });
-          NC.on('preview:hide', function() {
-            try {
-              delete window.AscDesktopEditor;
-              console.error('LSO_FS_BRIDGE off');
-            } catch (e3) {}
-          });
-          console.error('LSO_FS_BRIDGE_HOOKED');
-          return;
-        }
-        if (_n < 900) { setTimeout(_tick, 200); }
-      };
-      setTimeout(_tick, 500);
-    } catch (e) { console.error('LSO_FS_BRIDGE_ERR ' + String(e)); }
-  })();
-
+  // （3.7/3.7.1 web 语义开关+放映全屏已于 2026-09-21 fork 化阶段 2-j2 并入
+  //   ohos/bridge.js（INSTALL 装配后按页语义删/放映期临时恢复 AscDesktopEditor））
   // ---- 3.9 头部装饰定制（2026-09-05 用户：编辑器页右上角"用户头像 U + 关闭 X"去掉）----
   // 两元素官方均无**独立**显示开关，故按头部视觉定制在页适配层隐藏：
   //   - #slot-btn-close（Header.js:970/1076 btnClose）：显示条件 = canCloseEditor
@@ -132,4 +73,6 @@
   //      requestCloseDoc 注释：接口句柄=window.<NS>.controllers.Main.api（小写
   //      controllers）、查询 API=asc_isDocumentCanSave（三引擎均有）、ArkWeb
   //      runJavaScript 返回值 JSON 编码、saveAborted 修复 canSave 复位缝隙）
+  //（外层 IIFE 闭合在此：原 50_init 为末段时承担 `})();`，其退役后由本段收尾）
+})();
 
