@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """官方桌面链装配：web-apps deploy 产物 → rawfile/onlyoffice/
 
-== 唯一部署入口（2026-09-05 起；pack_web.py 已废弃，见其头部） ==
+== 唯一部署入口（2026-09-05 起；POC 时代的 pack_web.py 补丁打包器已删除，
+   git 历史可查） ==
 
 用法（正确命令/目录）：
   bash scripts/onlyoffice/desktop/grunt-build.sh          # 全链：官方 grunt 产物→本装配
