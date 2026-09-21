@@ -47,7 +47,15 @@ if [ "$UPSTREAM" = "1" ]; then
   bash "$ROOT/scripts/onlyoffice/patch_core_ohos.sh"
 
   echo "== 1/5 web-apps grunt (deploy) =="
-  (cd "$ROOT/third_party/web-apps/build" && npx grunt) 2>&1 | tail -3
+  # PRODUCT_VERSION 注入（2026-09-21 版本链收口）：web-apps 产物的 {{PRODUCT_VERSION}}
+  # 占位（编辑器 About 版本行 txtVersionNum 等）官方默认取其 package.json 的
+  # 4.3.0.1150——与产品版本（AppScope/app.json5 versionName，欢迎页 About 已显示
+  # 它）两处不一致。Gruntfile 官方语义：env PRODUCT_VERSION 优先于 pkg.version
+  #（build/Gruntfile.js:814）——此处注入统一两处数据源。
+  APP_VER="$(python3 -c "import re;print(re.search(r'\"versionName\"\s*:\s*\"([^\"]+)\"', open('$ROOT/AppScope/app.json5').read()).group(1))")" \
+    || { echo "!! AppScope/app.json5 versionName 提取失败" >&2; exit 1; }
+  echo "  PRODUCT_VERSION=$APP_VER"
+  (cd "$ROOT/third_party/web-apps/build" && PRODUCT_VERSION="$APP_VER" npx grunt) 2>&1 | tail -3
   [ -f "$ROOT/third_party/web-apps/deploy/web-apps/apps/documenteditor/main/index.html" ] \
     || { echo "!! web-apps deploy 产物缺失" >&2; exit 1; }
 

@@ -10,14 +10,17 @@
   bash scripts/onlyoffice/build_editors_ohos.py           # 本装配单独运行（dev 迭代用）
 产物路径一览（生成物）：
   entry/src/main/resources/rawfile/onlyoffice/
-    webapps/ sdkjs/ fonts/ index.html smoke/ version.json ascshim.js
-  （ascshim.js 由 make_ascshim.py 生成；本脚本消费并断言其存在）
+    webapps/ sdkjs/ fonts/ index.html smoke/ ohos/ plugins/ version.json
+  （ohos/ 源=scripts/onlyoffice/ohos/（bridge.js 模板在本链展开）；
+   smoke/inject-head.js 由本链 gen_smoke_head 生成——ascshim 已于
+   2026-09-21 阶段 2-n 彻底退役）
 
 流程：
   1. third_party/web-apps/deploy/web-apps/（官方 grunt 产物）→ rawfile/onlyoffice/webapps
   2. 删除  ie/mobile/embed 子变体（官方 build_js.py:65-66 同）
   3. apps/api/documents/index.html.desktop → index.html（官方 build_js.py:68 同）
-  4. 编辑器 main/index.html 注入 ascshim.js（<head> 前导；不改官方源）
+  4. 编辑器 main/index.html 注入 ohos/{boot,bridge,fonts}.js + smoke/inject-head.js
+     （<head> 前导；不改官方源）
   5. sdkjs deploy（--desktop 构建，含 Local/*.js 保存链）→ rawfile/onlyoffice/sdkjs
   6. 字体（AllFonts.js + fonts/ 预加密）→ rawfile/onlyoffice/
   7. loginpage/deploy/index.html → rawfile/onlyoffice/index.html（欢迎页）
@@ -799,308 +802,6 @@ def write_font_rows():
     print('fontrows.json: %d 行 → %s' % (len(names), out))
 
 
-def patch_about_brand():
-    """关于面板双品牌（2026-09-07 用户决策：**Pure Office 为主，ONLYOFFICE 为辅**）。
-
-    用户具体指示（真机截图后）：官方大 logo（.asc-about-office :before 的
-    logo_s.svg——图示內含超大「ONLYOFFICE」字样）**移除**——「上面放大的那行字才
-    应该使用 Pure Office；大张旗鼓用 ONLYOFFICE 也不好」——顶部主视觉 = appName
-    行「Pure Office」；「基于 ONLYOFFICE DesktopEditors（AGPL-3.0）为辅行文字
-    保留（归属声明低调存在）。
-
-    合规说明（写在此处供后续核对）：官方未商业授权时严格按 7(b) 保留 logo 可以，
-    但用户明确选主品牌 = Pure Office、ONLYOFFICE 仅作 AGPL 归属声明——AGPL §11
-    （trademark）不禁止改名/自品牌，前提是不得暗示 ONLYOFFICE 认可本产品；归属行
-    + 保留的公司信息（名/地址/邮箱/官网）+ 官方 AGPL 条款文本满足源码许可声明的
-    要求。Logo 替换/删除附带品牌商标使用判断，与本产品的开源许可义务分开。
-
-    品牌化（patch 对象 = grunt 产物，可再生成；upstream 重建后本脚本自动
-    重新生效——与 inject_ascshim 同模式）：
-      1) 五个编辑器 LeftMenu.js About 构造 appName「文档编辑器」→「Pure Office」；
-      2) About.js licensor 模板版本行下加归属行「基于 ONLYOFFICE
-         DesktopEditors（AGPL-3.0）」，其中「AGPL-3.0」即许可全文链接（用户
-         2026-09-10：删独占「许可信息：…」行，链接并入本行；修改版日期经用户
-         决策不展示——官方附加条款 2 的日期声明由随包 LICENSE 中的说明文本承接；
-         .asc-about-lic 12px 灰字，满足官方附加条款 3(i/ii/iii)）；其下再一行
-         源码/声明入口（NOTICE，见 §「源码可用性行」）——同时满足 AGPL §6 的
-         对应源码可得性在应用内可达；
-      3) 五编辑器 app.css `.asc-about-office:before{content:url(logo_s.svg)}`
-         → `content:''`（亮/暗主题两变体）——官方 logo 图示清除；
-      4) licensor 公司信息表（公司名/地址/邮箱/电话/网址）→ class hidden
-         （用户决策 2026-09-07「暂时先不放公司信息」）。
-    附：模板 appName.toUpperCase() 去上转（否则显示「PURE OFFICE」——用户期望保形）。
-    幂等：已替换（目标串不再存在）即跳过；应替换却没替换（0 命中）→ 非零退出
-    （grunt 产物结构变化立即暴露，防静默空 patch）。
-    """
-    # 归属确认行 + 许可入口：满足官方附加条款 2（修改版显式声明+日期）与 3(i)(ii)（识别
-    # ONLYOFFICE 为原始开发者 + 本版为修改版）；「原始开发者 Ascensio System SIA」由本行
-    # 完成识别——官方附加条款原文另行随包（install_licenses）。
-    # 2026-09-10 用户：删「许可信息：GNU AGPL v3.0」独占行，链接改挂本行「AGPL-3.0」
-    # 文字（点击=55_lic.js 弹层渲染全文；纯文本仍是完整归属句，不点也能读懂）。
-    # class="link" 供欢迎页复用其内置 `.link{color:var(--text-link)}`——版权行是
-    # `--text-tertiary` 灰字，链接嵌在句中须显链接色；编辑器 About 侧由 BRAND_CSS
-    # 的 `.about-dlg .asc-about-note a` 规则承担（官方 `.about-dlg a` 同染正文色）。
-    LIC_URL = 'http://localhost/onlyoffice/licenses/LICENSE.txt'
-    CREDIT = ('基于 ONLYOFFICE DesktopEditors（<a class="link" href="' + LIC_URL
-              + '" target="_blank">AGPL-3.0</a>）')
-    # 源码可用性行（AGPL §6：以客体形式分发须提供对应源码）：随包 NOTICE 写明
-    # 完整源码获取地址与重建步骤。链接走与许可同一本地通道（55_lic.js 弹层），
-    # 不依赖外网可达——审核/用户离线也能读到源码去向。
-    NOTE_URL = 'http://localhost/onlyoffice/licenses/NOTICE.txt'
-    # 「见」与链接之间用 &nbsp;：中文与拉丁词之间的普通空格在 HTML 渲染中会被
-    # 压缩到近乎不可见（2026-09-12 真机截图呈「见NOTICE」紧贴）
-    SOURCE_LINE = ('完整源码与第三方声明见&nbsp;<a class="link" href="' + NOTE_URL
-                   + '" target="_blank">NOTICE</a>')
-    APP_BRAND = "appName: 'Pure Office'"
-    patched = 0
-
-    # （1）appName → Pure Office（de/ss/pe/pdf/visio 五份 LeftMenu.js 均有 About 构造）
-    for app in ('documenteditor', 'spreadsheeteditor', 'presentationeditor',
-                'pdfeditor', 'visioeditor'):
-        p = os.path.join(W3D, 'apps', app, 'main', 'app', 'view', 'LeftMenu.js')
-        if not os.path.isfile(p):
-            continue  # 官方可单独 grunt 某 app；缺失即该编辑器不在发行内，属正常
-        with open(p, 'r', encoding='utf-8') as f:
-            s = f.read()
-        if APP_BRAND in s:
-            continue  # 幂等重跑
-        old = 'appName: this.txtEditor'
-        if old not in s:
-            raise SystemExit('About 品牌 patch 失败：%s 未找到 %r（grunt 产物结构变化？）' % (p, old))
-        s = s.replace(old, APP_BRAND)
-        with open(p, 'w', encoding='utf-8') as f:
-            f.write(s)
-        patched += 1
-        print('  about品牌: %s appName → Pure Office' % app)
-
-    # （2）About.js 模板（licensor 版本行 + 辅行；appName 去上转）
-    about_p = os.path.join(W3D, 'apps', 'common', 'main', 'lib', 'view', 'About.js')
-    with open(about_p, 'r', encoding='utf-8') as f:
-        s = f.read()
-    n_upper = s.count('options.appName.toUpperCase()')
-    if n_upper:
-        if n_upper != 2:
-            raise SystemExit('About 模板 toUpperCase 命中 %d != 2（licensor+licensee），结构变化?' % n_upper)
-        s = s.replace('options.appName.toUpperCase()', 'options.appName')
-        print('  about品牌: appName 去上转 ×%d' % n_upper)
-    # appName 行 class → asc-about-brand（主视觉大字；样式规则由 (3) 统一 append）。
-    # licensor（单空格）/licensee（双空格）行串不同，分别替换并计数。
-    n_brand = 0
-    for row in ("+ options.appName + '</label></td>',",
-                "+ options.appName  + '</label></td>',"):
-        old_row = ("'<td align=\"center\"><label class=\"asc-about-version\">' " + row)
-        cnt = s.count(old_row)
-        if cnt:
-            s = s.replace(old_row,
-                          "'<td align=\"center\"><label class=\"asc-about-brand\">' " + row)
-            n_brand += cnt
-    if n_brand:
-        print('  about品牌: appName 行 → asc-about-brand ×%d' % n_brand)
-    tag = 'id-about-licensor-version-name'
-    new_line = ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
-                + CREDIT + '</label></td></tr>\',')
-    if new_line not in s:
-        old_line = ('\'<td align="center"><label class="asc-about-version" id="' + tag + '">\''
-                    ' + this.txtVersion + this.txtVersionNum + \'</label></td>\',')
-        n = s.count(old_line)
-        if n != 1:
-            raise SystemExit('About 模板 licensor 版本行命中 %d != 1，结构变化?' % n)
-        s = s.replace(old_line, old_line + '\n                ' + new_line)
-        print('  about品牌: licensor 模板 + 归属/许可行')
-    # 源码/声明行：紧随归属行（同款样式）；幂等与插入点断言同归属行策略
-    src_line = ('\'<tr><td align="center"><label class="asc-about-lic asc-about-note">'
-                + SOURCE_LINE + '</label></td></tr>\',')
-    if src_line not in s:
-        n = s.count(new_line)
-        if n != 1:
-            raise SystemExit('About 模板归属行命中 %d != 1，无法定位源码行插入点' % n)
-        s = s.replace(new_line, new_line + '\n                ' + src_line)
-        print('  about品牌: licensor 模板 + 源码/声明行')
-    # （b2）licensor 公司信息表整体隐藏（用户决策 2026-09-07「暂时先不放公司信息」——
-    #     官方公司名/地址/邮箱/电话/网址不再展示，仅保留主品牌/版本/归属/许可；
-    #     官方附加条款未要求 UI 展示公司联系方式，版权声明保留在源码头与随包 LICENSE）。
-    #     class 加 hidden（licensee 表同款，common css 内置 .hidden）
-    info_old = ('\'<table id="id-about-licensor-info" cols="3" style="width: 100%;"'
-                ' class="margin-bottom">\',')
-    info_new = ('\'<table id="id-about-licensor-info" cols="3" style="width: 100%;"'
-                ' class="hidden margin-bottom">\',')
-    if info_old in s:
-        s = s.replace(info_old, info_new)
-        print('  about品牌: licensor 公司信息表 → hidden')
-    elif info_new not in s:
-        raise SystemExit('About 模板 licensor 信息表未找到（结构变化？）')
-    # 幂等判定的权威信号在 About.js 上下文里（new_line in s）——(3) 段 app.css 循环
-    # 会复用并覆写 s，底部判定不能再用裸 s（会拿最后一个 app.css 误判）
-    about_has_new = new_line in s
-    with open(about_p, 'w', encoding='utf-8') as f:
-        f.write(s)
-
-    # （3）五编辑器 app.css：官方 logo 图示（.asc-about-office:before content:url）
-    #     清除——Logo 图示内含超大「ONLYOFFICE」字样（用户：「大张旗鼓用
-    #     ONLYOFFICE 也不好；上面放大的那行字才应该显示 Pure Office」）；
-    #     content:none 使伪元素不生成。亮/暗主题两变体各一张。
-    #     同文件 append `.asc-about-brand`（(2) 指派的 appName 主视觉大字规则——
-    #     官方产品 logo 撤下后它就是面板顶部唯一主视觉）。
-    OLD_LOGO = "content:url('../../../../common/main/resources/img/about/logo_s.svg')"
-    OLD_LOGO_D = "content:url('../../../../common/main/resources/img/about/logo-white_s.svg')"
-    # 排版（2026-09-07 用户「排列太紧，之前 ONLYOFFICE 的多美观」）：主名顶部留白
-    # margin 40px + 与版本行间距 10px；辅行/许可行 note 类块级行距——零 logo 后重排
-    # 面板重心下移、行间通透（官方原版行间疏朗感来自 logo(45px)+20px 表距，已无 logo）
-    # 逐条判存补写（各条在 css 里出现即视为已生效）——升级路径与幂等由它统一承担
-    BRAND_CSS = [
-        '.asc-about-brand{font:bold 24px Tahoma;letter-spacing:.02em;'
-        'color:#444;color:var(--text-normal);user-select:text;'
-        'margin:40px 0 10px}',
-        '.asc-about-note{display:block;padding:4px 0;line-height:1.7}',
-        # 归属行里的「AGPL-3.0」是许可全文入口（2026-09-10）——官方 `.about-dlg a`
-        # 把面板内链接染成正文色（--text-normal），链接嵌在句子中间会完全看不出
-        # 可点；这里恢复链接色（选择器比 `.about-dlg a` 更具体，不依赖书写顺序）
-        '.about-dlg .asc-about-note a{color:var(--text-link)}',
-    ]
-    logos = 0
-    for app in ('documenteditor', 'spreadsheeteditor', 'presentationeditor',
-                'pdfeditor', 'visioeditor'):
-        p = os.path.join(W3D, 'apps', app, 'main', 'resources', 'css', 'app.css')
-        if not os.path.isfile(p):
-            continue
-        with open(p, 'r', encoding='utf-8') as f:
-            s = f.read()
-        n1 = s.count(OLD_LOGO)
-        n2 = s.count(OLD_LOGO_D)
-        rules = [r for r in BRAND_CSS if r not in s]
-        if n1 == 0 and n2 == 0 and not rules:
-            continue  # 幂等重跑：logo 与全部规则均已处理
-        if n1 or n2:
-            s = s.replace(OLD_LOGO, 'content:none').replace(OLD_LOGO_D, 'content:none')
-        if rules:
-            s = s.rstrip('\n') + '\n' + '\n'.join(rules) + '\n'
-        with open(p, 'w', encoding='utf-8') as f:
-            f.write(s)
-        logos += n1 + n2
-        print('  about品牌: %s css logo 图示清除 ×%d + about 样式规则%s'
-              % (app, n1 + n2, '追加×%d' % len(rules) if rules else '已存在'))
-
-    if patched == 0 and n_upper == 0 and n_brand == 0 and logos == 0:
-        if about_has_new:
-            print('  about品牌: 已全部生效（幂等重跑，跳过）')
-        else:
-            raise SystemExit('About 品牌 patch 无任何命中——请检查 grunt 产物完整性')
-
-    # —— 欢迎页 AboutDialog 品牌化（2026-09-10 用户拍板方案 A：入口放欢迎页侧栏
-    #    「关于」）——
-    # 官方欢迎页自带整套 About：侧栏项 `<li class="menu-item hidden"><a action="about">`
-    # （官方默认 hidden）+ AboutDialog（dlg-about，570 宽）+ 事件通路
-    #   window.sdk.on("on_native_message", …, () => /app\:version/.test(e) &&
-    #     $(".tool-menu a[action=about]").parent().removeClass("hidden"))
-    # 官方壳（CEF/Electron）发 app:version 才显示；本壳未发 → 项恒 hidden（这是
-    # 「关于入口不见」的根因——2026-09-10 调查，多 tab 与 ascshim 均未动过它）。
-    # 补发 = ascshim 57_about.js（页面侧模拟壳事件）；本段只品牌化对话框产物：
-    #   1) appname 行写死 Pure Office（事件 opts.appname 同值双保险）；
-    #   2) 官方 logo 块（#idx-about-cut-logo 内 idx-logo-light/dark use 图示——
-    #      同「官方 logo 图示內含超大 ONLYOFFICE 字样」）→ 内联 style display:none；
-    #   3) 版本行去「商业版/社区版」前缀 label（strVersionCommunity 语义属官方
-    #      订阅版；本壳 = AGPL 社区构建，label 不成立——版本值=version.json.ver
-    #      （=AppScope/app.json5 的 versionName），由 57_about.js 发 app:version 注入）；
-    #   4) 官网/站点行（ver-site，target=popup 无新标签页语义）→ 删除（用户
-    #      2026-09-10：面板不留两处 AGPL 文案；承接合规入口见下条）；
-    #   5) 版权行（ver-copyright ${t.rights}）→ CREDIT 归属行硬编码（事件不发
-    #      rights，单一来源——同编辑器 About 的 CREDIT 常量；「AGPL-3.0」即许可
-    #      全文链接，target=_blank + localhost LICENSE.txt → 55_lic.js 弹层拦截
-    #      渲染，满足官方附加条款 3(iii)）。
-    WELCOME = os.path.join(DST, 'index.html')
-    wsteps = [
-        ('<p id="idx-about-appname">${t.appname}</p>',
-         '<p id="idx-about-appname">Pure Office</p>', 'appname'),
-        ('<div id="idx-about-cut-logo" class="${t.logocls}">',
-         '<div id="idx-about-cut-logo" class="${t.logocls}" style="display:none">', 'logo'),
-        ('<p id="idx-about-version"><span l10n>${i}</span> ${t.version}</p>',
-         '<p id="idx-about-version">${t.version}</p>', '版本行 label'),
-        ('<div class="ver-copyright about-field">${t.rights}</div>',
-         '<div class="ver-copyright about-field">' + CREDIT + '</div>', '版权行'),
-    ]
-    # 整行删除步（无「新串」，幂等/探测看下方判定）
-    del_line = '<a class="ver-site link about-field" target="popup" href="${t.link}">${t.site}</a>'
-    wpatched = 0
-    if os.path.isfile(WELCOME):
-        with open(WELCOME, 'r', encoding='utf-8') as f:
-            s = f.read()
-        for old, new, desc in wsteps:
-            if old in s:  # 幂等：已替换（old 不在）即跳过
-                n = s.count(old)
-                s = s.replace(old, new)
-                wpatched += n
-                print('  about品牌: 欢迎页 %s ×%d' % (desc, n))
-        # 版权行（CREDIT）之后补源码/声明行：必须独立判存——归属行替换是一次性的
-        # （替换后官方源串不复存在），新加行若挂在上面那步里，已 patch 过的老产物
-        # 重跑永远补不上（2026-09-12 真机踩到：编辑器 About 有源码行、欢迎页没有）。
-        credit_div = '<div class="ver-copyright about-field">' + CREDIT + '</div>'
-        src_div = '<div class="ver-copyright about-field">' + SOURCE_LINE + '</div>'
-        if credit_div in s and src_div not in s:
-            n = s.count(credit_div)
-            s = s.replace(credit_div, credit_div + src_div)
-            wpatched += n
-            print('  about品牌: 欢迎页 源码/声明行 ×%d' % n)
-        if del_line in s:
-            n = s.count(del_line)
-            s = s.replace(del_line, '')
-            wpatched += n
-            print('  about品牌: 欢迎页 删官网行 ×%d' % n)
-        # viewport meta 注入：loginpage 是桌面起始页，官方 HTML 无 viewport meta——
-        # 手机等移动形态的 WebView 按 980px 默认虚拟视口渲染再整体缩到组件宽度，
-        # 欢迎页（桌面排版）被缩小显示（手机上约为编辑器页的一半——编辑器页有官方
-        # viewport meta 按 device-width 1:1 渲染，2026-09-19 phone 真机实证；PC/2in1
-        # 不解析 meta 故无此问题）。meta 写法对齐编辑器 main/index.html 官方行。
-        VP_META = ('<meta name="viewport" content="width=device-width, '
-                   'initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, '
-                   'user-scalable=no">')
-        if 'name="viewport"' not in s:
-            anchor = '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">'
-            if anchor not in s:
-                raise SystemExit('欢迎页 viewport 注入未命中锚点（Content-Type meta）'
-                                 '——请检查 loginpage 结构')
-            s = s.replace(anchor, anchor + VP_META, 1)
-            wpatched += 1
-            print('  welcome: viewport meta 注入')
-        if wpatched:
-            with open(WELCOME, 'w', encoding='utf-8') as f:
-                f.write(s)
-        # 结构性探测：各步应全部「已替换 or 已生效」，否则 loginpage 结构变了
-        missing = ([d for (o, nw, d) in wsteps if o not in s and nw not in s]
-                   + ([] if del_line not in s else ['官网行(删)']))
-        if missing:
-            raise SystemExit('欢迎页 About 品牌 patch 未命中: %s ——请检查 loginpage 结构' % ','.join(missing))
-        # ohos/bridge.js 注入欢迎页（2-j2：loginpage 的 sdk 链依赖 AscDesktopEditor
-        # 方法表——2.5 recents 桥/2.6 面板刷新都在欢迎页跑；INSTALL 内各编辑器页
-        # 专属块自带页判，欢迎页安全）。相对路径：rawfile/onlyoffice/index.html → ./ohos/
-        if inject_script_src(WELCOME, 'ohos/bridge.js'):
-            print('  注入 ohos/bridge.js → 欢迎页 index.html')
-    else:
-        print('  !! 欢迎页 index.html 不存在——跳过 welcome About 品牌化（loginpage 未部署）')
-
-    # —— 新建文档入口裁为 docx/xlsx/pptx（2026-09-10 用户：「主页入口中，只保留
-    #    docx/xlsx/pptx，PDF 入口去掉」）——
-    # 官方 DocumentCreationGrid 的 documentTypes 数组含第 4 项 PDF 表单卡（id:"form"），
-    # 点击 create:new id=form——本壳 EditorPage.onTabCommand 无 form 分支（会落到 docx
-    # 默认），入口本身就是错的，直接删卡。删整项（连同相邻逗号，保持数组语法）。
-    PDF_CARD = ('{id:"form",title:utils.Lang.newForm,langKey:"newForm",'
-                'formatLabel:{value:"PDF",gradientColorStart:"#F36653",'
-                'gradientColorEnd:"#D2402D",bgColorWinXP:"#e54d39"},icon:"#pdf-big"}')
-    if os.path.isfile(WELCOME):
-        with open(WELCOME, 'r', encoding='utf-8') as f:
-            s = f.read()
-        if PDF_CARD in s:
-            # 官方把 PDF 卡放数组末项 → 前导逗号必在；若哪天它不在末项，下面的探测
-            # 会报错（不静默留下语法错的数组）
-            dead = ',' + PDF_CARD if ',' + PDF_CARD in s else PDF_CARD
-            s = s.replace(dead, '')
-            with open(WELCOME, 'w', encoding='utf-8') as f:
-                f.write(s)
-            print('  welcome: 删除 PDF 新建入口卡')
-        if PDF_CARD in s:
-            raise SystemExit('欢迎页 PDF 入口卡未删除——新建入口结构可能已变，'
-                             '请检查 loginpage 的 documentTypes 数组')
-
-
 def gen_version_json():
     """生成 rawfile/onlyoffice/version.json —— 资源内容哈希（构建期 cache-bust 版本号）。
 
@@ -1426,10 +1127,11 @@ def main():
     # 7.56 内置字体行名清单（用户导入字体的重名检查数据源；common/userFonts.ets 读）
     write_font_rows()
 
-    # 7.6 【已源码化，2026-09-21 fork 化阶段 1】关于面板双品牌 + 欢迎页品牌/viewport/
+    # 7.6 【已源码化并删除，2026-09-21】关于面板双品牌 + 欢迎页品牌/viewport/
     #     PDF 卡——全部迁入 web-apps fork（About.js/LeftMenu×5/about.less）与
-    #     desktop-apps fork（panelabout 模板/panelrecent PDF 卡/index.html viewport），
-    #     patch_about_brand() 不再调用（函数体留档，阶段 4 清理后处理段时统一删除）
+    #     desktop-apps fork（panelabout 模板/panelrecent PDF 卡/index.html viewport）。
+    #     patch_about_brand() 死函数体（含 2-j2 误放其内的欢迎页 bridge 注入，
+    #     2-n 已移活）已于阶段 4 收尾删除（git 历史可查）
 
     # 8. 版本号 version.json（资源内容哈希 → 编辑页 ?v=）
     v = gen_version_json()
