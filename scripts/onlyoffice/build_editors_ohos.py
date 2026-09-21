@@ -1047,11 +1047,18 @@ def inject_ascshim(html_path):
     return inject_script_src(html_path, '../../../../ascshim.js')
 
 
+def inject_ohos_boot(html_path):
+    """在 <head> 注入 ohos/boot.js（宿主装配域启动链）。与 ascshim 无加载顺序
+    耦合（boot 的启动调度是 setTimeout 轮询，等的是编辑器 app 对象而非 ascshim
+    产物）；注入行位置在 ascshim 之前（两者都插在 <head> 首位，后插者在前）"""
+    return inject_script_src(html_path, '../../../../ohos/boot.js')
+
+
 def inject_script_src(html_path, src_rel):
-    """在 <head> 后注入 <script src=...>（幂等）"""
+    """在 <head> 后注入 <script src=...>（幂等；判据=目标 src 自身，多目标共存）"""
     with open(html_path, encoding='utf-8') as f:
         content = f.read()
-    if 'ascshim.js' in content:
+    if src_rel in content:
         return False
     marker = '<head>'
     inject = '<script src="%s"></script>\n' % src_rel
@@ -1127,6 +1134,22 @@ def main():
         if os.path.isfile(p) and inject_ascshim(p):
             injected += 1
             print('  注入 ascshim.js → apps/%s/main/index.html' % app)
+    # 4.1 ohos 模块（宿主装配域定制 JS，源=scripts/onlyoffice/ohos/）→
+    #     rawfile/onlyoffice/ohos/；编辑器 main/index.html 注入 boot.js
+    #    （与 ascshim 无顺序耦合：boot 等的是编辑器 app 对象，轮询调度）
+    OHOS_SRC = os.path.join(ROOT, 'scripts', 'onlyoffice', 'ohos')
+    OHOS_DST = os.path.join(DST, 'ohos')
+    if os.path.isdir(OHOS_SRC):
+        if os.path.isdir(OHOS_DST):
+            shutil.rmtree(OHOS_DST)
+        copy_tree(OHOS_SRC, OHOS_DST)
+        boots = [f for f in os.listdir(OHOS_DST) if f.endswith('.js')]
+        assert 'boot.js' in boots, 'ohos 模块缺 boot.js（scripts/onlyoffice/ohos/）'
+        for app in APP_MAIN:
+            p = os.path.join(W3D, 'apps', app, 'main', 'index.html')
+            if os.path.isfile(p) and inject_ohos_boot(p):
+                print('  注入 ohos/boot.js → apps/%s/main/index.html' % app)
+        print('  ohos 模块 %d 个 js → %s' % (len(boots), OHOS_DST))
     # 4.5 编辑器页 viewport meta 补注入（幂等）：官方三个 main/index.html 源码均带
     #     viewport meta，但 deploy 产物部分页面缺失（实测 presentationeditor 被剥）——
     #     缺失时手机 WebView 按 980px 默认虚拟视口渲染，与触摸输入按 devicePixelRatio
