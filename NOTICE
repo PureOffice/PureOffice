@@ -49,10 +49,17 @@ Third-party fonts bundled with this application
       Copyright (c) 2017-2024 Adobe
   Noto Serif CJK SC           SIL OFL 1.1
       Copyright (c) 2017-2024 Adobe
-  FandolFang, FandolKai       GPL with font exception
+  FandolFang, FandolKai       GPL-3.0 with font exception
       Copyright (c) 2012-2013 the Fandol team
   OpenSymbol                  MPL-2.0
       Copyright (c) 2009 Sun Microsystems Inc. and contributors
+
+Full license texts for the fonts above are distributed with this package:
+  licenses/OFL-1.1.txt, licenses/GPL-3.0.txt, licenses/MPL-2.0.txt,
+  licenses/Fandol-README.txt (upstream licensing statement).
+The Fandol fonts are redistributed here in a modified form (outline conversion
+and glyph subsetting); the exact conversion and subsetting commands are part of
+the source distribution (scripts/onlyoffice/).
 
 Other libraries bundled with the upstream web-apps distribution (jQuery,
 Backbone, Underscore, RequireJS, Monaco, Ace, Less.js, socket.io and others;

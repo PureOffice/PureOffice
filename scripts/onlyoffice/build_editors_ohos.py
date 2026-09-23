@@ -80,10 +80,9 @@ FONT_DST = os.path.join(DST, 'fonts')          # GlobalLoaders.fontFilesPath - .
 # 系统字体路径（Environment 可覆盖：OHOS_LIBERATION_FONTS；跨机不统一时保持一致性
 # —— 字体版本差异会反映进 version.json 哈希，2026-09-05 审查补）
 SYSTEM_FONTS_DIR = os.environ.get('OHOS_LIBERATION_FONTS', '/usr/share/fonts/truetype/liberation')
-# 中文字体路径（HarmonyOS SDK previewer 自带 CJK 字库；OHOS_CJK_FONTS_DIR 可覆盖。
-# —— 2026-09-05 用户目标「默认中文」：此前字体表只有拉丁字族，中文渲染全为方块）
-CJK_FONTS_DIR = os.environ.get('OHOS_CJK_FONTS_DIR',
-                               '/apps/harmony/sdk/default/hms/previewer/resources/fonts')
+# 注：中文字体的**全量源目录**（SDK previewer 的 CJK 字库）不在这里配置——
+# 全量→静态 glyf 的抽取/转换是独立一步（make_cjk_font_src.sh，读 OHOS_CJK_FONTS_DIR），
+# 产物落在 templates_src/fonts/ 后才由本脚本子集化（FONT_SRC_BY_FILE/FONT_SUBSETS）。
 # 顺序必须 R,I,B,BI（ascshim __fonts_files 注入数组与 FONT_INFOS 的 indexI/indexB 下标一致）
 # 下标 12 = NotoSansCJK-SC.ttf（黑体/无衬线 CJK；无独立 Bold/Italic 文件：
 # R/I/B/BI 共用 regular，加粗/倾斜由引擎模拟——与 OpenSymbol 行（全下标 16）同约定）
@@ -765,7 +764,7 @@ def install_smoke():
 def install_licenses():
     """随包许可证与声明文本 → rawfile/onlyoffice/licenses/{LICENSE,NOTICE}.txt。
 
-    两源均在仓库根：
+    三源均在仓库根：
       LICENSE = AGPL v3 全文 + 官方附加条款（与 third_party/core/LICENSE 正文
         逐字一致，md5 7de9925b…）+ 本工程声明段（自有代码授权 + 修改版声明与
         修改起始日期）。取根文件而非子模块文件：附加条款 2 要求修改版携带
@@ -773,6 +772,9 @@ def install_licenses():
         「声明修改」两项，避免两处文本漂移。
       NOTICE = 上游归属、修改清单、随包字体/脚本库的版权与许可、对应源码获取
         方式（附加条款 1/3 的归属声明与源码可得性）。
+      licenses/* = 随包第三方组件的**许可正本**（OFL/GPL/MPL 全文）。NOTICE 只
+        写「谁用什么许可」，正本必须随二进制分发才对得上（尤其 OFL 要求许可
+        文本随字体走）——外链不算分发。来源与校验和见 licenses/README.md。
     About 面板许可行链接 http://localhost/onlyoffice/licenses/LICENSE.txt →
     EditorPage 本地 serve（rawfile 根）；NOTICE 同源可访问（55_lic.js 弹层）。
     合规依据：官方附加条款 3(iii) 用户界面须能访问适用许可信息——文本随包+
@@ -788,6 +790,19 @@ def install_licenses():
         print('  %s → %s/%s (%d bytes)'
               % (src_name, dst_dir, dst_name,
                  os.path.getsize(os.path.join(dst_dir, dst_name))))
+    # 第三方正本整目录随包（仓库根 licenses/）。README.md 是维护说明不入包——
+    # 包内该目录 = 给最终用户的许可文本集合，不混构建文档。
+    src_dir = os.path.join(ROOT, 'licenses')
+    n = 0
+    for name in sorted(os.listdir(src_dir)) if os.path.isdir(src_dir) else []:
+        if not name.endswith('.txt'):
+            continue
+        shutil.copy2(os.path.join(src_dir, name), os.path.join(dst_dir, name))
+        n += 1
+    if not n:
+        raise SystemExit('第三方许可正本缺失：%s 下没有 .txt（见 licenses/README.md）'
+                         % src_dir)
+    print('  licenses/*.txt → %s (%d 份正本)' % (dst_dir, n))
 
 
 def write_font_rows():
