@@ -37,6 +37,12 @@
    - 字体：Noto Sans CJK SC / Noto Serif CJK SC（OFL 声明、版权行）、FandolFang/FandolKai（GPL + font exception）、OpenSymbol（MPL-2.0）——均随包，见 §4 L4；
    - MIT 清单（jQuery/Bootstrap 等）；**不得删改子模块内 LICENSE（保留原版权头）**。
 2. 采纳动作：根 LICENSE 置于依据 §5 选定的授权模式（默认 AGPL-3.0）。
+3. **第三方许可正本随包（2026-09-24 完成）**：仓库根 `licenses/` 存 OFL-1.1 /
+   GPL-3.0 / MPL-2.0 全文与 Fandol 上游授权声明（来源 URL 与校验和见
+   `licenses/README.md`）；`build_editors_ohos.py:install_licenses()` 在原有
+   LICENSE / NOTICE 之外整目录拷进包内 `rawfile/onlyoffice/licenses/`。
+   为什么必须做：NOTICE 只写「谁用什么许可」，而 OFL 明确要求**许可文本随字体
+   一起分发**（外链不算分发）——正本不随包时，NOTICE 的声明是空头支票。
 
 ### L2 源码可得性公开（交付物型）——验收：第三方可重放
 1. **公开仓库**（GitHub 等）：全仓库含子模块（子模块 URL 已指向官方 GitHub，可直接公开）；
@@ -55,7 +61,7 @@
 - 验收：docx/xlsx/pptx 中文渲染无方块 + `font-cjk` 回归（FONT_WARM_FILLED id 判据已同步为 `NotoSansCJK-SC.ttf`）。
 
 ### L5 版本纪律（交付物）——验收：一次发布全链可回溯
-- 每次发版：打 tag `v9.4.0-ohos-<n>`；附 `REPRO_MAP.md` 行；打包时 HAP 内含 `LICENSE`/`NOTICE`→ 于 `resources/rawfile/onlyoffice/compliance/`（**随包发布**，AGPL 文本随分发物）。
+- 每次发版：打 tag `v9.4.0-ohos-<n>`；附 `REPRO_MAP.md` 行；打包时 HAP 内含 `LICENSE`/`NOTICE` 与第三方正本 → 于 `resources/rawfile/onlyoffice/licenses/`（**随包发布**，AGPL 与第三方文本随分发物）。
 
 ### L6 上架材料清单（非代码）
 - 软件著作权登记（自有代码+组合代码，建议按整体申请）；
