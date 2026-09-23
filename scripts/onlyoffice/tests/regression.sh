@@ -2,7 +2,7 @@
 # ONLYOFFICE 鸿蒙真机回归（P0）：case 矩阵 → 启动验收态 → 采集日志 → 标签断言 → PASS/FAIL
 #
 # 用法（在仓库任意位置执行；设备必须显式指定——沿用 deploy_ohos.sh 约定）：
-#   OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/tests/regression.sh            # 全部 case
+#   OHOS_DEV=<ip:port> bash scripts/onlyoffice/tests/regression.sh                     # 全部 case
 #   OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --list                    # 列 case（不连设备）
 #   OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --case open-word          # 单个 case
 #   OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --record [--case <id>]    # 只采集不判定（加 case 前采基线用）
@@ -23,7 +23,7 @@ set -eo pipefail
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 TESTS="$ROOT/scripts/onlyoffice/tests"
 CASES="$TESTS/cases.tsv"
-HDC="${OHOS_HDC:-/apps/harmony/sdk/default/openharmony/toolchains/hdc}"
+. "$(dirname "$0")/../env.sh" || exit 1
 DEV="${OHOS_DEV:-}"
 BUNDLE=app.fuqidian.pureoffice
 LOG="/data/app/el2/100/base/$BUNDLE/haps/entry/files/web_console.txt"

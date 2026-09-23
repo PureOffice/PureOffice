@@ -7,7 +7,9 @@ set -e
 
 BOOST="$(cd "$(dirname "$0")/../../.." && pwd)/third_party/core/Common/3dParty/boost/boost_1_72_0"
 PREFIX="$BOOST/build/ohos_arm64"
-NDK="${OHOS_NDK:-/apps/harmony/sdk/default/openharmony/native}"
+# 工具链路径统一由 env.sh 探测（优先 OHOS_NDK，其次 OHOS_SDK_ROOT 下的 NDK 布局）
+. "$(dirname "$0")/../env.sh" || exit 1
+: "${NDK:?环境错误：未找到 OHOS NDK，请 export OHOS_NDK=/path/to/sdk/default/openharmony/native}"
 TRIPLE=aarch64-linux-ohos
 JOBS=$(nproc)
 

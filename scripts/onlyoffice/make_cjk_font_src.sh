@@ -35,9 +35,11 @@ set -eo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DST="$ROOT/scripts/onlyoffice/templates_src/fonts"
-FONTS="${OHOS_CJK_FONTS_DIR:-/apps/harmony/sdk/default/hms/previewer/resources/fonts}"
+# 字体源目录由 env.sh 探测（SDK previewer 自带字库；不写死本机路径）
+. "$(dirname "$0")/env.sh" || exit 1
+FONTS="${OHOS_CJK_FONTS_DIR:-}"
 
-[ -d "$FONTS" ] || { echo "错误：字体源目录不存在：$FONTS（可用 OHOS_CJK_FONTS_DIR 覆盖）" >&2; exit 1; }
+[ -d "$FONTS" ] || { echo "错误：字体源目录不存在或未探测到：'$FONTS'（可用 OHOS_CJK_FONTS_DIR 覆盖）" >&2; exit 1; }
 mkdir -p "$DST"
 
 # build_one <源 TTC 名> <产物名> <face 序> <期望 family 名>

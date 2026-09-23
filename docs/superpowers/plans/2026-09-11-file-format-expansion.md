@@ -30,12 +30,12 @@
 
 - **构建部署**（每个 Task 的验证起点；**禁止 hvigor clean**——会毁 core3d 产物）：
   ```bash
-  OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/deploy_ohos.sh
+  OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/deploy_ohos.sh
   ```
 - **单次手工验证**（拉一份干净日志）：
   ```bash
-  HDC=/apps/harmony/sdk/default/openharmony/toolchains/hdc
-  DEV=192.168.1.6:33363
+  HDC=$(command -v hdc)
+  DEV=<设备IP>:<端口>
   LOG=/data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files/web_console.txt
   $HDC -t $DEV shell aa force-stop app.fuqidian.pureoffice
   $HDC -t $DEV shell ": > $LOG"
@@ -44,7 +44,7 @@
   $HDC -t $DEV shell "grep -E 'OPEN_|FMT_|SAVE_BIN|LSO_' $LOG"
   ```
   注意：设备侧 `grep` 不支持 `\|`，必须用 `grep -E` + `|`。
-- **回归**：`OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/tests/regression.sh [--case <id> | --record --case <id>]`
+- **回归**：`OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/tests/regression.sh [--case <id> | --record --case <id>]`
 - 每个 Task 结束时 commit（中文 message，不带 Co-Authored-By）。
 
 ---
@@ -181,7 +181,7 @@ export function checkSaveOut(buf: Uint8Array, check: string): string | null {
 
 - [ ] **Step 2: 构建验证（编译通过）**
 
-Run: `OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/deploy_ohos.sh`
+Run: `OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/deploy_ohos.sh`
 Expected: 构建成功、部署到设备（`BUILD SUCCESSFUL` / 安装成功提示）。本 Task 纯新增文件，无行为变化。
 
 - [ ] **Step 3: Commit**
@@ -205,7 +205,7 @@ git commit -m "feat: formats.ets 格式表——可打开格式的唯一数据�
 - [ ] **Step 1: 复制三个真实旧格式样本（二进制，用 cp）**
 
 ```bash
-cd /data/share/office
+cd <仓库根>
 cp third_party/core/DesktopEditor/raster/Jp2/openjpeg/openjpeg-2.4.0/src/bin/mj2/mj2_to_metadata_Notes.doc scripts/onlyoffice/smoke/samples/sample.doc
 cp "third_party/core/Test/Applications/AVSOfficeEWSEditorTest/AVSOfficeEWSEditorTest/TestFiles/Auto_color_as_index.xls" scripts/onlyoffice/smoke/samples/sample.xls
 cp third_party/core/Common/cfcpp/test/data/src/ex.ppt scripts/onlyoffice/smoke/samples/sample.ppt
@@ -262,13 +262,13 @@ Line 2: regression sample for .rtf open/save.\par
 
 - [ ] **Step 5: 构建验证（样本进包）**
 
-Run: `OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/deploy_ohos.sh`
+Run: `OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/deploy_ohos.sh`
 Expected: 构建成功。若断言报 `smoke 样本缺失` → 回到 Step 1/3 补文件。
 
 验证样本确实进了设备沙箱（应用启动后）：
 ```bash
-HDC=/apps/harmony/sdk/default/openharmony/toolchains/hdc
-$HDC -t 192.168.1.6:33363 shell "ls -la /data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files/ | grep -E 'sample\.(doc|xls|ppt|rtf|txt|csv)'"
+HDC=$(command -v hdc)
+$HDC -t <设备IP>:<端口> shell "ls -la /data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files/ | grep -E 'sample\.(doc|xls|ppt|rtf|txt|csv)'"
 ```
 （样本由 EditorPage 启动时从 rawfile 拷到沙箱；若为空，先启动一次应用 `aa start -a EntryAbility -b app.fuqidian.pureoffice --ps m7args 'm7accept=1;m7file=sample.doc'`）
 
@@ -443,7 +443,7 @@ import { specOf, pickerSuffixes, editorAppOf, needsSaveAsPrompt, checkSaveOut } 
 Run:
 ```bash
 python3 scripts/onlyoffice/desktop/make_ascshim.py
-OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/deploy_ohos.sh
+OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/deploy_ohos.sh
 ```
 Expected: `node --check: OK` + 构建成功。
 
@@ -452,8 +452,8 @@ Expected: `node --check: OK` + 构建成功。
 对 `sample.doc` / `sample.xls` / `sample.ppt` / `sample.rtf` / `sample.txt` / `sample.csv` 各跑一次（把下面命令的 `sample.doc` 替换为目标样本）：
 
 ```bash
-HDC=/apps/harmony/sdk/default/openharmony/toolchains/hdc
-DEV=192.168.1.6:33363
+HDC=$(command -v hdc)
+DEV=<设备IP>:<端口>
 LOG=/data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files/web_console.txt
 $HDC -t $DEV shell aa force-stop app.fuqidian.pureoffice
 $HDC -t $DEV shell ": > $LOG"
@@ -625,12 +625,12 @@ git commit -m "feat: 打开链查表化（picker/硬校验/editorUrl/recents 全
 
 Run:
 ```bash
-OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/deploy_ohos.sh
+OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/deploy_ohos.sh
 ```
 验证 rtf/csv 原地保存（rtf 头校验 / csv 非空校验是否放行）：
 ```bash
-HDC=/apps/harmony/sdk/default/openharmony/toolchains/hdc
-DEV=192.168.1.6:33363
+HDC=$(command -v hdc)
+DEV=<设备IP>:<端口>
 LOG=/data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files/web_console.txt
 for F in sample.rtf sample.csv; do
   $HDC -t $DEV shell aa force-stop app.fuqidian.pureoffice
@@ -809,12 +809,12 @@ git commit -m "feat: 保存链按表分派产物后缀与校验（rtf/csv 不再
 
 - [ ] **Step 7: 构建 + 真机验证「提示 → 另存」**
 
-Run: `OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/deploy_ohos.sh`
+Run: `OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/deploy_ohos.sh`
 
 验证 doc 的保存被提示拦下且**不回写原文件**：
 ```bash
-HDC=/apps/harmony/sdk/default/openharmony/toolchains/hdc
-DEV=192.168.1.6:33363
+HDC=$(command -v hdc)
+DEV=<设备IP>:<端口>
 LOG=/data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files/web_console.txt
 $HDC -t $DEV shell aa force-stop app.fuqidian.pureoffice
 $HDC -t $DEV shell ": > $LOG"
@@ -932,16 +932,16 @@ Expected：无命中（30_open.js 已改为读 URL 的 m7type）。
 
 - [ ] **Step 5: 构建 + 真机验证「不支持格式显式提示」**
 
-Run: `OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/deploy_ohos.sh`
+Run: `OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/deploy_ohos.sh`
 
 构造一个不支持格式进沙箱（`.odt`），用 recents 路径触发：
 ```bash
-HDC=/apps/harmony/sdk/default/openharmony/toolchains/hdc
-DEV=192.168.1.6:33363
+HDC=$(command -v hdc)
+DEV=<设备IP>:<端口>
 BASE=/data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files
 LOG=$BASE/web_console.txt
 # 从仓库现有 odt 测试文件造一个样本（third_party/core/OdfFile/Test/Test/ExampleFiles/61364.odt）
-$HDC -t $DEV file send /data/share/office/third_party/core/OdfFile/Test/Test/ExampleFiles/61364.odt $BASE/sample.odt
+$HDC -t $DEV file send <仓库根>/third_party/core/OdfFile/Test/Test/ExampleFiles/61364.odt $BASE/sample.odt
 $HDC -t $DEV shell aa force-stop app.fuqidian.pureoffice
 $HDC -t $DEV shell ": > $LOG"
 $HDC -t $DEV shell "aa start -a EntryAbility -b app.fuqidian.pureoffice --ps m7args 'm7accept=1;m7file=sample.odt'"
@@ -983,8 +983,8 @@ git commit -m "refactor: 残留扩展名硬编码清理（tab 主题色/验收�
 对 9 个新 case 逐个采基线——参数取自 Step 2 表格，先跑一遍看**真实标签**：
 
 ```bash
-HDC=/apps/harmony/sdk/default/openharmony/toolchains/hdc
-DEV=192.168.1.6:33363
+HDC=$(command -v hdc)
+DEV=<设备IP>:<端口>
 BASE=/data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files
 for ARGS in 'm7accept=1;m7file=sample.doc' 'm7accept=1;m7file=sample.xls' \
             'm7accept=1;m7file=sample.ppt' 'm7accept=1;m7file=sample.rtf' \
@@ -1027,8 +1027,8 @@ save-doc|m7accept=1;m7file=sample.doc;m7auto=1|120|FMT_DIALOG_ON|SAVE_BIN_X2T,FM
 
 Run:
 ```bash
-OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/tests/regression.sh --case open-doc
-OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/tests/regression.sh --case save-doc
+OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/tests/regression.sh --case open-doc
+OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/tests/regression.sh --case save-doc
 ```
 Expected: 均为 `PASS`。任一 FAIL → 看 `out/<runid>/<id>.log` 实际标签，修正 cases.tsv 判据（判据错）或回到对应 Task 修代码（真回归）。
 
@@ -1048,7 +1048,7 @@ Expected: 均为 `PASS`。任一 FAIL → 看 `out/<runid>/<id>.log` 实际标�
 
 - [ ] **Step 5: 跑全量回归**
 
-Run: `OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/tests/regression.sh`
+Run: `OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/tests/regression.sh`
 Expected: `总计：19/19 PASS`（原 10 + 新 9）。有 FAIL → 逐 case 看日志修复；**原有 10 case 必须全绿**（三格式不得退化）。
 
 - [ ] **Step 6: Commit**

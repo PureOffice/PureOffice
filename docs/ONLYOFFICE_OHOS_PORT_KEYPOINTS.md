@@ -90,7 +90,7 @@ bash scripts/onlyoffice/deploy_ohos.sh --probe     # 打包+装机+重启+读探
 - **禁止 `hvigorw clean`**：会删 `build/core3d`（libx2t.a 等），native 链断，重建 10+ 分钟：
   `python3 scripts/onlyoffice/core3d/gen_cmake.py && cmake -S build/core3d -B build/core3d/build -DCMAKE_TOOLCHAIN_FILE=<abs path>/scripts/onlyoffice/core3d/ohos-arm64.toolchain.cmake && cmake --build build/core3d/build -j$(nproc)`
 - **增量打包校准**：改 .ets 后行为没变 → `strings entry/build/.../entry-default-signed.hap | grep <新字符串>` 确认进包（踩坑：modules.abc 未刷新）。
-- hdc **多设备必须 `-t 192.168.1.8:33363`**；截图 `snapshot_display` 后缀必须 `.jpeg`。
+- hdc **多设备必须 `-t <ip:port>`**；截图 `snapshot_display` 后缀必须 `.jpeg`。
 - 签名配置在 build-profile.json5 的 signingConfigs（2026-09-12 起该文件不入库——含本机签名材料路径与口令；模板见 build-profile.json5.template）。
 
 ## 9. 下一步（迭代 2/3）注意点
@@ -100,7 +100,7 @@ bash scripts/onlyoffice/deploy_ohos.sh --probe     # 打包+装机+重启+读探
 - 大文档（≥10MB）base64 过桥的阈值评估（迭代 3 范畴）。
 - 正式化时瘦身 index.html 诊断打点（保留 `__pf` 骨架即可）。
 
-## 10. 迭代 2 实测沉淀（2026-09-03 真机 192.168.1.8）—— 打开链 v11
+## 10. 迭代 2 实测沉淀（2026-09-03 真机）—— 打开链 v11
 
 **Gateway 协议（webapps `apps/common/Gateway.js`）四个坑，必读：**
 1. 命令名是 **驼峰**：`openDocument` / `openDocumentFromBinary`（`commandMap` 精确匹配；全小写 miss——`go:"-"` 实测）。
@@ -310,7 +310,7 @@ release 升级会冻结）；构建切官方 --desktop 语义；B 架构补 nati
 - 三处欢迎页跳转必须带 `?lang=zh-CN`：EditorPage.homeUrl（#63 已带）、
   ascshim 30_open.goBack、ascshim 40_save.requestClose 覆写（本次补上——用户
   「关闭后变英文」即这两处）。
-- 验证（真机 192.168.1.8）：点右上角 X（slot-btn-close）→ requestClose 覆写 →
+- 验证（真机）：点右上角 X（slot-btn-close）→ requestClose 覆写 →
   欢迎页全中文 ✓。uitest 点击坐标：`dumpLayout` JSON 的 bounds 物理像素。
 
 ### 15.2 新建 word 默认语言 = 空模板 docDefaults（链：模板→x2t→doct_bin）

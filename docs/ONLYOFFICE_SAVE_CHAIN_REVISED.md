@@ -79,7 +79,7 @@ x2t    doct_bin2docx → BinDocxRW::CDocxSerializer → docx zip       （native
   2. 真机日志确认：`DOCY;v` 头、base64 长度、`x2t rc=0`、`out.docx` zip 头（mk=0x504b）。
   3. 用 shell `hdc file recv` 拉回 `out.docx`，本地（Host）用 python zipfile 打开校验（`word/document.xml` 是否正确）。
 - **通过标准**：编辑后内容（如页面上打了 "POC5" 字符串）出现在 `out.docx` 的 `word/document.xml` 中。—— **已达成**。
-- **实测结果（2026-09-03 真机 192.168.1.8）**：
+- **实测结果（2026-09-03 真机）**：
   - 页面轮询等 `Asc.editor.WordControl.m_oLogicDocument`（CDocument）就绪 → `asc_AddText('POC5-1788365602126')`；
   - `new AscCommonWord.BinaryFileWriter(model).Write(false)` → `DOCY;v5;292662;CwCAAgAAC…` 整串 390231B（**v5 契约**，与 x2t loadFromFile 一致）；
   - `window.AscSaveBridge.save(docy)`（registerJavaScriptProxy）→ ArkTS 写沙箱 `in.bin`（390231B 精确一致）→ `x2tConvertSync(<Convert>)` **rc=0x0** → `save.docx` 26077B（比原始文档 seq 大 29B = 标记文字），`mk=0x504b zipok`；
@@ -88,7 +88,7 @@ x2t    doct_bin2docx → BinDocxRW::CDocxSerializer → docx zip       （native
   1. **模型就绪时序**：`Asc.editor`/`WordControl` 出现 ≠ 文档打开完成；`m_oLogicDocument` 由 `asc_docs_api.InitEditor` 创建（TrueInitEditor→asc_SaveDocumentReady 链），必须轮询 `m_oLogicDocument` 非 null（文档打开约需 1-3s，Gateway openDocument 由 index.html POC-1 模板 postMessage 驱动）。
   2. **`BinaryFileWriter(null)` 不报错**——构造不校验，`Write()` 时才 `this.Document.App` → TypeError "Cannot read properties of null (reading 'App')"；按模型就绪轮询即根治。
   3. **save() 返回非 Promise**（`registerJavaScriptProxy` 在 SDK 6.1.0(23) 传 AsyncMethodList 后 `.then` 仍不可用）：**调用本身照常生效**（副作用完整写盘+转换），只是页面端拿不到解决值——后续版本用回调/轮询确认或改 runJavaScript 通道。**日志缺行 ≠ 未执行**：以沙箱 in.bin/save.docx 时间戳+大小为准。
-  4. **hdc 多设备坑**：主机在列两台设备（192.168.1.4:44959 / 192.168.1.8:33363）时**所有命令必须 `-t <addr>`**，否则报 `ExecuteCommand need connect-key`（迷惑性强）。
+  4. **hdc 多设备坑**：主机在列多台设备时**所有命令必须 `-t <addr>`**，否则报 `ExecuteCommand need connect-key`（迷惑性强）。
   5. 后续收尾：POC-5 探针与 `tryNativeSaveStep1` 为临时代码（EditorPage.ets onPageEnd/aboutToAppear），阶段 2 换成正式保存按钮与原生对话框前应撤除。
 
 ## 5. 方案性修正汇总

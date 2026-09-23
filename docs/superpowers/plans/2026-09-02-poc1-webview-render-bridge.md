@@ -9,9 +9,9 @@
 **Tech Stack:** HarmonyOS NEXT 6.1.0(23)、ArkTS/ArkUI、系统 Web 组件(@ohos.web.webview)、CEF-only `onlyoffice://` scheme、sdkjs(JS)、hvigorw、hdc。
 
 **前置约束（已确认）：**
-- 目标真机 `192.168.1.8:33363`，hdc 在 `/apps/harmony/sdk/default/openharmony/toolchains/hdc`
+- 目标真机 `<设备IP>:<端口>`，hdc 在 `$(command -v hdc)`
 - 对齐 wineohos：签名 `.ohos/*.cer|.p7b|.p12`、`targetSdkVersion=6.1.0(23)`、`runtimeOS: HarmonyOS`、`nativeCompiler: BiSheng`
-- 工程根：`/data/share/office`（当前仅 `.temp`、`docs`）
+- 工程根：`<仓库根>`（当前仅 `.temp`、`docs`）
 
 ---
 
@@ -25,7 +25,7 @@
 - [ ] **Step 1: 建目录 + 拷签名/构建配置（不改动 wineohos）**
 
 ```bash
-cd /data/share/office
+cd <仓库根>
 mkdir -p AppScope/resources/base/element AppScope/resources/base/media \
   entry/src/main/ets/entryability entry/src/main/ets/pages \
   entry/src/main/resources/base/element entry/src/main/resources/base/profile \
@@ -173,7 +173,7 @@ export default class EntryAbility extends UIAbility {
 - [ ] **Step 10: 写 `.gitignore` + 初始化 git**
 
 ```bash
-cd /data/share/office
+cd <仓库根>
 cat > .gitignore <<'EOF'
 entry/build/
 build/
@@ -202,13 +202,13 @@ git add -A && git commit -m "chore: scaffold OHOS HAP project skeleton (POC-1)"
 - [ ] **Step 1: 写拉取脚本（clone sdkjs），拷贝产物到 rawfile**
 
 ```bash
-cd /data/share/office
+cd <仓库根>
 mkdir -p scripts/onlyoffice
 cat > scripts/onlyoffice/fetch_frontend.sh <<'EOF'
 #!/usr/bin/env bash
 set -e
-SDK_DIR=/data/share/office/.temp/onlyoffice_frontend
-mkdir -p "$SDK_DIR" /data/share/office/entry/src/main/resources/rawfile/onlyoffice
+SDK_DIR=<仓库根>/.temp/onlyoffice_frontend
+mkdir -p "$SDK_DIR" <仓库根>/entry/src/main/resources/rawfile/onlyoffice
 cd "$SDK_DIR"
 # sdkjs：编辑器引擎 + api（JS 库，无需构建即可被 <script> 引入）
 [ -d sdkjs ] || git clone --depth=1 https://github.com/ONLYOFFICE/sdkjs.git
@@ -221,18 +221,18 @@ cp -r sdkjs/licenses rawfileweb/ 2>/dev/null || true
 cp -r sdkjs/vendor rawfileweb/ 2>/dev/null || true
 cp -r sdkjs/sdkjs rawfileweb/ 2>/dev/null || true
 cp -r sdkjs/api rawfileweb/ 2>/dev/null || true
-echo "RAWFILE_DEST=" /data/share/office/entry/src/main/resources/rawfile/onlyoffice
+echo "RAWFILE_DEST=" <仓库根>/entry/src/main/resources/rawfile/onlyoffice
 EOF
 chmod +x scripts/onlyoffice/fetch_frontend.sh
 ./scripts/onlyoffice/fetch_frontend.sh
-echo "--- sdkjs 顶层 ---"; ls /data/share/office/.temp/onlyoffice_frontend/sdkjs | head -30
-echo "--- api 产物 ---"; ls /data/share/office/.temp/onlyoffice_frontend/sdkjs/api 2>/dev/null | head
+echo "--- sdkjs 顶层 ---"; ls <仓库根>/.temp/onlyoffice_frontend/sdkjs | head -30
+echo "--- api 产物 ---"; ls <仓库根>/.temp/onlyoffice_frontend/sdkjs/api 2>/dev/null | head
 ```
 
 - [ ] **Step 2: 确认 sdkjs 的编辑器初始化 API（读源码定入口，不臆造）**
 
 ```bash
-cd /data/share/office/.temp/onlyoffice_frontend/sdkjs
+cd <仓库根>/.temp/onlyoffice_frontend/sdkjs
 echo "--- 找 api.js / editor 初始化入口 ---"
 find . -maxdepth 3 -iname 'api.js' -o -iname '*editor*.js' 2>/dev/null | grep -viE 'node_modules|\.min\.' | head -20
 echo "--- 找 最小宿主示例/测试 html（能直接跑编辑器的例子） ---"
@@ -245,13 +245,13 @@ find . -maxdepth 4 -iname '*.html' 2>/dev/null | head -20
 
 ```bash
 # 上一步确定入口后，把需要的 sdkjs 静态产物拷入 rawfile（Task 4 用 onInterceptRequest 供给）
-cp -r /data/share/office/.temp/onlyoffice_frontend/sdkjs/sdkjs \
-      /data/share/office/entry/src/main/resources/rawfile/onlyoffice/sdkjs
-cp -r /data/share/office/.temp/onlyoffice_frontend/sdkjs/api \
-      /data/share/office/entry/src/main/resources/rawfile/onlyoffice/api
-cp -r /data/share/office/.temp/onlyoffice_frontend/sdkjs/vendor \
-      /data/share/office/entry/src/main/resources/rawfile/onlyoffice/vendor 2>/dev/null || true
-find /data/share/office/entry/src/main/resources/rawfile/onlyoffice -maxdepth 2 | head -30
+cp -r <仓库根>/.temp/onlyoffice_frontend/sdkjs/sdkjs \
+      <仓库根>/entry/src/main/resources/rawfile/onlyoffice/sdkjs
+cp -r <仓库根>/.temp/onlyoffice_frontend/sdkjs/api \
+      <仓库根>/entry/src/main/resources/rawfile/onlyoffice/api
+cp -r <仓库根>/.temp/onlyoffice_frontend/sdkjs/vendor \
+      <仓库根>/entry/src/main/resources/rawfile/onlyoffice/vendor 2>/dev/null || true
+find <仓库根>/entry/src/main/resources/rawfile/onlyoffice -maxdepth 2 | head -30
 ```
 
 ---
@@ -440,13 +440,13 @@ export const ascBridgeMethodList = ['getDocumentsCount', 'getDocumentUrl', 'asc_
 - [ ] **Step 1: hvigor 配置检查 + 构建**
 
 ```bash
-cd /data/share/office
-export OHOS_SDK=/apps/harmony/sdk/default/openharmony
+cd <仓库根>
+export OHOS_SDK=<OHOS_SDK_ROOT>/openharmony
 export PATH=$OHOS_SDK/toolchains:$PATH
 # 若无全局 hvigorw，用 wineohos 的同款
-ls /apps/harmony/bin/hvigorw && /apps/harmony/bin/hvigorw --version
-/apps/harmony/bin/hvigorw clean --no-daemon
-/apps/harmony/bin/hvigorw assembleHap --mode module -p product=default --no-daemon
+ls hvigorw && hvigorw --version
+hvigorw clean --no-daemon
+hvigorw assembleHap --mode module -p product=default --no-daemon
 echo "---  产物 ---"
 find . -name '*.hap' 2>/dev/null
 ```
@@ -456,11 +456,11 @@ find . -name '*.hap' 2>/dev/null
 - [ ] **Step 2: 安装到真机 + 启动 + 看日志**
 
 ```bash
-H=/apps/harmony/sdk/default/openharmony/toolchains/hdc
+H=$(command -v hdc)
 $H list targets
-$H -t 192.168.1.8:33363 install -r entry/build/default/outputs/default/entry-default-signed.hap
-$H -t 192.168.1.8:33363 shell aa start -a EntryAbility -b com.onlyoffice.poc1
-$H -t 192.168.1.8:33363 hilog | grep -iE 'poc1|onlyoffice|Asc|initEditor|Web error' | tail -50
+$H -t <设备IP>:<端口> install -r entry/build/default/outputs/default/entry-default-signed.hap
+$H -t <设备IP>:<端口> shell aa start -a EntryAbility -b com.onlyoffice.poc1
+$H -t <设备IP>:<端口> hilog | grep -iE 'poc1|onlyoffice|Asc|initEditor|Web error' | tail -50
 ```
 
 **Expected:** app 启动、无 `Web error`、日志出现 `initEditor` 相关输出。
@@ -472,9 +472,9 @@ $H -t 192.168.1.8:33363 hilog | grep -iE 'poc1|onlyoffice|Asc|initEditor|Web err
 - [ ] **Step 1: UI 验证（真机看屏/截屏）**
 
 ```bash
-H=/apps/harmony/sdk/default/openharmony/toolchains/hdc
-$H -t 192.168.1.8:33363 shell snapshot_display -f /data/local/tmp/poc1.png
-$H -t 192.168.1.8:33363 file recv /data/local/tmp/poc1.png ./poc1.png
+H=$(command -v hdc)
+$H -t <设备IP>:<端口> shell snapshot_display -f /data/local/tmp/poc1.png
+$H -t <设备IP>:<端口> file recv /data/local/tmp/poc1.png ./poc1.png
 ```
 **Expected:** 截图显示编辑器画布出现「POC-1 编辑器渲染验证」文本、有工具栏痕迹、无白屏。
 
@@ -490,7 +490,7 @@ this.controller.runJavaScript('window.Asc && (window.Asc.getDocumentsCount ? win
 - [ ] **Step 3: 记录 POC-1 结论（渲染可行 + 桥走通）**
 
 ```bash
-cat > /data/share/office/docs/poc1-result.md <<'EOF'
+cat > <仓库根>/docs/poc1-result.md <<'EOF'
 # POC-1 结论
 - 日期: $(date +%F)
 - 结果: PASS/FAIL

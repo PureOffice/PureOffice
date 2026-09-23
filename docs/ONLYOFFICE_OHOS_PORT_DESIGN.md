@@ -1,7 +1,7 @@
 # ONLYOFFICE DesktopEditors → 鸿蒙 Pad 移植设计文档
 
 - 日期：2026-09-02
-- 目标产物：鸿蒙 Pad（商用 HarmonyOS NEXT，真机 `192.168.1.8:33363`）上的 ONLYOFFICE 办公套件
+- 目标产物：鸿蒙 Pad（商用 HarmonyOS NEXT，真机 `<设备IP>:<端口>`）上的 ONLYOFFICE 办公套件
 - 源项目：<https://github.com/ONLYOFFICE/DesktopEditors>（AGPL-3.0）
 - 参考工程：`../wineohos`（HAP 宿主范式）、`../qemuohos`；OHOS 侧参考件 `openharmony-sig/qt`、`openharmony-tpc/chromium_cef`
 
@@ -89,8 +89,8 @@ ArkWebCore.hap (Chromium + CEF 合编产物)                 ← 系统引擎，
 - **② 能力天花板（仅 B 路径）：无 renderer 原生钩子、无应用级多进程控制**：ONLYOFFICE 里依赖"同步 V8 原生桥"的能力（同步剪贴板/原生打印/系统拖拽/原生拼写）须浏览器侧重写或降级异步。Electron(C) 能自管多进程，但桥依旧异步，故非必要。
 
 ### 2.5 环境实测（已就绪）
-- `hdc 3.2.0d`：`/apps/harmony/sdk/default/openharmony/toolchains/hdc`，已连通真机 `192.168.1.8:33363`（另有 `192.168.1.4`）
-- OHOS SDK：`/apps/harmony/sdk/default/openharmony`（ets/js/native/toolchains），目标 `HarmonyOS NEXT 6.1.0(23)`，native 编译器 BiSheng
+- `hdc 3.2.0d`：位于 SDK 的 `openharmony/toolchains/`（路径由 `scripts/onlyoffice/env.sh` 探测），已连通真机 `<设备IP>:<端口>`（另有第二台设备）
+- OHOS SDK：`<OHOS_SDK_ROOT>/openharmony`（ets/js/native/toolchains），目标 `HarmonyOS NEXT 6.1.0(23)`，native 编译器 BiSheng
 - node v22 / hvigorw / ohpm 齐备；wineohos 已有签名证书（.cer/.p7b/.p12）与 sign 脚本可复用
 
 ---
@@ -206,7 +206,7 @@ ArkWebCore.hap (Chromium + CEF 合编产物)                 ← 系统引擎，
 - **输出**: 桥改写工作量清单 + 方案可行性判定
 
 ### POC-2 —— core 交叉编译到 arm64 OHOS 【✅ 已通过：convertershell NAPI 26 库真机就位，docx→ODT rc=0】
-- **方法**: 用 OHOS NDK（BiSheng clang，`OPENHARMONY_NDK_ROOT` 指向 `/apps/harmony/sdk/default/openharmony/native`）交叉编译 `core`（先最小链路 x2t），`libs` → `.so`；NAPI 暴露 `convert(path)`
+- **方法**: 用 OHOS NDK（BiSheng clang，`OPENHARMONY_NDK_ROOT` 指向 `<OHOS_SDK_ROOT>/openharmony/native`）交叉编译 `core`（先最小链路 x2t），`libs` → `.so`；NAPI 暴露 `convert(path)`
 - **通过标准**: NAPI 在真机把 `sample.docx` 转成 PDF/内部格式成功；验证 OHOS 沙箱下无 exec 段 mmap、可写文件、Boost/OpenSSL/ICU/Hunspell 依赖链交叉编译通过
 - **风险要点**: `NOEXEC_MMAP_ANALYSIS`（参照 wineohos）、`dlopen`、权限、`fork` 限制
 
@@ -224,7 +224,7 @@ ArkWebCore.hap (Chromium + CEF 合编产物)                 ← 系统引擎，
 
 ---
 
-## 6. 工程结构（根目录 `/data/share/office`，对齐 wineohos 骨架）
+## 6. 工程结构（仓库根目录，对齐 wineohos 骨架）
 
 ```
 office/
@@ -256,12 +256,12 @@ office/
 ## 7. 真机部署链路
 
 ```bash
-# 开发→真机联调循环（设备已 hdc 连通 192.168.1.8:33363）
-hdc list targets                        # 确认 192.168.1.8:33363
-hdc -t 192.168.1.8:33363 shell           # 进真机 shell
-hdc -t 192.168.1.8:33363 install <app.hap>
-hdc -t 192.168.1.8:33363 shell aa start -a <AbilityName> -b <bundleName>
-hdc -t 192.168.1.8:33363 hilog | grep -iE 'onlyoffice|core|NAPI|web'
+# 开发→真机联调循环（设备已 hdc 连通 <设备IP>:<端口>）
+hdc list targets                        # 确认 <设备IP>:<端口>
+hdc -t <设备IP>:<端口> shell           # 进真机 shell
+hdc -t <设备IP>:<端口> install <app.hap>
+hdc -t <设备IP>:<端口> shell aa start -a <AbilityName> -b <bundleName>
+hdc -t <设备IP>:<端口> hilog | grep -iE 'onlyoffice|core|NAPI|web'
 ```
 
 **构建（DevEco 命令行 / hvigor）**：
@@ -291,7 +291,7 @@ hvigorw assembleHap --mode module -p product=default --no-daemon
 
 ## 9. 附：调研要点与参考
 
-- **DesktopEditors**：`/data/share/office/.temp/desktop_editors/`（含 `.gitmodules`、7 个 submodule）
+- **DesktopEditors**：`<仓库根>/.temp/desktop_editors/`（含 `.gitmodules`、7 个 submodule）
   - `desktop_apps/win-linux/`：Qt5.15(qmake) 壳，`defaults.pri` 模块=`core gui widgets printsupport svg network`；平台层用 GTK3/xcb/X11/cups/dbus/notify（OHOS 需替换为 `platform_ohos`）
   - `desktop_sdk/ChromiumBasedEditors/lib/`：CEF v103/107 + `qt_wrapper`(QCefView/QAScApplicationManager)；自定义 scheme `onlyoffice://`；`window.Asc.*` 原生桥类（AscApplicationManager/AscCrypto/AscSpellChecker…）
 - **openharmony-sig/qt**：Qt 5.15.12/5.15.17 + 6.5.6；QtWebEngine 未移植；QPA `-platform openharmony`（NativeWindow+EGL+XComponent）；`qtohextras` 替代沙箱受限的 QProcess/QLocalServer

@@ -7,8 +7,8 @@
 # 这些欠账聚合成清单（去重+计数），是「打包完整性」的证据通道。
 #
 # 用法：
-#   bash scripts/onlyoffice/audit_missing_assets.sh
-#     （参数：设备地址，默认 192.168.1.8:33363；环境变量 OHOS_HDC 覆盖 hdc 路径）
+#   bash scripts/onlyoffice/audit_missing_assets.sh <ip:port>
+#     （设备地址必须显式给出；hdc 路径由 env.sh 探测，OHOS_HDC 可覆盖）
 #   注意：需要在设备上跑过一轮操作（打开/新建三格式任意组合）后执行，日志才有代表
 #   性；清空日志再跑一轮 = 本轮操作的完整缺口基线：
 #   hdc shell "> /data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files/web_console.txt"
@@ -21,8 +21,14 @@
 #   此脚本只列举，不判定（判定 = 对照审计文档人工或后续基线演进）。
 # ============================================================================
 set -eo pipefail
-HDC="${OHOS_HDC:-/apps/harmony/sdk/default/openharmony/toolchains/hdc}"
-DEV="${1:-${OHOS_DEV:-192.168.1.8:33363}}"
+. "$(dirname "$0")/env.sh" || exit 1
+# 目标设备必须显式指定（位置参数或 OHOS_DEV），同 deploy_ohos.sh 的约定——
+# 不给默认值，避免多设备环境下静默查错机器。
+DEV="${1:-${OHOS_DEV:-}}"
+if [ -z "$DEV" ]; then
+  echo "错误：未指定目标设备。用法：bash $0 <ip:port>（或 OHOS_DEV=<ip:port> bash $0）" >&2
+  exit 1
+fi
 CONSOLE=/data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files/web_console.txt
 
 echo "== 运行时 rawfile miss 清单（$DEV）=="

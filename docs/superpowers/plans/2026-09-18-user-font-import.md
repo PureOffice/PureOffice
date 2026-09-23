@@ -35,15 +35,15 @@
 
 ```bash
 # 编译（严禁 clean——会删 build/core3d 的 libx2t.a）
-/apps/harmony/bin/hvigorw assembleHap -p product=default --mode module --no-daemon 2>&1 | tail -3
+hvigorw assembleHap -p product=default --mode module --no-daemon 2>&1 | tail -3
 # 期望：BUILD SUCCESSFUL
 ```
 
 **真机（Task 9 专用）：**
 
 ```bash
-OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/deploy_ohos.sh
-hdc -t 192.168.1.6:33363 shell "cat /data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files/web_console.txt" | grep LSO_UFONT
+OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/deploy_ohos.sh
+hdc -t <设备IP>:<端口> shell "cat /data/app/el2/100/base/app.fuqidian.pureoffice/haps/entry/files/web_console.txt" | grep LSO_UFONT
 ```
 
 ---
@@ -272,7 +272,7 @@ export function parseSfnt(u8: Uint8Array): SfntInfo | null {
 
 - [ ] **Step 2: 编译验证**
 
-Run: `/apps/harmony/bin/hvigorw assembleHap -p product=default --mode module --no-daemon 2>&1 | tail -3`
+Run: `hvigorw assembleHap -p product=default --mode module --no-daemon 2>&1 | tail -3`
 Expected: `BUILD SUCCESSFUL`
 
 - [ ] **Step 3: 用 Python 侧对照值备好真机验收样本（不写文件，仅记录期望）**
@@ -562,7 +562,7 @@ export function encodeUrlParam(filesDir: string): string {
 
 - [ ] **Step 2: 编译验证**
 
-Run: `/apps/harmony/bin/hvigorw assembleHap -p product=default --mode module --no-daemon 2>&1 | tail -3`
+Run: `hvigorw assembleHap -p product=default --mode module --no-daemon 2>&1 | tail -3`
 Expected: `BUILD SUCCESSFUL`
 
 - [ ] **Step 3: Commit**
@@ -648,7 +648,7 @@ function loadUserFont(filesDir: string, rel: string, log: (m: string) => void): 
 
 - [ ] **Step 3: 编译验证**
 
-Run: `/apps/harmony/bin/hvigorw assembleHap -p product=default --mode module --no-daemon 2>&1 | tail -3`
+Run: `hvigorw assembleHap -p product=default --mode module --no-daemon 2>&1 | tail -3`
 Expected: `BUILD SUCCESSFUL`
 
 - [ ] **Step 4: Commit**
@@ -719,7 +719,7 @@ git commit -m "feat(font): 拦截层新增 userfonts 前缀（沙箱供给，XOR
 
 - [ ] **Step 4: 编译验证**
 
-Run: `/apps/harmony/bin/hvigorw assembleHap -p product=default --mode module --no-daemon 2>&1 | tail -3`
+Run: `hvigorw assembleHap -p product=default --mode module --no-daemon 2>&1 | tail -3`
 Expected: `BUILD SUCCESSFUL`
 
 - [ ] **Step 5: Commit**
@@ -936,14 +936,14 @@ git commit -m "feat(font): 欢迎页侧栏「导入字体」入口（clone 官�
 
 - [ ] **Step 1: 部署**
 
-Run: `OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/deploy_ohos.sh 2>&1 | tail -8`
+Run: `OHOS_DEV=<设备IP>:<端口> bash scripts/onlyoffice/deploy_ohos.sh 2>&1 | tail -8`
 Expected: `== done ==`，install 段含 `install bundle successfully`
 
 - [ ] **Step 2: 准备样本并推送到设备**
 
 ```bash
 # 中文 ttf 样本（取随包字体之一改名，family 与内置行重名则换用系统字体文件）
-hdc -t 192.168.1.6:33363 file send \
+hdc -t <设备IP>:<端口> file send \
   entry/src/main/resources/rawfile/onlyoffice/fonts/FandolKai.ttf \
   /data/local/tmp/Download/OnlyOffice/Documents/TestFont.ttf
 ```

@@ -19,7 +19,7 @@ AI 插件联网验证桩（OpenAI 兼容 /v1 端点）——仅供 smoke，非�
   python3 scripts/onlyoffice/smoke/ai_stub_openai.py            # 默认 0.0.0.0:18999
   PORT=19000 python3 scripts/onlyoffice/smoke/ai_stub_openai.py # 换端口
 
-正确目录：/data/share/office（相对引用仅脚本自身路径无关，无外部依赖；仅 python3 标准库）。
+正确目录：仓库根目录（相对引用仅脚本自身路径无关，无外部依赖；仅 python3 标准库）。
 
 CORS 说明：AI 插件 iframe origin=http://localhost（编辑器仍由 onInterceptRequest 本地提供），
 浏览器 preflight（OPTIONS + Authorization）必须被桩应答 ACAO:* 才会放行实际 POST。

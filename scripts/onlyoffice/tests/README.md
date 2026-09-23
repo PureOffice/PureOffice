@@ -9,7 +9,7 @@
 
 ```bash
 # 全量（约 7 分钟，20 个 case；每个 case 命中终态标签即结束，不必等满超时）
-OHOS_DEV=192.168.1.6:33363 bash scripts/onlyoffice/tests/regression.sh
+OHOS_DEV=<设备ip:端口> bash scripts/onlyoffice/tests/regression.sh
 
 # 单 case / 列清单 / 采基线（加 case 前用）
 OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --case open-word

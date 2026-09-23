@@ -1,10 +1,9 @@
 ## 快速开始（从零复现）
 
 ```bash
-# 环境（可环境变量覆盖）：
-#   OHOS SDK /apps/harmony/sdk/default/openharmony → OHOS_NDK
-#   hdc /apps/harmony/sdk/default/openharmony/toolchains/hdc → OHOS_HDC
-#   hvigor /apps/harmony/bin/hvigorw → OHOS_HVIGORW
+# 环境：工具链路径由 scripts/onlyoffice/env.sh 统一探测（PATH → SDK 环境变量 →
+#   通用安装布局；探测不到即报错，**不内置任何本机默认路径**）。要显式指定时：
+#   OHOS_HDC / OHOS_HVIGORW / OHOS_SDK_ROOT / OHOS_NDK / OHOS_CJK_FONTS_DIR
 #   target device → OHOS_DEV（必须显式指定，无默认值）
 
 # 0) 子模块与补丁（两者幂等，已应用即跳过；grunt-build.sh 全链会自动调用）
@@ -40,8 +39,8 @@ entry/src/main/
 third_party/core|sdkjs|...        # ONLYOFFICE 官方源码（submodule pinned）
 scripts/onlyoffice/
   desktop/grunt-build.sh          # 官方构建 + 装配唯一入口（--no-upstream 仅装配）
-  desktop/make_ascshim.py         # ascshim.js 拼装（src/*.js → rawfile）
-  desktop/src/*.js                # 页面适配层（桥/打开/保存/欢迎页）
+  desktop/ascdesktop_shim_raw.js  # 页面侧 AscDesktopEditor 适配层（装配期展开成桥方法）
+  desktop/asc_methods.txt         # 桥需实现的方法清单（一行一个，装配期生成调用表）
   make_empty_templates.py         # 新建空模板（empty.docx/xlsx/pptx）
   build_editors_ohos.py           # 装配：webapps/sdkjs/fonts/index.html/smoke/version.json
   deploy_ohos.sh                  # 一键增量：装配(ascshim/模板/注入) + 打包 + 安装 + 重启
@@ -52,8 +51,9 @@ docs/                             # 设计/关键点/功能矩阵/合规方案�
 ## 常用命令
 
 ```bash
-# 构建 HAP（严禁 clean——会清掉 build/core3d native 产物）
-/apps/harmony/bin/hvigorw assembleHap -p product=default --mode module --no-daemon
+# 构建 HAP（严禁 clean——会清掉 build/core3d native 产物）；
+# hvigorw 需在 PATH（或 export OHOS_HVIGORW=<path>），探测见 scripts/onlyoffice/env.sh
+hvigorw assembleHap -p product=default --mode module --no-daemon
 
 # 真机（多设备必须 -t <ip:port>）
 hdc list targets

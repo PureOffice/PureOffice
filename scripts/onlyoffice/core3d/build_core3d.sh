@@ -18,7 +18,7 @@
 #   - ICU:     scripts/onlyoffice/core3d/build_icu_ohos.sh
 #   - cryptopp: third_party/core/Common/3dParty/cryptopp/libcryptopp.a（fetch_3dparty.sh）
 #   - third_party/core 子模块已克隆（release/v9.4.0）
-#   - NDK: env OHOS_NDK_ROOT 可覆盖（ohos-arm64.toolchain.cmake 默认 /apps/harmony/...）
+#   - NDK: 由 ../env.sh 探测（OHOS_NDK 或 OHOS_SDK_ROOT 下的 native/）；探测不到即退出
 set -eo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -26,6 +26,11 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 CORE3D="$ROOT/build/core3d"        # CMake source dir（gen_cmake.py 生成 CMakeLists 于此）
 BD="$CORE3D/build"                 # 产物目录
 TOOLCHAIN="$HERE/ohos-arm64.toolchain.cmake"
+# 工具链路径统一由 env.sh 探测（PATH / SDK 环境变量 / 通用布局；不写死本机路径），
+# NDK 根以 -DOHOS_NDK_ROOT 交给工具链文件（其无内置默认值，见该文件说明）
+. "$HERE/../env.sh" || exit 1
+: "${NDK:?环境错误：未找到 OHOS NDK，请 export OHOS_NDK=/path/to/sdk/default/openharmony/native}"
+NDK_ARG=(-DOHOS_NDK_ROOT="$NDK")
 
 gen() {
   python3 "$HERE/gen_cmake.py"
@@ -38,12 +43,14 @@ if [ "${1:-}" = "--rebuild" ]; then
   echo "== configure =="
   cmake -S "$CORE3D" -B "$BD" \
         -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+        "${NDK_ARG[@]}" \
         -DCMAKE_BUILD_TYPE=Release
 elif [ ! -f "$BD/CMakeCache.txt" ]; then
   gen
   echo "== configure (首次/无缓存) =="
   cmake -S "$CORE3D" -B "$BD" \
         -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+        "${NDK_ARG[@]}" \
         -DCMAKE_BUILD_TYPE=Release
 else
   # CMakeLists.txt 变更时 cmake --build 会自动重 run：无需显式配置

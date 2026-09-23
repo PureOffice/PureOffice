@@ -11,11 +11,10 @@
 set -eo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HAP="$ROOT/entry/build/default/outputs/default/entry-default-signed.hap"
-# 工具链/设备环境（可用环境变量覆盖；默认值=当前开发机路径）
-HDC="${OHOS_HDC:-/apps/harmony/sdk/default/openharmony/toolchains/hdc}"
-HVIGORW="${OHOS_HVIGORW:-/apps/harmony/bin/hvigorw}"
-# 目标设备必须显式指定，无默认值（2026-09-05 用户要求：默认 192.168.1.8 导致
-# 忘设 OHOS_DEV 时静默装错设备；用法前缀：OHOS_DEV=192.168.1.4:44959 bash deploy_ohos.sh）
+# 工具链路径统一由 env.sh 探测（PATH / SDK 环境变量 / 通用布局；不写死本机路径）
+. "$(dirname "$0")/env.sh" || exit 1
+# 目标设备必须显式指定，无默认值（2026-09-05 用户要求：给默认值会导致忘设
+# OHOS_DEV 时静默装错设备；用法前缀：OHOS_DEV=<ip:port> bash deploy_ohos.sh）
 DEV="${OHOS_DEV:-}"
 if [ -z "$DEV" ]; then
   echo "错误：未指定目标设备。用法：OHOS_DEV=<ip:port> bash $0" >&2
