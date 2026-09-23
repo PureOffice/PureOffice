@@ -69,3 +69,7 @@ scripts/onlyoffice/templates_src/fonts/FandolKai.ttf
 #   唯一字体资产（make_cjk_subset 幂等分支「src 缺失 → 复用产物」依赖它），
 #   git clone 后无需 otf2ttf/SDK TTC 即可构建。勿按"中间产物"套用上一条规则。
 
+# Windows/WSL 下载来源标记（NTFS 备用数据流，随文件从浏览器/资源管理器拷入而产生，
+# 名字形如 "<原名>:Zone.Identifier"，内容是来源 URL；无任何入库价值）
+*:Zone.Identifier
+
