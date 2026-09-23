@@ -14,7 +14,7 @@
 | 1 | `third_party/{core,sdkjs,web-apps,desktop-apps,build_tools}` 五子模块 | AGPL-3.0（LICENSE 已核，均为 GNU AGPL v3 文本） | 基线官方 `release/v9.4.0`；**core 有 OHOS 平台适配提交、sdkjs 有 desktop 适配提交（修改版）**；web-apps/desktop-apps/build_tools 视为原样 |
 | 2 | 修改痕迹：`scripts/onlyoffice/patches/core-ohos/`、core `d96b186d`、sdkjs `562fdc2` | 我方对 AGPL 代码的修改 | **必须连同修改版源码公开** |
 | 3 | ascshim 注入层（`make_ascshim.py` + `src/*.js`）、`EditorPage.ets`/`ascBridge.ets`/`x2t.ets`、构建链（`build_editors_ohos.py`/`deploy_ohos.sh`/`grunt-build.sh`） | 自有代码（作者所有） | 与 AGPL 程序组合分发，按 §5 边界处理 |
-| 4 | 字体 HarmonyOS Sans SC（`HarmonyOS_Sans_SC.ttf` 及 subset） | **华为字体许可**（非开源；仅限 HarmonyOS 签名应用内使用——分销另有条款需书面确认） | 随 HAP 分发 → 唯一有实际回收风险资产 |
+| 4 | ~~字体 HarmonyOS Sans SC~~ → **字体 Noto Sans CJK SC**（`NotoSansCJK-SC.subset.ttf`） | **SIL OFL 1.1** | **2026-09-24 换入**（原 HarmonyOS Sans 的许可明文"不得修改字体"，而引擎只吃静态 glyf TTF ⇒ 静态化 + 子集化绕不开 ⇒ 与许可硬冲突；见 §4 D2）。换入后随包分发合规，原"唯一有实际回收风险资产"已消除 |
 | 5 | 字体 Noto Serif CJK（`NotoSerifCJK-SC.subset.ttf`） | **SIL OFL 1.1** | 随包分发合规（保留 OFL 声明即可；不得单独转卖字体） |
 | 6 | webapps 内置 jQuery / Bootstrap 等 | MIT（随官方 webapps 打包） | 随 AGPL 主链披露即可（NOTICE 列名） |
 | 7 | 本仓库 | **无 LICENSE** | 作者未定权（组合后建议 AGPL-3.0 整体授权，见 §5） |
@@ -34,7 +34,7 @@
 1. 根仓加 `LICENSE` = AGPL-3.0 **全文**（官方文本，非引用）；`docs/` 加 `NOTICE`：
    - 上游 ONLYOFFICE 各组件名+许可+来源 URL+`release/v9.4.0` 基线；
    - 我方修改清单（core/sdkjs 自定义 commit 摘要、patches 目录、ascshim 注入说明）；
-   - 字体：Noto（OFL 声明、版权行）、HarmonyOS Sans（华为许可引用，见 §4 处置）；
+   - 字体：Noto Sans CJK SC / Noto Serif CJK SC（OFL 声明、版权行）、FandolFang/FandolKai（GPL + font exception）、OpenSymbol（MPL-2.0）——均随包，见 §4 L4；
    - MIT 清单（jQuery/Bootstrap 等）；**不得删改子模块内 LICENSE（保留原版权头）**。
 2. 采纳动作：根 LICENSE 置于依据 §5 选定的授权模式（默认 AGPL-3.0）。
 
@@ -49,10 +49,10 @@
 2. 入口：文档页右上 `U/X` 附近 or 主界面左上 logo 附近放「关于」；**或**官方 `customization.about:false`。官方已关（记忆 #68 有隐藏 logo/菜单自定义），**入口位置建议**：欢迎页左下角「设置」已藏 → 放右上 `?`/`关于` 图标（参考官方 AboutDialog）。
 3. 内容数据化：`src/main/resources/rawfile/onlyoffice/LICENSE_NOTICE.json`（L1 的机器可读摘要），页面渲染消费——**避免页面硬编码，演进可持续**。
 
-### L4 字体处置（两个决策点）——风险最高项
-- **默认（推荐）**：将 `HarmonyOS Sans SC` 替换为 **思源黑体 Noto Sans SC（OFL 1.1）** 构建链子集化（与现有 NotoSerifCJK subset 管道同构——`make_cjk_subset` 已支持）；代价：字形观感微变（鸿蒙黑体→思源黑体，视觉差异很小）+ 需要回归中文字体链路（FONT_INFOS 注入、`__fonts_files` 表、渲染验证三格式）。
-- **备选**：保留 HarmonyOS Sans，但执行华为字体许可书面确认（保留「场景仅限 HarmonyOS 签名应用内使用」证据链；**若仅上架华为 AppGallery 且自用签名**，多数条款场景默认可行——仍以书面确认为准）。
-- 验收：替换后 docx/xlsx/pptx 中文渲染无方块（复用既有真机验证矩阵）。
+### L4 字体处置 —— 已执行（2026-09-24）
+- **采用（已落地）**：`HarmonyOS Sans SC` → **Noto Sans CJK SC（OFL 1.1）**，走与现有 NotoSerifCJK subset 完全同构的管道（SDK previewer 的 `NotoSansCJK-Regular.ttc` 抽 SC 面 → `make_cjk_font_src.sh` CFF→glyf → `make_cjk_subset` 子集化）。
+- **为什么"保留 + 书面确认"这条路实际不可行**：HarmonyOS Sans 的许可明文**禁止修改字体**，而引擎的 wasm libfont 只吃静态 glyf TrueType ⇒ 静态化（原版是可变字体，直接随包会让渲染管线崩溃）+ 子集化这两重修改都绕不开 ⇒ 不是"要不要改"而是"必改"，与许可条款硬冲突。换入 Noto 后该风险彻底消除。
+- 验收：docx/xlsx/pptx 中文渲染无方块 + `font-cjk` 回归（FONT_WARM_FILLED id 判据已同步为 `NotoSansCJK-SC.ttf`）。
 
 ### L5 版本纪律（交付物）——验收：一次发布全链可回溯
 - 每次发版：打 tag `v9.4.0-ohos-<n>`；附 `REPRO_MAP.md` 行；打包时 HAP 内含 `LICENSE`/`NOTICE`→ 于 `resources/rawfile/onlyoffice/compliance/`（**随包发布**，AGPL 文本随分发物）。

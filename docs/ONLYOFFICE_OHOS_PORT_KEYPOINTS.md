@@ -228,7 +228,8 @@ textshaper.js:124 实参开始取。
   轮廓**（wasm libfont 精简 freetype FT_Open_Face 失败——老契约，勿回退）；
   `otf2ttf`(>=0.2, pip3 install --break-system-packages otf2ttf) CFF→glyf
   静态化（**TTC 面序 JP/KR/SC/TC/HK → SC=face_index=2**，命令固化为
-  build_editors_ohos.py FONT_SRC_BY_FILE 注释）→ 全量 31.5MB **不入库**
+  `scripts/onlyoffice/make_cjk_font_src.sh`（宋体+黑体两条，带面序断言；
+  2026-09-24 前散在 build_editors_ohos.py 注释里））→ 全量 31.5MB **不入库**
   （按构建可复现原则：全量源缺失时 subset 幂等复用——git clone 后无需重转）→
   `make_cjk_subset` GB2312 子集 → **5.5MB 入库** `NotoSerifCJK-SC.subset.ttf`。
   FONT_FILES 追加 `NotoSerifCJK-SC.ttf`（下标 13）；宋体族四行 12→13；
@@ -241,7 +242,10 @@ name 表（ID1/16 family）**必须等于 FONT_INFOS 注册行名**（引擎把'
 'SimSun'）。第一版宋体包（内部名 'Noto Serif CJK SC' ≠ 注册名）→ 渲染槽失效
 → **整个 run 空白（含拉丁 'dd'，run 级非字形级）**。修复=构建链 `family` 参数
 → `rewrite_font_name`（fontTools setName ID1/2/3/4/6/16/17 + 断言，幂等）。
-黑体原文件内部名='HarmonyOS Sans SC' 与注册行名恰一致——此前从未暴露该契约。
+黑体文件内部名='Noto Sans CJK SC'（2026-09-24 换字体，原 'HarmonyOS Sans SC'）——
+换字体后**必须**在 FONT_INFOS 里保留同名行 `"Noto Sans CJK SC"` 才满足该契约（表里
+确实有这一行）；其余黑体族行名（黑体/雅黑/SimHei/simhei.ttf/msyh.ttf）靠请求名
+匹配落到同一文件。换字体的合规理由见 docs/OPENSOURCE_COMPLIANCE_PLAN.md §4 L4。
 
 **字体选择语义（产品行为说明，与 Word/官方桌面版一致）**：
 - 工具栏字体选择器设置**西文字体**（ascii/hAnsi），**中文字体（eastAsia）由

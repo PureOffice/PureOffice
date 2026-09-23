@@ -45,15 +45,14 @@ Third-party fonts bundled with this application
 -----------------------------------------------
   Liberation Sans/Serif/Mono  SIL OFL 1.1
       Copyright (c) 2010 Google Corporation; Copyright (c) 2012 Red Hat, Inc.
+  Noto Sans CJK SC            SIL OFL 1.1
+      Copyright (c) 2017-2024 Adobe
   Noto Serif CJK SC           SIL OFL 1.1
       Copyright (c) 2017-2024 Adobe
   FandolFang, FandolKai       GPL with font exception
       Copyright (c) 2012-2013 the Fandol team
   OpenSymbol                  MPL-2.0
       Copyright (c) 2009 Sun Microsystems Inc. and contributors
-  HarmonyOS Sans SC           HarmonyOS Sans font license
-      (use restricted to signed HarmonyOS applications)
-      Copyright 2021-2024 Huawei Device Co., Ltd.
 
 Other libraries bundled with the upstream web-apps distribution (jQuery,
 Backbone, Underscore, RequireJS, Monaco, Ace, Less.js, socket.io and others;
