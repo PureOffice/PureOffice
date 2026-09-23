@@ -47,7 +47,7 @@ save-slide|m7accept=1;m7file=sample.pptx;m7auto=1|240|SAVE_BIN_BACK|SAVE_BIN_X2T
 #   装填式：IDS 清单内任一字体无流 = 渲染期静默回退（仿宋/楷体故障形态），逐个断言在册字体
 #   映射式：FONT_PICK = 官方 GetFontFileWeb 回调（09_fontpick.js 探针，仅 m7auto 态装钩子），
 #     抓"请求被错误行截胡"（Symbol/Wingdings 曾命中同名行 → 码位映射不触发 → 符号变方块）
-font-cjk|m7accept=1;m7file=fonts-test.docx|60|PROF_SNAP|FONT_WARM_FILLED id=HarmonyOS_Sans_SC.ttf,FONT_WARM_FILLED id=NotoSerifCJK-SC.ttf,FONT_WARM_FILLED id=FandolFang.ttf,FONT_WARM_FILLED id=FandolKai.ttf,FontPicker: 仿宋 => 仿宋,FontPicker: 楷体 => 楷体,FontPicker: 宋体 => SimSun,FontPicker: 黑体 => SimHei,FontBySymbol: 26126 => 宋体|FONT_WARM_NOFILE,FONT_WARM_PF_GIVEUP,FontPicker: 仿宋 => SimSun,FontPicker: 楷体 => SimSun|CJK 字体：装填 + 请求名命中行（仿宋/楷体不得被宋体截胡）
+font-cjk|m7accept=1;m7file=fonts-test.docx|60|PROF_SNAP|FONT_WARM_FILLED id=NotoSansCJK-SC.ttf,FONT_WARM_FILLED id=NotoSerifCJK-SC.ttf,FONT_WARM_FILLED id=FandolFang.ttf,FONT_WARM_FILLED id=FandolKai.ttf,FontPicker: 仿宋 => 仿宋,FontPicker: 楷体 => 楷体,FontPicker: 宋体 => SimSun,FontPicker: 黑体 => SimHei,FontBySymbol: 26126 => 宋体|FONT_WARM_NOFILE,FONT_WARM_PF_GIVEUP,FontPicker: 仿宋 => SimSun,FontPicker: 楷体 => SimSun|CJK 字体：装填 + 请求名命中行（仿宋/楷体不得被宋体截胡）
 font-symbol|m7accept=1;m7file=fonts-sym-single.docx|60|PROF_SNAP|FONT_WARM_FILLED id=OpenSymbol.ttf,FontPicker: Wingdings => OpenSymbol,FontPicker: Symbol => OpenSymbol|FONT_WARM_NOFILE,FontPicker: Wingdings => Wingdings,FontPicker: Symbol => Symbol|符号字体：装填 + Wingdings/Symbol 经相似类落 OpenSymbol（不得被同名行截胡）
 # —— 插件/AI 链（m7ai 门控双向：开着能点、默认不点——后者防回归弹出聊天窗遮挡截图）——
 plug-ai-on|m7accept=1;m7ai=1;m7file=sample.docx|120|PLUG_AI_CHAT|PLUG_TAB_CLICKED,PLUG_AI_TOGGLE_CLICKED,PLUG_AI_TAB_CLICKED,PLUG_AI_CHAT_CLICKED|PLUG_AI_CHAT_ERR|AI 插件链全通（装配→run→AI tab→Chatbot 窗口）

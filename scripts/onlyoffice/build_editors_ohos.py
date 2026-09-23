@@ -85,21 +85,25 @@ SYSTEM_FONTS_DIR = os.environ.get('OHOS_LIBERATION_FONTS', '/usr/share/fonts/tru
 CJK_FONTS_DIR = os.environ.get('OHOS_CJK_FONTS_DIR',
                                '/apps/harmony/sdk/default/hms/previewer/resources/fonts')
 # 顺序必须 R,I,B,BI（ascshim __fonts_files 注入数组与 FONT_INFOS 的 indexI/indexB 下标一致）
-# 下标 12 = HarmonyOS_Sans_SC.ttf（黑体/无衬线 CJK；无独立 Bold/Italic 文件：
+# 下标 12 = NotoSansCJK-SC.ttf（黑体/无衬线 CJK；无独立 Bold/Italic 文件：
 # R/I/B/BI 共用 regular，加粗/倾斜由引擎模拟——与 OpenSymbol 行（全下标 16）同约定）
+#   2026-09-24 换入（原为 HarmonyOS_Sans_SC.ttf）：HarmonyOS Sans 的许可明文
+#   禁止修改字体，而引擎只吃静态 glyf TTF ⇒ 静态化（原版是可变字体）+ 子集化
+#   两重修改都绕不开 ⇒ 与许可硬冲突、无合规余地。Noto Sans CJK SC 是 OFL 1.1
+#   （明确允许修改），与宋体同源同目录（SDK previewer 的 NotoSansCJK-Regular.ttc，
+#   face_index=2）——转换链见 make_cjk_font_src.sh。
 # 下标 13 = NotoSerifCJK-SC.ttf（宋体/衬线 CJK —— 2026-09-05 宋体修复：真宋体，
 #   用户选「宋体」渲染成无衬线黑体的根因=宋体族行全映射下标 12；见 FONT_INFOS）
 # 曾试用 NotoSansCJK_SC-Regular.otf（CFF）：引擎 wasm libfont 为精简 freetype，
-# FT_Open_Face 对 CFF 失败（m_pFaceInfo=null → 字体系统崩溃）——弃；
-# 2026-09-05 实测记录。HarmonyOS_Sans_SC.ttf = glyf + gvar（可变字体但仍为
-# TrueType 轮廓，freetype 可打开）。
+# FT_Open_Face 对 CFF 失败（m_pFaceInfo=null → 字体系统崩溃）——弃，改走 TTC 抽面
+# 后 CFF→glyf 转换（同宋体链）；两字体转换产物均为静态 glyf（无 fvar/gvar）。
 FONT_FILES = ['LiberationSans-Regular.ttf', 'LiberationSans-Italic.ttf',
               'LiberationSans-Bold.ttf', 'LiberationSans-BoldItalic.ttf',
               'LiberationSerif-Regular.ttf', 'LiberationSerif-Italic.ttf',
               'LiberationSerif-Bold.ttf', 'LiberationSerif-BoldItalic.ttf',
               'LiberationMono-Regular.ttf', 'LiberationMono-Italic.ttf',
               'LiberationMono-Bold.ttf', 'LiberationMono-BoldItalic.ttf',
-              'HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf',
+              'NotoSansCJK-SC.ttf', 'NotoSerifCJK-SC.ttf',
               # 下标 14/15 = 仿宋/楷体（2026-09-07 字体扩充：Fandol 字体集，CTAN
               # fandol v0.3，GPL + GPL font exception——随包分发合规）。来源/转换
               # 见 FONT_SUBSETS 注释（CFF→glyf 同宋体链）。
@@ -118,24 +122,13 @@ FONT_FILES = ['LiberationSans-Regular.ttf', 'LiberationSans-Italic.ttf',
 #   1. VF 原文件（含 fvar/gvar）→ 引擎渲染管线崩溃（白屏/1 页空）；
 #   2. Noto CFF（.otf）→ wasm libfont（精简 freetype）FT_Open_Face 失败
 #      （m_pFaceInfo=null）——只支持 glyf TrueType。
-# 复现（在构建机，需 fontTools + otf2ttf/pip 包 + 字体源）：
-#   - 黑体：HarmonyOS_Sans_SC.ttf（SDK previewer，可变字体）实例化静态化——
-#     python3 -c "
-# from fontTools.ttLib import TTFont
-# from fontTools.varLib.instancer import instantiateVariableFont
-# f = TTFont('$CJK_FONTS_DIR/HarmonyOS_Sans_SC.ttf')
-# instantiateVariableFont(f, {})
-# for t in ('fvar','gvar','STAT','avar','cvar','MVAR','HVAR','VVAR'):
-#     t in f and del f[t]
-# f.save('scripts/onlyoffice/templates_src/fonts/HarmonyOS_Sans_SC.ttf')"
-#   - 宋体：NotoSerifCJK-Regular.ttc（SDK previewer，CFF 字库）CFF→glyf（otf2ttf
-#     >=0.2，pip3 install --break-system-packages otf2ttf）——取 SC 面（TTC 面序
-#     JP/KR/SC/TC/HK → face_index=2）：
-#     otf2ttf -o scripts/onlyoffice/templates_src/fonts/NotoSerifCJK-SC.ttf \
-#       --face-index 2 --overwrite $CJK_FONTS_DIR/NotoSerifCJK-Regular.ttc
-#     产物 31.5MB（全量，**不入库**——过大；子集化产物才入库，见 FONT_SUBSETS）。
+# 全量源的转换命令**已固化**为 make_cjk_font_src.sh（宋体 + 黑体两条，幂等、
+# 带面序断言）：全量产物 20~32MB **不入库**（过大；子集化产物才入库，见
+# FONT_SUBSETS），fresh clone 需要时跑该脚本重建。不要凭记忆手敲转换命令——
+# otf2ttf 的 --face-index 与 TTC 内的表顺序强耦合，写错面会静默换成日文/韩文
+# 字形（脚本内有 family 名断言兜底）。
 FONT_SRC_BY_FILE = {fn: SYSTEM_FONTS_DIR for fn in FONT_FILES[:12]}
-FONT_SRC_BY_FILE['HarmonyOS_Sans_SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
+FONT_SRC_BY_FILE['NotoSansCJK-SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
 FONT_SRC_BY_FILE['NotoSerifCJK-SC.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
 FONT_SRC_BY_FILE['FandolFang.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
 FONT_SRC_BY_FILE['FandolKai.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice', 'templates_src', 'fonts')
@@ -177,11 +170,11 @@ FONT_FILES_ALL = FONT_FILES + SYSTEM_FONT_FILES
 
 # 子集映射：final 名（FONT_FILES/rawfile fonts/ 里的名字）→ (全量源文件, 子集产物,
 # 注册面名——渲染槽 name 匹配用；CJK 族注册行名须一致。宋体=SimSun（引擎把
-# '宋体' 归一为 'SimSun'），黑体=None（内部名已=注册行名 'HarmonyOS Sans SC'）。
-# 子集产物入库（git）：宋体全量 31.5MB 太大不适于库；subset 缺失时可从全量源重建
-# （otf2ttf 命令见上注释；黑体全量在库、subset 为构建中间产物不入库）。
+# '宋体' 归一为 'SimSun'）；黑体=None（内部名 'Noto Sans CJK SC' 已是注册行名）。
+# 全量源（宋体 31.5MB / 黑体 19.9MB）**都不入库**（过大），subset 产物入库；
+# 全新克隆由 make_cjk_font_src.sh 从 SDK previewer 重建全量源，再幂等生成 subset。
 FONT_SUBSETS = {
-    'HarmonyOS_Sans_SC.ttf': ('HarmonyOS_Sans_SC.ttf', 'HarmonyOS_Sans_SC.subset.ttf', None),
+    'NotoSansCJK-SC.ttf': ('NotoSansCJK-SC.ttf', 'NotoSansCJK-SC.subset.ttf', None),
     'NotoSerifCJK-SC.ttf': ('NotoSerifCJK-SC.ttf', 'NotoSerifCJK-SC.subset.ttf', 'SimSun'),
     # 仿宋/楷体（2026-09-07 字体扩充，用户「支持更多字体」目标）：Fandol（CTAN
     # fandol v0.3，GPL + GPL font exception）。官方包里是 **CFF OTF**（fandol/
@@ -230,12 +223,18 @@ FONT_INFOS = [
     # MapSrc/MapDst（0x76→U+E441 等 10 组）、Symbol 的 0xB7/0xA8→●/◆ 亦生效；
     # 未列入 MapSrc 的字符（如 ∀∂∑√α）原样用 OpenSymbol 渲染——该字体自带这些字形。
     ["OpenSymbol", 16, 0, 16, 0, 16, 0, 16, 0],
-    # HarmonyOS Sans SC：引擎 CJK fallback 的实际请求名（字符缺字形时
-    # GetFontIndex 按此名选字体）。此前本表只有文件名 HarmonyOS_Sans_SC.ttf
-    # （FONT_FILES）而没有同名条目 → 候选列表此项不在 → GetFontIndex 无精确
-    # 匹配短路 DefaultIndex=Arial → fallback 死循环 → 中文字形方块
-    # （2026-09-05 实测：PROF_LF 反复 "HarmonyOS Sans SC -> dst=Arial"；
-    # PROF_LIST n=18 恰等于旧 FONT_INFOS 行数，果无此项）。
+    # 黑体族（以下各行全部指向下标 12 = NotoSansCJK-SC.ttf；2026-09-24 前该文件
+    # 是 HarmonyOS_Sans_SC.ttf）：**行名与文件解耦**——行名是"文档/引擎请求名"
+    # 的匹配目标，换字体文件不动行名。
+    # 但有一条硬约束：**face 内部 family 名必须在表里有一行与之匹配**（引擎渲染槽
+    # 按 face 名注册）——下面 "Noto Sans CJK SC" 这一行就是它；其余行名靠请求名
+    # 精确/相似度匹配落到同一文件。
+    # "HarmonyOS Sans SC" 行是引擎 CJK fallback 的实际请求名（字符缺字形时
+    # GetFontIndex 按此名选字体）。曾有坑：表里只有文件名（FONT_FILES）而没有同名
+    # 条目 → 候选列表此项不在 → GetFontIndex 无精确匹配短路 DefaultIndex=Arial →
+    # fallback 死循环 → 中文字形方块（2026-09-05 实测：PROF_LF 反复
+    # "HarmonyOS Sans SC -> dst=Arial"；PROF_LIST n=18 恰等于旧 FONT_INFOS 行数，
+    # 果无此项）。
     ["HarmonyOS Sans SC", 12, 0, 12, 0, 12, 0, 12, 0],
     ["Noto Sans CJK SC", 12, 0, 12, 0, 12, 0, 12, 0],
     ["Microsoft YaHei", 12, 0, 12, 0, 12, 0, 12, 0],
@@ -322,10 +321,12 @@ FONT_GUID_ODTTF = bytes([0xA0, 0x66, 0xD6, 0x20, 0x14, 0x96, 0x47, 0xFA, 0x95, 0
 
 # —— B：CJK 字体子集化（2026-09-05 默认中文方案 B；2026-09-05 宋体修复泛化为
 #     黑体+宋体双字体，见 FONT_SUBSETS 映射）——
-# 9.25MB HarmonyOS_Sans_SC.ttf 是 14 个字体中唯一大文件：A（09_fonts 装填）虽把
-# 字节保供提前到文档打开前，XHR 字节体积仍是毫秒 vs 秒的观感差；子集化后 ~1.9MB
-# （黑体）/5.2MB（宋体衬线——笔画弯钩多，字形数据天然大于黑体；实测装填 <2s
+# 19.9MB NotoSansCJK-SC.ttf 是随包字体源里最大的一个：A（09_fonts 装填）虽把
+# 字节保供提前到文档打开前，XHR 字节体积仍是毫秒 vs 秒的观感差；子集化后 4.1MB
+# （黑体）/5.5MB（宋体衬线——笔画弯钩多，字形数据天然大于黑体；实测装填 <2s
 # 仍无首帧竞态窗口），装填几乎瞬时，且对「首帧竞态」再无任何概率窗口。
+# 注：黑体子集自 2026-09-24 换字体后为 4.1MB（原 HarmonyOS Sans 子集 1.9MB）——
+# Noto CJK 字形数据更精细，同字集下体积更大，可接受（仍远低于 19.9MB 全量）。
 # 字符集：GB2312 全集（6763 汉字 + 符号/字母区 A1A1-F7FE）+ ASCII + Latin-1
 #   + CJK 标点（3000-303F）+ 全角形式（FF00-FFEF）。
 #   取舍：BMP 扩展 A 区（3400-4DBF）生僻字不在子集内——此类字符渲染 notdef
@@ -475,7 +476,7 @@ def make_fonts_sprites(count):
                 # 字形样本近似——不影响引擎真实渲染，2026-09-07 系统字体桥）。
                 # 真正的渲染预览问题在 v1 实验暴露过（用户指正），系统字体的
                 # 缩略图真字形待字体源进构建机后升级（P3）。
-                ff = FONT_FILES[row[1]] if row[1] < len(FONT_FILES) else 'HarmonyOS_Sans_SC.ttf'
+                ff = FONT_FILES[row[1]] if row[1] < len(FONT_FILES) else 'NotoSansCJK-SC.ttf'
                 fname = ff
                 # 子集字体（FONT_SUBSETS）优先用子集产物渲染——与引擎实际拿到的
                 # 字形完全一致（宋体全量不入库，subset 一定存在）

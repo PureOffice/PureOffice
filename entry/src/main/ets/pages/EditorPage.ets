@@ -74,7 +74,7 @@ const PRINT_FONT_FILES: string[] = [
   'LiberationSerif-Regular.ttf', 'LiberationSerif-Bold.ttf',
   'LiberationSerif-Italic.ttf', 'LiberationSerif-BoldItalic.ttf',
   'LiberationMono-Regular.ttf', 'LiberationMono-Bold.ttf',
-  'HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf'
+  'NotoSansCJK-SC.ttf', 'NotoSerifCJK-SC.ttf'
 ];
 /**
  * 字体前 32B 的 XOR 密钥（构建期 pre_xor_font 加密态，SDK 假设服务器字体已

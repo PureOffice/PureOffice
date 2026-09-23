@@ -47,7 +47,7 @@
 (function() {
   var GUID = [0xA0, 0x66, 0xD6, 0x20, 0x14, 0x96, 0x47, 0xFA, 0x95, 0x69, 0xB8, 0x50, 0xB0, 0x41, 0x49, 0x48];
   // 装填清单 = 全部 CJK 字体（2026-09-05 宋体修复：单字体→清单；ID 与构建链
-  // FONT_FILES final 名一致：黑体=HarmonyOS_Sans_SC.ttf，真宋体=NotoSerifCJK-SC.ttf）
+  // FONT_FILES final 名一致：黑体=NotoSansCJK-SC.ttf，真宋体=NotoSerifCJK-SC.ttf）
   // + 系统字体（2026-09-07 v2：ID=设备 /system/fonts 文件名，isSys=true → 请求
   //   systemfonts/ 前缀由 rawfileLoader→NAPI native 读（ArkTS fileIo 系统路径
   //   ENOENT，native 与 wine 同权）；native 返回前已 XOR 加密态（同 pre_xor_font
@@ -61,7 +61,7 @@
   //   的 ChangeGlyphsMap 把这两个符号字体的码位映射到该字体私用区）——同样必须在
   //   装填清单内，否则渲染期无流、映射后仍取不到字形（与仿宋/楷体同一失效模式）。
   //   字体仅 204KB，装填代价可忽略。
-  var IDS = ['HarmonyOS_Sans_SC.ttf', 'NotoSerifCJK-SC.ttf',
+  var IDS = ['NotoSansCJK-SC.ttf', 'NotoSerifCJK-SC.ttf',
              'FandolFang.ttf', 'FandolKai.ttf',
              'OpenSymbol.ttf',
              'HYQiHeiL3.ttf',
