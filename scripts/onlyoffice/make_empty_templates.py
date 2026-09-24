@@ -210,6 +210,21 @@ XLSX_REPLACES = {
 }
 
 
+def _new_part(name):
+    """新增部件用的 ZipInfo：时间戳固定，否则产物字节每次构建都不同。
+
+    writestr(字符串名) 时 zipfile 内部取 time.localtime()，新增部件会带上构建时刻
+    ——version.json 是资源**内容**哈希，被这层时间噪声带动后每次换号，产物无法
+    逐字节对比。zip 纪元 1980-01-01 是固定时间戳的标准取值；compress_type 与
+    external_attr 需显式复现 writestr 对字符串名的默认（ZipInfo 缺省是 STORED，
+    漏设会让产物变大）。
+    """
+    zi = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+    zi.compress_type = zipfile.ZIP_DEFLATED
+    zi.external_attr = 0o600 << 16
+    return zi
+
+
 def rewrite_zip(src_path, dst_path, replaces, transform=None):
     """以官方骨架 src 为底，按 replaces {部件名: 新内容} 重写部件。
 
@@ -262,8 +277,8 @@ def empty_docx():
             out.writestr(item, data)
         # 新增部件（骨架中没有 → 追加写入；styles 关系放 word/_rels/document.xml.rels——
         # 包级目录仅是 package rels，挂错层级 = styles 被孤立，见 DOCX_DOC_RELS 注释）
-        out.writestr('word/styles.xml', DOCX_STYLES.encode('utf-8'))
-        out.writestr('word/_rels/document.xml.rels', DOCX_DOC_RELS.encode('utf-8'))
+        out.writestr(_new_part('word/styles.xml'), DOCX_STYLES.encode('utf-8'))
+        out.writestr(_new_part('word/_rels/document.xml.rels'), DOCX_DOC_RELS.encode('utf-8'))
     src.close()
 
 
