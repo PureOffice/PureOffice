@@ -83,7 +83,7 @@ SYSTEM_FONTS_DIR = os.environ.get('OHOS_LIBERATION_FONTS', '/usr/share/fonts/tru
 # 注：中文字体的**全量源目录**（SDK previewer 的 CJK 字库）不在这里配置——
 # 全量→静态 glyf 的抽取/转换是独立一步（make_cjk_font_src.sh，读 OHOS_CJK_FONTS_DIR），
 # 产物落在 templates_src/fonts/ 后才由本脚本子集化（FONT_SRC_BY_FILE/FONT_SUBSETS）。
-# 顺序必须 R,I,B,BI（ascshim __fonts_files 注入数组与 FONT_INFOS 的 indexI/indexB 下标一致）
+# 顺序必须 R,I,B,BI（本脚本生成的 __fonts_files 数组与 FONT_INFOS 的 indexI/indexB 下标一致）
 # 下标 12 = NotoSansCJK-SC.ttf（黑体/无衬线 CJK；无独立 Bold/Italic 文件：
 # R/I/B/BI 共用 regular，加粗/倾斜由引擎模拟——与 OpenSymbol 行（全下标 16）同约定）
 #   2026-09-24 换入（原为 HarmonyOS_Sans_SC.ttf）：HarmonyOS Sans 的许可明文
@@ -164,7 +164,7 @@ FONT_SRC_BY_FILE['OpenSymbol.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice',
 SYSTEM_FONT_FILES = ['HYQiHeiL3.ttf',
                      'NotoSansBengaliUI-Regular.ttf',
                      'NotoSansDevanagariUI-Regular.ttf']
-# 注入 __fonts_files / 精灵行序列引用：rawfile + system（make_ascshim 同源导入）
+# 注入 __fonts_files / 精灵行序列引用：rawfile + system
 FONT_FILES_ALL = FONT_FILES + SYSTEM_FONT_FILES
 
 # 子集映射：final 名（FONT_FILES/rawfile fonts/ 里的名字）→ (全量源文件, 子集产物,
@@ -293,8 +293,8 @@ FONT_INFOS = [
 # 的码位映射依赖请求能落到「OpenSymbol」行——见上该行注释的 map.js 机制），但下拉每项
 # 以**自身字体**渲染名字，而 OpenSymbol 无任何拉丁字形（cmap 实测 O/p/e/n/S/y/m/b/o/l
 # 全缺）→ 该行整条显示为方块（2026-09-12 真机 1.5 截图实证）。
-# 派生链：gen_allfonts 注入 window["__lso_font_hidden"] → ascshim 30_open.js 的
-# sync_InitEditorFonts wrap 在归一收集时跳过这些名字（与 .ttf 文件名行剔除同一处判断）。
+# 派生链：gen_allfonts 注入 window["__lso_font_hidden"] → 引擎侧 sync_InitEditorFonts
+# （sdkjs fork apiBase.js [OHOS: fonts]）在归一收集时跳过这些名字（与 .ttf 文件名行剔除同一处判断）。
 # 新增内部行只改本清单——**禁止在页面侧硬编码字体名**。
 UI_HIDDEN_FONT_ROWS = ['OpenSymbol']
 
@@ -333,7 +333,7 @@ FONT_GUID_ODTTF = bytes([0xA0, 0x66, 0xD6, 0x20, 0x14, 0x96, 0x47, 0xFA, 0x95, 0
 # 前提：fontTools（pip install fonttools；构建机 4.63.0 实测 OK）+ 全量源字体。
 # 输入源必须是**静态 glyf TTF**（templates_src/fonts/ 现成产物，勿用 VF/ CFF，
 # 见 FONT_SRC_BY_FILE 注释踩坑记录）——子集化不改字体名/表序，__fonts_files
-# 与 ascshim 09_fonts 装填（ID=final 名）不受影响。
+# 与 ohos/fonts.js 装填（ID=final 名）不受影响。
 
 
 def _cjk_unicodes():
@@ -822,7 +822,7 @@ def write_font_rows():
 def gen_version_json():
     """生成 rawfile/onlyoffice/version.json —— 资源内容哈希（构建期 cache-bust 版本号）。
 
-    哈希范围：rawfile/onlyoffice/ 下全部文件（排除自身；含 ascshim 与 webapps 内容）。
+    哈希范围：rawfile/onlyoffice/ 下全部文件（排除自身；含 ohos 模块与 webapps 内容）。
     EditorPage 启动读取，编辑页/欢迎页 URL ?v=N 引用它替代原 VERSION_BUMP 手工递增
     （阶段3，2026-09-05）。
     """
@@ -848,17 +848,17 @@ def copy_tree(src, dst):
     shutil.copytree(src, dst, dirs_exist_ok=True, symlinks=True)
 
 
-def inject_ascshim(html_path):
-    """【已退役，2026-09-21 阶段 2-n】ascshim.js 注入 → smoke/inject-head.js（验收态
-    head 注入脚本：m7 验收三块/fontpick 映射探针/验收工具——产品 URL 无 m7 参数时
-    各段门控早退=零行为。保留函数名防漏改调用点，语义已切换）"""
+def inject_smoke_head(html_path):
+    """注入 smoke/inject-head.js（验收态 head 注入脚本：m7 验收三块/fontpick 映射
+    探针/验收工具——产品 URL 无 m7 参数时各段门控早退=零行为）。产物由 gen_smoke_head
+    生成；本注入原为 ascshim.js，2026-09-21 阶段 2-n 迁入 smoke 域"""
     return inject_script_src(html_path, '../../../../smoke/inject-head.js')
 
 
 def inject_ohos_boot(html_path):
-    """在 <head> 注入 ohos/boot.js（宿主装配域启动链）。与 ascshim 无加载顺序
-    耦合（boot 的启动调度是 setTimeout 轮询，等的是编辑器 app 对象而非 ascshim
-    产物）；注入行位置在 ascshim 之前（两者都插在 <head> 首位，后插者在前）"""
+    """在 <head> 注入 ohos/boot.js（宿主装配域启动链）。与 smoke head 无加载顺序
+    耦合（boot 的启动调度是 setTimeout 轮询，等的是编辑器 app 对象而非脚本产物）；
+    注入行位置在 smoke head 之前（两者都插在 <head> 首位，后插者在前）"""
     return inject_script_src(html_path, '../../../../ohos/boot.js')
 
 
@@ -998,12 +998,12 @@ def main():
     injected = 0
     for app in APP_MAIN:
         p = os.path.join(W3D, 'apps', app, 'main', 'index.html')
-        if os.path.isfile(p) and inject_ascshim(p):
+        if os.path.isfile(p) and inject_smoke_head(p):
             injected += 1
             print('  注入 smoke/inject-head.js → apps/%s/main/index.html' % app)
     # 4.1 ohos 模块（宿主装配域定制 JS，源=scripts/onlyoffice/ohos/）→
     #     rawfile/onlyoffice/ohos/；编辑器 main/index.html 注入 boot.js
-    #    （与 ascshim 无顺序耦合：boot 等的是编辑器 app 对象，轮询调度）
+    #    （与 smoke head 无顺序耦合：boot 等的是编辑器 app 对象，轮询调度）
     OHOS_SRC = os.path.join(ROOT, 'scripts', 'onlyoffice', 'ohos')
     OHOS_DST = os.path.join(DST, 'ohos')
     if os.path.isdir(OHOS_SRC):
@@ -1021,7 +1021,7 @@ def main():
         for app in APP_MAIN:
             p = os.path.join(W3D, 'apps', app, 'main', 'index.html')
             # 注入调用序与最终加载序：inject_script_src 每次插 <head> 紧后（后插者
-            # 在前）→ 产物序 boot → bridge → fonts → ascshim。bridge 的 INSTALL 由
+            # 在前）→ 产物序 boot → bridge → fonts → smoke。bridge 的 INSTALL 由
             # AscNative 出现异步触发，与 script 相对顺序无关（实测证实：注入序两种
             # 排法行为一致）；引擎字体链 web 语义由 bridge.js INSTALL 体内的 3.7
             # 删除块兜住，不依赖本处顺序。fonts 只注编辑器页（欢迎页无 sdkjs 引擎，
@@ -1058,7 +1058,7 @@ def main():
         print('  viewport meta 补注入 → apps/%s/main/index.html' % app)
     # api/documents 外壳页（编辑 iframe 宿主）
     p = os.path.join(W3D, 'apps', 'api', 'documents', 'index.html')
-    if os.path.isfile(p) and inject_ascshim(p):
+    if os.path.isfile(p) and inject_smoke_head(p):
         injected += 1
         print('  注入 smoke/inject-head.js → apps/api/documents/index.html')
     print('  injected %d pages' % injected)
@@ -1069,7 +1069,7 @@ def main():
                          % injected)
 
     # 5. 字体（AllFonts.js + fonts/ 预加密）→ rawfile/onlyoffice/
-    #    AllFonts.js 每次重生成（与 FONT_INFOS 契约（make_ascshim import 同源）——
+    #    AllFonts.js 每次重生成（与 FONT_INFOS 契约同源）——
     #    以前"已存在即跳过"会静默采用官方 deploy 自带版本，内容不确定 —— 2026-09-05 审查修）
     allfonts_dst = os.path.join(SDK_DST, 'common', 'AllFonts.js')
     os.makedirs(os.path.dirname(allfonts_dst), exist_ok=True)

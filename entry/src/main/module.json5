@@ -61,7 +61,7 @@
       // availableLevel=system_basic、provisionEnable=true）——声明 + 签名 profile
       // 含 acl 条目只是取得申请资格，授予由用户点头（EntryAbility 启动即弹申请，
       // 见 requestClipboardPermission）。生产/调试 profile 的 acl 均已含此权限
-      //（prod/PureOffice_Release.p7b 与 config/ ExampleProject 调试档）。
+      //（prod/PureOffice_Release.p7b 与 config/ PureOffice 调试档）。
       {
         "name": "ohos.permission.READ_PASTEBOARD",
         "reason": "$string:clipboard_usage_desc",
