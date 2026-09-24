@@ -221,7 +221,7 @@ FONT_INFOS = [
     # 故**删两行**、让请求经相似类 1 落到 OpenSymbol 行 → GetReplaceGlyph 走
     # MapSrc/MapDst（0x76→U+E441 等 10 组）、Symbol 的 0xB7/0xA8→●/◆ 亦生效；
     # 未列入 MapSrc 的字符（如 ∀∂∑√α）原样用 OpenSymbol 渲染——该字体自带这些字形。
-    ["OpenSymbol", 16, 0, 16, 0, 16, 0, 16, 0],
+    ["OpenSymbol", 16, 0, -1, 0, -1, 0, -1, 0],
     # 黑体族（以下各行全部指向下标 12 = NotoSansCJK-SC.ttf；2026-09-24 前该文件
     # 是 HarmonyOS_Sans_SC.ttf）：**行名与文件解耦**——行名是"文档/引擎请求名"
     # 的匹配目标，换字体文件不动行名。
@@ -234,19 +234,27 @@ FONT_INFOS = [
     # fallback 死循环 → 中文字形方块（2026-09-05 实测：PROF_LF 反复
     # "HarmonyOS Sans SC -> dst=Arial"；PROF_LIST n=18 恰等于旧 FONT_INFOS 行数，
     # 果无此项）。
-    ["HarmonyOS Sans SC", 12, 0, 12, 0, 12, 0, 12, 0],
-    ["Noto Sans CJK SC", 12, 0, 12, 0, 12, 0, 12, 0],
-    ["Microsoft YaHei", 12, 0, 12, 0, 12, 0, 12, 0],
-    ["微软雅黑", 12, 0, 12, 0, 12, 0, 12, 0],
-    ["SimHei", 12, 0, 12, 0, 12, 0, 12, 0],
-    ["黑体", 12, 0, 12, 0, 12, 0, 12, 0],
+    # 单字重字体行的槽位语义（**勿把 indexI/B/BI 回填成与 indexR 相同的值**）：
+    # 这些族只有一个 Regular 文件，其余样式槽必须 -1。引擎 CFontInfo.GetBaseStyle
+    # 见槽位 != -1 即认定「该族有真该样式的字形」，GetNeedInfo 随之返回 needB=false
+    # → SetNeedBold(false) → 光栅化处 m_bNeedDoBold 分支（file.js）永不进入
+    # → 加粗请求渲染出的仍是 Regular 字形，**视觉上完全无变化**（真机实测：加粗行
+    # 暗像素与常规行相差 0.0%，同页 Arial 对照组 +60%）。置 -1 后引擎改走 Regular
+    # 分支且置 needB=true → 触发引擎的合成加粗（位图横向膨胀）。斜体同理（needI）。
+    # 官方同款用法见 Externals.js 的 ASCW3 行：indexR 有效、其余四槽全 -1。
+    ["HarmonyOS Sans SC", 12, 0, -1, 0, -1, 0, -1, 0],
+    ["Noto Sans CJK SC", 12, 0, -1, 0, -1, 0, -1, 0],
+    ["Microsoft YaHei", 12, 0, -1, 0, -1, 0, -1, 0],
+    ["微软雅黑", 12, 0, -1, 0, -1, 0, -1, 0],
+    ["SimHei", 12, 0, -1, 0, -1, 0, -1, 0],
+    ["黑体", 12, 0, -1, 0, -1, 0, -1, 0],
     # 下标 13 = NotoSerifCJK-SC.ttf（真宋体/衬线，2026-09-05 宋体修复：FONT_INFOS
     # 里宋体族（宋体/SimSun/Songti SC/simsun.ttf）此前全映射下标 12（黑体）——
     # 用户选「宋体」输入文字渲染成**无衬线黑体样式**，实测确认。真宋体行
     # indexR=13（与下表中黑体族行 12 区分；微软雅黑/黑体/Noto Sans 等仍 12）。
-    ["SimSun", 13, 0, 13, 0, 13, 0, 13, 0],
-    ["宋体", 13, 0, 13, 0, 13, 0, 13, 0],
-    ["Songti SC", 13, 0, 13, 0, 13, 0, 13, 0],
+    ["SimSun", 13, 0, -1, 0, -1, 0, -1, 0],
+    ["宋体", 13, 0, -1, 0, -1, 0, -1, 0],
+    ["Songti SC", 13, 0, -1, 0, -1, 0, -1, 0],
     # 「字典文件记录名」（带 .ttf 后缀）行（simsun.ttf/simhei.ttf/msyh.ttf）——
     # 2026-09-05 源码复核（map.js GetPenalty/GetFaceNamePenalty/CheckLikeFonts）：
     # **不是**任何硬编码字体字典的键（旧注释“map.js FD_FontDictionary 硬编码
@@ -258,34 +266,35 @@ FONT_INFOS = [
     #    simsun.ttf」三行指向同一 indexR 是**别名重复**，并非三级归一链；
     # ③ simsun.ttf 行仅供带 .ttf 后缀形式的请求名（个别 API 回显 m_wsFontPath
     #    用此形式）命中，保持 indexR 一致即可（13/12/12 现正确）。
-    ["simsun.ttf", 13, 0, 13, 0, 13, 0, 13, 0],
-    ["simhei.ttf", 12, 0, 12, 0, 12, 0, 12, 0],
-    ["msyh.ttf", 12, 0, 12, 0, 12, 0, 12, 0],
+    ["simsun.ttf", 13, 0, -1, 0, -1, 0, -1, 0],
+    ["simhei.ttf", 12, 0, -1, 0, -1, 0, -1, 0],
+    ["msyh.ttf", 12, 0, -1, 0, -1, 0, -1, 0],
     # 仿宋/楷体族（2026-09-07 字体扩充）。约定同宋体区：行名须与 wasm face
     # family Name 一致（FONT_SUBSETS 的注册面名=FandolFang/FandolKai，name
     # 重写后匹配）；中文/英文/GB2312/.ttf 变体行指向同 indexR=文件下标 14/15。
-    # 样式：仅 Regular 文件，R/I/B/BI 全部用 regular（加粗由引擎模拟，同黑体）。
+    # 样式：仅 Regular 文件，I/B/BI 槽一律 -1（=该族无此样式，引擎据此走合成加粗/
+    # 斜体；填成与 indexR 相同的值会让引擎误判「已有真变体」使加粗失效——见黑体族块注释）。
     # 文档侧常见 eastAsia 声明：仿宋、仿宋_GB2312、FangSong；楷体、楷体_GB2312、
     # KaiTi（Word 中文环境默认）。「未匹配时引擎 name 相似度匹配」在此补充分
     # 显式别名行（官方 NamePenalty=0 别名集仅覆盖宋体/黑体，仿宋/楷体不在内）。
-    ["FandolFang", 14, 0, 14, 0, 14, 0, 14, 0],
-    ["仿宋", 14, 0, 14, 0, 14, 0, 14, 0],
-    ["FangSong", 14, 0, 14, 0, 14, 0, 14, 0],
-    ["仿宋_GB2312", 14, 0, 14, 0, 14, 0, 14, 0],
-    ["fangsong.ttf", 14, 0, 14, 0, 14, 0, 14, 0],
-    ["FandolKai", 15, 0, 15, 0, 15, 0, 15, 0],
-    ["楷体", 15, 0, 15, 0, 15, 0, 15, 0],
-    ["KaiTi", 15, 0, 15, 0, 15, 0, 15, 0],
-    ["楷体_GB2312", 15, 0, 15, 0, 15, 0, 15, 0],
-    ["kaiti.ttf", 15, 0, 15, 0, 15, 0, 15, 0],
+    ["FandolFang", 14, 0, -1, 0, -1, 0, -1, 0],
+    ["仿宋", 14, 0, -1, 0, -1, 0, -1, 0],
+    ["FangSong", 14, 0, -1, 0, -1, 0, -1, 0],
+    ["仿宋_GB2312", 14, 0, -1, 0, -1, 0, -1, 0],
+    ["fangsong.ttf", 14, 0, -1, 0, -1, 0, -1, 0],
+    ["FandolKai", 15, 0, -1, 0, -1, 0, -1, 0],
+    ["楷体", 15, 0, -1, 0, -1, 0, -1, 0],
+    ["KaiTi", 15, 0, -1, 0, -1, 0, -1, 0],
+    ["楷体_GB2312", 15, 0, -1, 0, -1, 0, -1, 0],
+    ["kaiti.ttf", 15, 0, -1, 0, -1, 0, -1, 0],
     # 系统字体行（2026-09-07 v2 终版：多机交集）。下标 = len(FONT_FILES) 起（17 起）。
     # 约定：**face 名真身行**（= face 内部 name，见 SYSTEM_FONT_FILES 注释实测值）
     # + 中文别名行（单一族、无重名——dict 后写覆盖坑已避）。『仿宋/楷体』中文名
     # 已注册到 Fandol（14/15，跨机一致）——系统行严禁再注册同名。
-    ["HYQiHei L3", 17, 0, 17, 0, 17, 0, 17, 0],
-    ["汉仪旗黑", 17, 0, 17, 0, 17, 0, 17, 0],
-    ["Noto Sans Bengali UI", 18, 0, 18, 0, 18, 0, 18, 0],
-    ["Noto Sans Devanagari UI", 19, 0, 19, 0, 19, 0, 19, 0],
+    ["HYQiHei L3", 17, 0, -1, 0, -1, 0, -1, 0],
+    ["汉仪旗黑", 17, 0, -1, 0, -1, 0, -1, 0],
+    ["Noto Sans Bengali UI", 18, 0, -1, 0, -1, 0, -1, 0],
+    ["Noto Sans Devanagari UI", 19, 0, -1, 0, -1, 0, -1, 0],
 ]
 
 # —— 内部字体行（不进用户字体下拉）——
@@ -591,7 +600,9 @@ def gen_allfonts(fonts_infos, font_files_all, font_ranges):
 // lsofonts = base64(URI 编码的 JSON 数组)，元素 [file, family, weight, italic]
 //（ArkTS 侧 common/userFonts.encodeUrlParam 编码）。此刻三表刚注入、sdk-all.js
 // 尚未加载（checkAllFonts 未跑）——唯一能改注册表的时机（跑完即删表）。
-// 注册行四槽同索引（单文件通吃；先例 OpenSymbol 行）；行名 = 字体内部 family
+// 注册行 indexR 指向导入文件、I/B/BI 槽一律 -1（导入的是单字重文件，四槽同指会让
+// 引擎误判「已有真变体」从而跳过合成加粗——机制见 build_editors_ohos.py 的
+// FONT_INFOS 黑体族块注释）；行名 = 字体内部 family
 // 名（引擎契约：行名必须等于 face 内部名，故导入侧从 name 表读，见 common/
 // sfnt.ets）。与内置行重名者跳过（导入侧已拦，此处兜底）。
 (function () {
@@ -620,7 +631,7 @@ def gen_allfonts(fonts_infos, font_files_all, font_ranges):
       if (_dup) { _skip++; continue; }
       _files.push(_file);
       var _idx = _files.length - 1;
-      _infos.push([_fam, _idx, 0, _idx, 0, _idx, 0, _idx, 0]);
+      _infos.push([_fam, _idx, 0, -1, 0, -1, 0, -1, 0]);
       window.__lso_user_font_names.push(_fam);
       _n++;
     }
