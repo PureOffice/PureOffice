@@ -44,15 +44,14 @@ export interface FormatSpec {
    *  只给 From 会让 x2t 的格式判定整体失败（getConversionDirection 返回
    *  TCD_ERROR），比不传更糟。 */
   openBinTo: number;
-  /** 打开链附加 x2t 参数（XML 片段，空串 = 无）。CSV 必须给：x2t 的
-   *  processDownloadFile 对 CSV/TSV/SCSV 源要求编码与分隔符**二者都非空**，
-   *  否则转换方向判定失败（CSV 被特判成 NEED_PARAMS，真机实测 0x80041359）；
-   *  而 .csv 扩展名不会自动填分隔符，无 BOM 的 UTF-8 也测不出编码
-   *  （getEncodingByContent 只认 BOM，无 BOM 返回 -1）。
-   *  46 = codePage 65001(UTF-8)，4 = TCSVD_COMMA。
-   *  固定值取舍：无 BOM 的 GBK CSV（Excel 中文导出常见）会按 UTF-8 解出乱码，
-   *  分号/制表符分隔的会整行挤在一列——x2t 侧无从自动判定（同 getEncodingByContent
-   *  只认 BOM），壳层嗅探留待后续；此处取中文环境最常见形态（UTF-8 + 逗号）。 */
+  /** 打开链附加 x2t 参数（XML 片段，空串 = 无）。
+   *  CSV 必须给：x2t 的 processDownloadFile 对 CSV/TSV/SCSV 源要求编码与分隔符
+   *  **二者都非空**，否则方向判定失败（特判成 NEED_PARAMS，真机实测 0x80041359）；
+   *  而 .csv 扩展名不会自动填分隔符，无 BOM 时 x2t 也测不出编码
+   *  （getEncodingByContent 只认 BOM）。
+   *  CSV 行的该字段留空：参数由 openExtraFor() 按**文件字节**嗅探生成——表内写死
+   *  只能覆盖 UTF-8+逗号一种形态，Excel 导出的 GBK（解成乱码）与分号/制表符分隔
+   *  （整行挤一列）都会坏（见 csvOpenExtra）。 */
   openExtra: string;
   /** 保存链显式格式对（[源, 目标]，0 = 不需要——x2t 按目标扩展名走方向表）。
    *  保存链的源是内部二进制（doct_bin/xlst_bin/pptt_bin），不是原文件格式。
@@ -78,7 +77,7 @@ const FORMATS: FormatSpec[] = [
   { ext: 'xls', family: 'cell', fileType: 'xlsx', recentType: 0x102, saveExt: 'xlsx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false },
   { ext: 'csv', family: 'cell', fileType: 'xlsx', recentType: 0x104, saveExt: 'csv', check: 'size', openBinTo: 0x2002,
     saveFrom: 0x2002, saveTo: 0x104,
-    openExtra: '<m_nCsvTxtEncoding>46</m_nCsvTxtEncoding><m_nCsvDelimiter>4</m_nCsvDelimiter>',
+    openExtra: '',
     lossySave: true },
   { ext: 'pptx', family: 'slide', fileType: 'pptx', recentType: 0x81, saveExt: 'pptx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false },
   { ext: 'ppt', family: 'slide', fileType: 'pptx', recentType: 0x82, saveExt: 'pptx', check: 'zip', openBinTo: 0, saveFrom: 0, saveTo: 0, openExtra: '', lossySave: false }
@@ -147,6 +146,174 @@ export function needsSaveAsPrompt(ext: string): boolean {
 export function isLossySave(ext: string): boolean {
   const f = specOf(ext);
   return f !== null && f.lossySave;
+}
+
+// —— CSV 打开参数嗅探 ——
+// 为什么在壳层做：x2t 的 getEncodingByContent 只认 BOM（无 BOM 返回 -1）、
+// getDelimiterByContent 未被调用（processDownloadFile 里那段在 if (false) 内），
+// 而编码与分隔符任一为空即判转换失败——拿到完整文件字节的壳层是唯一能补上的地方。
+
+/** x2t 编码索引：UnicodeConverter_Encodings.h 的 Encodings[].Index
+ *  （CSVReader 对 UTF-8/16/32 另有 46/48/50 的显式分支，与表值一致） */
+const CSV_ENC_UTF8 = 46;      // Index 46 = 65001 UTF-8
+const CSV_ENC_GBK = 18;       // Index 18 = 936 GBK
+const CSV_ENC_UTF16LE = 48;   // Index 48 = 1200 UTF-16LE
+const CSV_ENC_UTF16BE = 49;   // Index 49 = 1201 UTF-16BE
+
+/** x2t 分隔符枚举（X2tConverter/src/cextracttools.h TCSVD_*） */
+const CSV_DELIM_TAB = 1;
+const CSV_DELIM_SEMICOLON = 2;
+const CSV_DELIM_COMMA = 4;
+
+/** 嗅探取样上限：字节数（覆盖表头与若干数据行即可）/ 分隔符统计行数 */
+const CSV_SNIFF_BYTES = 8192;
+const CSV_SNIFF_LINES = 10;
+
+/**
+ * 字节序列是否为合法 UTF-8（只看前 CSV_SNIFF_BYTES）。
+ * 严格版：拒绝 overlong、代理区、超 U+10FFFF——此判据用于**区分 GBK 与 UTF-8**，
+ * 放宽会让 GBK 字节对（两个编码的字节范围有交集）碰巧过关。
+ */
+function isUtf8Bytes(buf: Uint8Array): boolean {
+  const lim = buf.byteLength < CSV_SNIFF_BYTES ? buf.byteLength : CSV_SNIFF_BYTES;
+  let i = 0;
+  while (i < lim) {
+    const b = buf[i];
+    if (b < 0x80) {
+      i++;
+      continue;
+    }
+    let need = 0;
+    let cp = 0;
+    let min = 0;
+    if (b >= 0xC2 && b <= 0xDF) {
+      need = 1;
+      cp = b & 0x1F;
+      min = 0x80;
+    } else if (b >= 0xE0 && b <= 0xEF) {
+      need = 2;
+      cp = b & 0x0F;
+      min = 0x800;
+    } else if (b >= 0xF0 && b <= 0xF4) {
+      need = 3;
+      cp = b & 0x07;
+      min = 0x10000;
+    } else {
+      // 0x80-0xC1 与 0xF5-0xFF 都不是合法起始字节
+      return false;
+    }
+    if (i + need >= lim) {
+      // 序列跨取样边界：证据不足，按「不判错」收手（余下字节不再看）
+      break;
+    }
+    for (let k = 1; k <= need; k++) {
+      const c = buf[i + k];
+      if (c < 0x80 || c > 0xBF) {
+        return false;
+      }
+      cp = (cp << 6) | (c & 0x3F);
+    }
+    if (cp < min || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF) {
+      return false;
+    }
+    i += need + 1;
+  }
+  return true;
+}
+
+/**
+ * 编码嗅探：BOM 优先，无 BOM 用「是否合法 UTF-8」二选一。
+ * 判据可靠性：GBK 汉字同时满足「首字节落进 UTF-8 起字节区间 0xC2-0xDF」与
+ * 「续字节落进 0x80-0xBF」的概率约 1/12（GBK 首字节 0x81-0xFE 中的 30/126、
+ * 续字节 0x40-0xFE 中的 64/190）——整份中文 CSV 全部「碰巧合法」的概率趋近零。
+ */
+function sniffCsvEncoding(buf: Uint8Array): number {
+  if (buf.byteLength >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) {
+    return CSV_ENC_UTF8;
+  }
+  if (buf.byteLength >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) {
+    return CSV_ENC_UTF16LE;
+  }
+  if (buf.byteLength >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
+    return CSV_ENC_UTF16BE;
+  }
+  return isUtf8Bytes(buf) ? CSV_ENC_UTF8 : CSV_ENC_GBK;
+}
+
+/**
+ * 分隔符嗅探：取前若干行，选「每行出现次数一致且 > 0」的候选（并列取次数多者）；
+ * 无满足者兜底逗号（单列 CSV 即无分隔符的情形）。
+ * 只判逗号/分号/制表符——x2t 枚举里另有冒号与空格，那两种在正文里太常见，
+ * 判错的代价大于不判。UTF-16 的 ASCII 字符隔字节存放，先剥掉 0x00 位再统一统计。
+ */
+function sniffCsvDelimiter(buf: Uint8Array, enc: number): number {
+  let sample = buf;
+  if (enc === CSV_ENC_UTF16LE || enc === CSV_ENC_UTF16BE) {
+    const src = buf.byteLength < CSV_SNIFF_BYTES * 2 ? buf.byteLength : CSV_SNIFF_BYTES * 2;
+    const out = new Uint8Array(src >> 1);
+    const off = enc === CSV_ENC_UTF16LE ? 0 : 1;
+    for (let i = 0; i < out.length; i++) {
+      out[i] = buf[i * 2 + off];
+    }
+    sample = out;
+  }
+  const lim = sample.byteLength < CSV_SNIFF_BYTES ? sample.byteLength : CSV_SNIFF_BYTES;
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let from = 0;
+  for (let i = 0; i < lim && starts.length < CSV_SNIFF_LINES; i++) {
+    if (sample[i] === 0x0A) {
+      starts.push(from);
+      ends.push(i);
+      from = i + 1;
+    }
+  }
+  if (starts.length === 0) {
+    return CSV_DELIM_COMMA;
+  }
+  const codes: number[] = [0x09, 0x3B, 0x2C];
+  const ids: number[] = [CSV_DELIM_TAB, CSV_DELIM_SEMICOLON, CSV_DELIM_COMMA];
+  let best = CSV_DELIM_COMMA;
+  let bestCount = 0;
+  for (let c = 0; c < codes.length; c++) {
+    let first = -1;
+    let even = true;
+    for (let j = 0; j < starts.length; j++) {
+      let n = 0;
+      for (let i = starts[j]; i < ends[j]; i++) {
+        if (sample[i] === codes[c]) {
+          n++;
+        }
+      }
+      if (first < 0) {
+        first = n;
+      } else if (n !== first) {
+        even = false;
+        break;
+      }
+    }
+    if (even && first > bestCount) {
+      best = ids[c];
+      bestCount = first;
+    }
+  }
+  return best;
+}
+
+/** CSV 打开参数（编码 + 分隔符，按文件字节嗅探） */
+function csvOpenExtra(buf: Uint8Array): string {
+  const enc = sniffCsvEncoding(buf);
+  const dlm = sniffCsvDelimiter(buf, enc);
+  return '<m_nCsvTxtEncoding>' + enc + '</m_nCsvTxtEncoding>'
+    + '<m_nCsvDelimiter>' + dlm + '</m_nCsvDelimiter>';
+}
+
+/** 打开链附加参数唯一入口：CSV 按字节嗅探（表内 openExtra 留空），其余取表值 */
+export function openExtraFor(spec: FormatSpec, buf: Uint8Array): string {
+  if (spec.ext === 'csv') {
+    return csvOpenExtra(buf);
+  }
+  return spec.openExtra;
 }
 
 /** RTF 头「{\rtf」的字节 */

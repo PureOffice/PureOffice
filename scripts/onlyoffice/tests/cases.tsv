@@ -62,6 +62,11 @@ open-ppt|m7accept=1;m7file=sample.ppt|120|PROF_SNAP|M7_DIRECT_OPEN sample.ppt le
 open-rtf|m7accept=1;m7file=sample.rtf|60|PROF_SNAP|M7_DIRECT_OPEN sample.rtf len=,OPEN_X2T rc=0x0,LSO_OPEN_DOCUMENT_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|rtf 打开（word）
 open-txt|m7accept=1;m7file=sample.txt|60|PROF_SNAP|M7_DIRECT_OPEN sample.txt len=,OPEN_X2T rc=0x0,LSO_OPEN_DOCUMENT_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|txt 打开（word）
 open-csv|m7accept=1;m7file=sample.csv|120|PROF_SNAP|M7_DIRECT_OPEN sample.csv len=,OPEN_X2T rc=0x0,LSO_DIOPEN_OK|OPEN_X2T_FAIL,OPEN_BIN_MISS|csv 打开（cell，编码+分隔符参数）
+#   GBK / 分号样本（make_csv_samples.py 生成）：判据是「嗅探参数 + 产物尺寸」两条——
+#   产物尺寸是「内容真的解出来了」的实证：ICU 数据缺失时转换照样 rc=0，但产出的是空表
+#   （bin=1016，且无报错），只验 rc 会放行静默失败
+open-csv-gbk|m7accept=1;m7file=sample-gbk.csv|120|PROF_SNAP|OPEN_CSV_SNIFF <m_nCsvTxtEncoding>18</m_nCsvTxtEncoding>,OPEN_X2T rc=0x0,bin=1977|OPEN_X2T_FAIL|csv GBK 编码嗅探 + 内容非空（空壳 ICU 时恒 1016）
+open-csv-semi|m7accept=1;m7file=sample-semi.csv|120|PROF_SNAP|<m_nCsvDelimiter>2</m_nCsvDelimiter>,OPEN_X2T rc=0x0,bin=1994|OPEN_X2T_FAIL|csv 分号分隔嗅探（与逗号版同内容故尺寸相同；分列正确性由真机截图验）
 #   保存：rtf/csv 可原地回写；doc 不可 → 必须出现格式提示且禁止回写源文件（反向断言 SAVE_BIN_BACK）
 save-rtf|m7accept=1;m7file=sample.rtf;m7auto=1|120|PROF_SNAP|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|rtf 原地保存（rtf 头校验通过）
 save-csv|m7accept=1;m7file=sample.csv;m7auto=1;m7autosave=1|120|PROF_SNAP|SAVE_BIN_X2T,SAVE_BIN_BACK|SAVE_BIN_EMPTY,SAVE_BIN_ERR|csv 自动保存静默回写（userFlag=0 不弹「丢格式」提示；用户保存路径的提示由 csv-lossy 守）

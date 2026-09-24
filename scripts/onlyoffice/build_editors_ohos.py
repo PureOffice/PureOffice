@@ -751,6 +751,9 @@ def install_smoke():
     # （依据：docs/superpowers/specs/2026-09-11-file-format-expansion-design.md §9.1）
     for name in ('sample.doc', 'sample.xls', 'sample.ppt',
                  'sample.rtf', 'sample.txt', 'sample.csv',
+                 # CSV 编码/分隔符嗅探样本（make_csv_samples.py 生成）：GBK 与
+                 # UTF-8 唯一合法性的区分、逗号/分号分隔的判定各需一份，别删
+                 'sample-gbk.csv', 'sample-semi.csv',
                  # 含图样本（make_img_sample.py 生成）：判定 _offline_media 媒体供给
                  # 缺失的真实影响（丢不丢图），别删
                  'sample-img.pptx',

@@ -12,7 +12,7 @@ import { b64ToBuf, readFileBuf, writeFileBuf, x2tXml, x2tXmlFont, u8ToStr } from
 import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } from '../common/recents';
 import { encodeUrlParam, pickFontFile, importFontFile, listFontItems, removeFont,
   MAX_FONTS, FontListItem } from '../common/userFonts';
-import { specOf, pickerSuffixes, pickerFilterOption, editorAppOf, needsSaveAsPrompt, isLossySave, checkSaveOut } from '../common/formats';
+import { specOf, pickerSuffixes, pickerFilterOption, editorAppOf, needsSaveAsPrompt, isLossySave, checkSaveOut, openExtraFor } from '../common/formats';
 import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
 import { DocTabHost, DocTabCtx, DocTabPair } from './DocTabHost';
 
@@ -1708,11 +1708,17 @@ struct EditorPage {
       // 产品路径恒为空串（走弹框）。openBinTo ≠ 0 的格式要显式给出格式对（方向表与
       // 转换器 switch 不一致，见 formats.ets）。
       const specOpen = specOf(extU);
+      // 打开附加参数：CSV 按文件字节嗅探编码/分隔符（x2t 侧无 BOM 测不出、分隔符
+      // 不按扩展名填），其余格式取表内固定值。密码重试复用同一份（文件字节不变）。
+      const openExtra = specOpen === null ? '' : openExtraFor(specOpen, new Uint8Array(ab));
+      if (extU === 'csv') {
+        this.arkLog('OPEN_CSV_SNIFF ' + openExtra);
+      }
       let failed = false;
       const attempt = (pwd: string): void => {
         const pwdExtra = pwd.length > 0 ? '<m_sPassword>' + pwd + '</m_sPassword>' : '';
         const rc = x2tConvertSync((specOpen !== null && specOpen.openBinTo > 0)
-          ? x2tXml(inP, outP, specOpen.recentType, specOpen.openBinTo, specOpen.openExtra + pwdExtra)
+          ? x2tXml(inP, outP, specOpen.recentType, specOpen.openBinTo, openExtra + pwdExtra)
           : x2tXml(inP, outP, 0, 0, pwdExtra));
         this.arkLog('OPEN_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ') tab=' + ctx.id);
         if (rc === 0) {
