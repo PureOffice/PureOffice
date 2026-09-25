@@ -1,5 +1,5 @@
 import { BusinessError, deviceInfo, print, pasteboard } from '@kit.BasicServicesKit';
-import { bundleManager, common } from '@kit.AbilityKit';
+import { abilityAccessCtrl, bundleManager, common, Want } from '@kit.AbilityKit';
 import { buffer } from '@kit.ArkTS';
 import { promptAction, window } from '@kit.ArkUI';
 import { resourceManager } from '@kit.LocalizationKit';
@@ -888,10 +888,34 @@ struct EditorPage {
    * 编码：buffer（@kit.ArkTS 平级导出，非 util 命名空间）UTF-8 → base64（标准
    * 字母表，无引号/换行——runJavaScript 内联字符串安全）；页面 atob +
    * TextDecoder 还原（atob 直得 latin1，多字节必须经 TextDecoder）。
-   * 权限被拒（code 201，启动申请被用户拒绝时的路径）：toast 引导系统设置，
-   * 不回调页面——无内容可贴，toast 已给反馈，避免双重提示。
    */
   private pasteClipboard(ctx: DocTabCtx): void {
+    this.readClipboard(ctx, false);
+  }
+
+  /**
+   * 读取主体。**读前先判权限**：实测（2026-09-25）无权限时 getData() 既不抛 201
+   * 也不报错、只静默返回空数据——只靠 catch 判断会把「没权限」误报成「剪贴板为空」
+   * （页面侧 Web 层那条相反：无权限会抛 NotAllowedError，所以那条能自己兜住）。
+   * retried：补申请后的重试标记（只重试一次，用户拒绝后不再反复弹申请）。
+   */
+  private readClipboard(ctx: DocTabCtx, retried: boolean): void {
+    this.checkClipPerm((granted: boolean) => {
+      this.arkLog('CLIP_PERM granted=' + granted + ' retried=' + retried);
+      if (granted) {
+        this.doReadClipboard(ctx);
+      } else if (!retried) {
+        // 未授予：借「用户点粘贴」这个明确意图当场申请（此时弹窗有上下文）。
+        this.requestClipPerm(ctx);
+      } else {
+        // 申请过仍未授予（用户点了「不允许」，系统已记账、不再弹）——只能引导去设置。
+        this.showPermGuide();
+      }
+    });
+  }
+
+  /** 实际读取（调用前须已确认权限，见 readClipboard 注释） */
+  private doReadClipboard(ctx: DocTabCtx): void {
     try {
       pasteboard.getSystemPasteboard().getData().then((data: pasteboard.PasteData) => {
         let html = '';
@@ -914,11 +938,110 @@ struct EditorPage {
       }).catch((e: BusinessError) => {
         this.arkLog('CLIP_PASTE_ERR ' + e.code + ' ' + e.message);
         if (e.code === 201) {
-          promptAction.showToast({ message: t($r('app.string.clip_perm_denied')), duration: 3000 });
+          // 兜底：权限判定以 checkClipPerm 为准，此处仍按 201 的原语义引导去设置
+          this.showPermGuide();
         }
       });
     } catch (e) {
       this.arkLog('CLIP_PASTE_ERR ' + String(e));
+    }
+  }
+
+  /**
+   * 补申请 READ_PASTEBOARD：授予→重试读取一次；被拒/异常→引导去系统设置。
+   * 「被拒」含两种情况且无法区分：用户真点了「不允许」，以及弹窗压根没出来
+   * （首启撞系统「用户协议」模态时）。两者都只剩「去设置手动开」一条路——
+   * 系统对已记账的拒绝不再弹窗，重复调用只是徒劳。
+   */
+  private requestClipPerm(ctx: DocTabCtx): void {
+    try {
+      const ac = getContext(this) as common.UIAbilityContext;
+      abilityAccessCtrl.createAtManager()
+        .requestPermissionsFromUser(ac, ['ohos.permission.READ_PASTEBOARD'])
+        .then((res) => {
+          const rs = res.authResults;
+          const ok = rs !== undefined && rs.length > 0 && rs[0] === 0;
+          this.arkLog('CLIP_PERM_REQ granted=' + ok);
+          if (ok) {
+            this.readClipboard(ctx, true);
+          } else {
+            this.showPermGuide();
+          }
+        })
+        .catch((e: BusinessError) => {
+          this.arkLog('CLIP_PERM_REQ_ERR ' + e.code + ' ' + e.message);
+          this.showPermGuide();
+        });
+    } catch (e) {
+      this.arkLog('CLIP_PERM_REQ_ERR ' + String(e));
+    }
+  }
+
+  /**
+   * 查 READ_PASTEBOARD 授予态。判据必须是 checkAccessToken 而非 getData 的返回值：
+   * 无权限时 getData() 不抛错、静默返回空（见 readClipboard 注释）。
+   * 取不到 bundleInfo 等异常一律按「已授予」放行——读取本身还有兜底，不阻断主流程。
+   */
+  private checkClipPerm(cb: (granted: boolean) => void): void {
+    try {
+      bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION)
+        .then((info: bundleManager.BundleInfo) => {
+          if (info.appInfo === undefined || info.appInfo === null) {
+            cb(true);
+            return;
+          }
+          return abilityAccessCtrl.createAtManager()
+            .checkAccessToken(info.appInfo.accessTokenId, 'ohos.permission.READ_PASTEBOARD')
+            .then((st: abilityAccessCtrl.GrantStatus) => {
+              cb(st === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED);
+            });
+        })
+        .catch(() => {
+          cb(true);
+        });
+    } catch (e) {
+      cb(true);
+    }
+  }
+
+  /**
+   * 未授予权限的引导。用 dialog 而非 toast：需要带「去设置」这个动作——
+   * 系统对已拒绝/已记账的申请不再弹窗，设置页手动开启是唯一出路。
+   */
+  private showPermGuide(): void {
+    promptAction.showDialog({
+      title: t($r('app.string.clip_perm_title')),
+      message: t($r('app.string.clip_perm_denied')),
+      buttons: [
+        { text: t($r('app.string.go_settings')), color: '#007DFF' },
+        { text: t($r('app.string.btn_cancel')), color: '#666666' }
+      ]
+    }).then((res: promptAction.ShowDialogSuccessResponse) => {
+      if (res.index === 0) {
+        this.openAppSettings();
+      }
+    }).catch((e: BusinessError) => {
+      this.arkLog('PERM_GUIDE_ERR ' + e.code);
+    });
+  }
+
+  /** 跳系统设置的应用详情页（用户在此手动开启「读取剪贴板」权限） */
+  private openAppSettings(): void {
+    try {
+      const ac = getContext(this) as common.UIAbilityContext;
+      const want: Want = {
+        bundleName: 'com.huawei.hmos.settings',
+        abilityName: 'com.huawei.hmos.settings.MainAbility',
+        uri: 'application_info_entry',
+        parameters: { pushParams: 'app.fuqidian.pureoffice' }
+      };
+      ac.startAbility(want).then(() => {
+        this.arkLog('OPEN_SETTINGS ok');
+      }).catch((e: BusinessError) => {
+        this.arkLog('OPEN_SETTINGS_ERR ' + e.code + ' ' + e.message);
+      });
+    } catch (e) {
+      this.arkLog('OPEN_SETTINGS_ERR ' + String(e));
     }
   }
 

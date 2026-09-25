@@ -80,6 +80,8 @@
     { "name": "print_err_convert", "value": "打印失败：文档转换出错" },
     { "name": "print_err_pdf", "value": "打印失败：PDF 生成异常" },
     { "name": "print_err_launch", "value": "无法调起系统打印" },
-    { "name": "clip_perm_denied", "value": "未授予剪贴板权限，请在系统设置中开启后重试" }
+    { "name": "clip_perm_denied", "value": "未授予剪贴板权限，请在系统设置中开启后重试" },
+    { "name": "clip_perm_title", "value": "未授予剪贴板权限" },
+    { "name": "go_settings", "value": "去设置" }
   ]
 }

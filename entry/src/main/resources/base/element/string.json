@@ -80,6 +80,8 @@
     { "name": "print_err_convert", "value": "Print failed: document conversion error" },
     { "name": "print_err_pdf", "value": "Print failed: PDF generation error" },
     { "name": "print_err_launch", "value": "Cannot launch the system print service" },
-    { "name": "clip_perm_denied", "value": "Clipboard permission not granted. Enable it in system settings and try again." }
+    { "name": "clip_perm_denied", "value": "Clipboard permission not granted. Enable it in system settings and try again." },
+    { "name": "clip_perm_title", "value": "Clipboard permission not granted" },
+    { "name": "go_settings", "value": "Settings" }
   ]
 }
