@@ -49,6 +49,18 @@ save-slide|m7accept=1;m7file=sample.pptx;m7auto=1|240|SAVE_BIN_BACK|SAVE_BIN_X2T
 #     抓"请求被错误行截胡"（Symbol/Wingdings 曾命中同名行 → 码位映射不触发 → 符号变方块）
 font-cjk|m7accept=1;m7file=fonts-test.docx|60|PROF_SNAP|FONT_WARM_FILLED id=NotoSansCJK-SC.ttf,FONT_WARM_FILLED id=NotoSerifCJK-SC.ttf,FONT_WARM_FILLED id=FandolFang.ttf,FONT_WARM_FILLED id=FandolKai.ttf,FontPicker: 仿宋 => 仿宋,FontPicker: 楷体 => 楷体,FontPicker: 宋体 => SimSun,FontPicker: 黑体 => SimHei,FontBySymbol: 26126 => 宋体|FONT_WARM_NOFILE,FONT_WARM_PF_GIVEUP,FontPicker: 仿宋 => SimSun,FontPicker: 楷体 => SimSun|CJK 字体：装填 + 请求名命中行（仿宋/楷体不得被宋体截胡）
 font-symbol|m7accept=1;m7file=fonts-sym-single.docx|60|PROF_SNAP|FONT_WARM_FILLED id=OpenSymbol.ttf,FontPicker: Wingdings => OpenSymbol,FontPicker: Symbol => OpenSymbol|FONT_WARM_NOFILE,FontPicker: Wingdings => Wingdings,FontPicker: Symbol => Symbol|符号字体：装填 + Wingdings/Symbol 经相似类落 OpenSymbol（不得被同名行截胡）
+#   别名矩阵样本（font-name-matrix.docx，14 段）：同一行中文分别用 13 个"宋体"别名
+#   + 黑体对照声明。CJK 不在 FD_Ascii_Font_Like_Names 相似类表里（该表硬编码仅
+#   Cambria Math/OpenSymbol/Arial/Times/Courier/Segoe/Cambria 七类），故中文别名
+#   只有两级能兜：**精确同名行**（penalty 0）与**互为子串**（penalty 1000，见
+#   map.js GetFaceNamePenalty_private）。CJK 回退表（__fonts_ranges）保证落错行
+#   时中文仍出字形、不显方块——所以落错行的**可见代价在拉丁字符**（走 Arial 的
+#   无衬线拉丁，而非宋体衬线拉丁），断言必须取 FONT_PICK 而非截图观感。
+font-name-matrix|m7accept=1;m7file=font-name-matrix.docx|60|PROF_SNAP|FontPicker: NSimSun => SimSun,FontPicker: 新宋体 => SimSun,FontPicker: 宋体-简 => 宋体,FontPicker: 华文宋体 => 宋体,FontPicker: SimSun-ExtB => SimSun,FontPicker: 思源宋体 => 宋体,FontPicker: 黑体 => SimHei|FontPicker: NSimSun => Arial,FontPicker: 新宋体 => Arial,FontPicker: 华文宋体 => Arial,FontPicker: 宋体-简 => Arial|宋体别名矩阵：子串规则兜住的 6 个别名（未注册行）落到宋体族，黑体对照不受影响
+#   注：样本里另 4 名为**已知缺口**（落 Arial，2026-09-25 实测）——STSong（与
+#   'Songti SC' 去分隔符后互不包含）、MingLiU/PMingLiU（繁体族，无注册行）、
+#   **Noto Serif CJK SC（= 随包宋体文件自己的 family 名，宋体族漏注册该行；
+#   黑体族有对称的 'Noto Sans CJK SC' 行）**。补行后应提升为必须项。
 # —— 插件/AI 链（m7ai 门控双向：开着能点、默认不点——后者防回归弹出聊天窗遮挡截图）——
 plug-ai-on|m7accept=1;m7ai=1;m7file=sample.docx|120|PLUG_AI_CHAT|PLUG_TAB_CLICKED,PLUG_AI_TOGGLE_CLICKED,PLUG_AI_TAB_CLICKED,PLUG_AI_CHAT_CLICKED|PLUG_AI_CHAT_ERR|AI 插件链全通（装配→run→AI tab→Chatbot 窗口）
 plug-ai-gated|m7accept=1;m7file=sample.docx|120|PLUG_AI_CHAT_GATED|PLUG_AI_TOGGLE_GATED,PLUG_AI_TAB_GATED,PLUG_AI_CHAT_GATED|PLUG_AI_CHAT_CLICKED,PLUG_AI_TOGGLE_CLICKED|默认态门控：只记 GATED 不点击（防聊天窗弹出）
