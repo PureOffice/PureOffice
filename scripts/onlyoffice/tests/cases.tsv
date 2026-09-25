@@ -56,11 +56,12 @@ font-symbol|m7accept=1;m7file=fonts-sym-single.docx|60|PROF_SNAP|FONT_WARM_FILLE
 #   map.js GetFaceNamePenalty_private）。CJK 回退表（__fonts_ranges）保证落错行
 #   时中文仍出字形、不显方块——所以落错行的**可见代价在拉丁字符**（走 Arial 的
 #   无衬线拉丁，而非宋体衬线拉丁），断言必须取 FONT_PICK 而非截图观感。
-font-name-matrix|m7accept=1;m7file=font-name-matrix.docx|60|PROF_SNAP|FontPicker: NSimSun => SimSun,FontPicker: 新宋体 => SimSun,FontPicker: 宋体-简 => 宋体,FontPicker: 华文宋体 => 宋体,FontPicker: SimSun-ExtB => SimSun,FontPicker: 思源宋体 => 宋体,FontPicker: 黑体 => SimHei|FontPicker: NSimSun => Arial,FontPicker: 新宋体 => Arial,FontPicker: 华文宋体 => Arial,FontPicker: 宋体-简 => Arial|宋体别名矩阵：子串规则兜住的 6 个别名（未注册行）落到宋体族，黑体对照不受影响
-#   注：样本里另 4 名为**已知缺口**（落 Arial，2026-09-25 实测）——STSong（与
-#   'Songti SC' 去分隔符后互不包含）、MingLiU/PMingLiU（繁体族，无注册行）、
-#   **Noto Serif CJK SC（= 随包宋体文件自己的 family 名，宋体族漏注册该行；
-#   黑体族有对称的 'Noto Sans CJK SC' 行）**。补行后应提升为必须项。
+font-name-matrix|m7accept=1;m7file=font-name-matrix.docx|60|PROF_SNAP|FontPicker: NSimSun => SimSun,FontPicker: 新宋体 => SimSun,FontPicker: 宋体-简 => 宋体,FontPicker: 华文宋体 => STSong,FontPicker: SimSun-ExtB => SimSun,FontPicker: 思源宋体 => 宋体,FontPicker: 黑体 => SimHei,FontPicker: STSong => STSong,FontPicker: MingLiU => MingLiU,FontPicker: PMingLiU => PMingLiU,FontPicker: Noto Serif CJK SC => Noto Serif CJK SC|FontPicker: STSong => Arial,FontPicker: MingLiU => Arial,FontPicker: PMingLiU => Arial,FontPicker: Noto Serif CJK SC => Arial,FontPicker: 华文宋体 => Arial|宋体别名矩阵：6 名由子串规则兜住 + 4 名显式注册行命中（均不得落 Arial）
+#   判据升级史（**改字体表后必须重采**，别按旧日志改判据）：未注册 STSong/
+#   MingLiU/PMingLiU/NotoSerifCJK 时四者均落 Arial；补行后各自精确命中，且
+#   **「华文宋体」的落点由宋体行变为 STSong 行**（引擎把该中文名解析到其英文
+#   接口名；两行同指 indexR=13，渲染等价）。后者是「凭想象改判据会立刻 FAIL」
+#   的实例——单看名字无从推断，只能重采日志。
 # —— 插件/AI 链（m7ai 门控双向：开着能点、默认不点——后者防回归弹出聊天窗遮挡截图）——
 plug-ai-on|m7accept=1;m7ai=1;m7file=sample.docx|120|PLUG_AI_CHAT|PLUG_TAB_CLICKED,PLUG_AI_TOGGLE_CLICKED,PLUG_AI_TAB_CLICKED,PLUG_AI_CHAT_CLICKED|PLUG_AI_CHAT_ERR|AI 插件链全通（装配→run→AI tab→Chatbot 窗口）
 plug-ai-gated|m7accept=1;m7file=sample.docx|120|PLUG_AI_CHAT_GATED|PLUG_AI_TOGGLE_GATED,PLUG_AI_TAB_GATED,PLUG_AI_CHAT_GATED|PLUG_AI_CHAT_CLICKED,PLUG_AI_TOGGLE_CLICKED|默认态门控：只记 GATED 不点击（防聊天窗弹出）

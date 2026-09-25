@@ -255,6 +255,28 @@ FONT_INFOS = [
     ["SimSun", 13, 0, -1, 0, -1, 0, -1, 0],
     ["宋体", 13, 0, -1, 0, -1, 0, -1, 0],
     ["Songti SC", 13, 0, -1, 0, -1, 0, -1, 0],
+    # —— 外部文档常用名（不注册则整个 run 落 Arial 行）——
+    # 落 Arial 行的代价集中在拉丁段：中文由 __fonts_ranges 回退到宋体行、仍出
+    # 字形，而拉丁（0000-00FF）该表明确不设回退 → 用 Liberation Sans 的无衬线
+    # 字形渲染，与同行的宋体中文风格割裂（真机像素级确认：落 Arial 行的 'A'
+    # 无衬线脚、落宋体行的有）。含已注册名的变体（NSimSun/新宋体/宋体-简/
+    # 华文宋体/思源宋体/SimSun-ExtB）由 map.js GetFaceNamePenalty_private 的
+    # 子串分支兜住；以下四名不含任何已注册名，故必须显式注册：
+    #   Noto Serif CJK SC = 随包宋体文件（NotoSerifCJK-SC.ttf）自身的 family
+    #     名——黑体族有对称的 Noto Sans CJK SC 行，宋体族此前漏注册；
+    #   MingLiU/PMingLiU = Windows 繁体系统标准字体名；STSong = macOS 华文宋体。
+    # 后三者无对应字源，属**近似映射**（统一指向随包宋体）——形态为简中宋体
+    # 而非繁体明体/华文宋体，但优于中西文风格割裂。
+    # 副作用：**加行会让字体下拉多出同名条目**——CFontInfo 的 thumbnail 参数
+    # 是 __fonts_infos 行号（非 indexR），同一文件的多个行各自成项，_ohosNormalizeFontList
+    # 的"族归一"实际只剔 .ttf 行与 UI_HIDDEN_FONT_ROWS、并不合并同族
+    # （实测 LSO_FONT_INJ：31 行→out=25，补 4 行后 35 行→out=29）。
+    # 这与既有的 Songti SC / Noto Sans CJK SC / FandolFang 等英文名条目同风格，
+    # 故保持可见：用户文档用了这些名字时，下拉里能找到对应项。
+    ["Noto Serif CJK SC", 13, 0, -1, 0, -1, 0, -1, 0],
+    ["MingLiU", 13, 0, -1, 0, -1, 0, -1, 0],
+    ["PMingLiU", 13, 0, -1, 0, -1, 0, -1, 0],
+    ["STSong", 13, 0, -1, 0, -1, 0, -1, 0],
     # 「字典文件记录名」（带 .ttf 后缀）行（simsun.ttf/simhei.ttf/msyh.ttf）——
     # 2026-09-05 源码复核（map.js GetPenalty/GetFaceNamePenalty/CheckLikeFonts）：
     # **不是**任何硬编码字体字典的键（旧注释“map.js FD_FontDictionary 硬编码
