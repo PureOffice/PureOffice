@@ -1,5 +1,13 @@
 # ONLYOFFICE OHOS 移植 —— 方案关键点（不可变决策与实测数据流）
 
+> **〔读前必看〕** 本文写于 2026-09-03（ascshim 时代），**文件指针已失效**：
+> `scripts/onlyoffice/desktop/src/*.js` 段文件、`make_ascshim.py` 均已删除，对应机制
+> 现存于 `scripts/onlyoffice/ohos/{boot,bridge,fonts}.js` 或三个 fork。换算表见
+> `docs/README.md`「文档里的历史文件指针」。
+> **「不可变决策」指架构选择（B 架构 / NAPI 桥 / 沙箱模型 / 双清单加载等），不含
+> 实现载体**——ascshim 运行时注入已于 2026-09-23 整体退役、由 fork 源码化替代，
+> 那是**已被推翻**的载体而非「不可推翻的决策」。
+
 - 日期：2026-09-03（迭代 1 闭环后定稿）
 - 作用：接手者的「不要推翻的东西」清单；与 `ONLYOFFICE_OHOS_PORT_DESIGN.md`（总设计）配合阅读
 

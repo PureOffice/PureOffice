@@ -1,5 +1,10 @@
 # 未保存关闭守卫（Unsaved-Close Guard）设计
 
+> **〔读前必看〕** 文中 `scripts/onlyoffice/desktop/src/40_save.js`、`assemble.txt`
+> 等文件指针**已失效**（ascshim 于 2026-09-23 整体退役）；`_hookCloseEditor` 机制现
+> 存于 fork 的 web-apps `apps/*/main/app/controller/Main.js` closeEditor 重定向处。
+> 换算表见 `docs/README.md`「文档里的历史文件指针」。**守卫设计本身仍有效且已实现。**
+
 > 2026-09-09。现状代码实证 + 实现方案。目标问题：文档被编辑过（新建或打开已有）
 > 且未保存时，关闭 tab / 关闭窗口是否有「文件未保存」提示与保存动作？
 

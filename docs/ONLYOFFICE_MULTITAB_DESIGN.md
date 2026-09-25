@@ -1,5 +1,10 @@
 # 多文档 Tab 编辑（方案 A）详细实现设计
 
+> **〔读前必看〕** 本文写于 ascshim 时代，「现状基准」里的 `40_save` 等**段文件已删除**
+> （2026-09-23 退役），对应机制现存于 `scripts/onlyoffice/ohos/{boot,bridge,fonts}.js`
+> 或三个 fork——换算表见 `docs/README.md`「文档里的历史文件指针」。
+> **设计结论（多 tab 方案 A）本身仍有效，且已实施。**
+
 > 2026-09-08 · 未定稿 · 交付审查
 > 现状基准：HEAD 31ecae8 + 工作区未提交改动（40_save 3.9.1 模板项移除 / 1.0.42）
 > 组件关系：EditorPage.ets(879) = @Entry 单页；ascBridge.ets(304) = AscNative._call 同步桥

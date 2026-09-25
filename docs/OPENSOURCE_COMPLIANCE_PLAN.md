@@ -11,9 +11,9 @@
 
 | # | 组件 | 许可 | 我方状态 |
 |---|---|---|---|
-| 1 | `third_party/{core,sdkjs,web-apps,desktop-apps,build_tools}` 五子模块 | AGPL-3.0（LICENSE 已核，均为 GNU AGPL v3 文本） | 基线官方 `release/v9.4.0`；**core 有 OHOS 平台适配提交、sdkjs 有 desktop 适配提交（修改版）**；web-apps/desktop-apps/build_tools 视为原样 |
-| 2 | 修改痕迹：`scripts/onlyoffice/patches/core-ohos/`、core `d96b186d`、sdkjs `562fdc2` | 我方对 AGPL 代码的修改 | **必须连同修改版源码公开** |
-| 3 | ascshim 注入层（`make_ascshim.py` + `src/*.js`）、`EditorPage.ets`/`ascBridge.ets`/`x2t.ets`、构建链（`build_editors_ohos.py`/`deploy_ohos.sh`/`grunt-build.sh`） | 自有代码（作者所有） | 与 AGPL 程序组合分发，按 §5 边界处理 |
+| 1 | `third_party/{core,sdkjs,web-apps,desktop-apps,build_tools}` 五子模块 | AGPL-3.0（LICENSE 已核，均为 GNU AGPL v3 文本） | 基线官方 `release/v9.4.0`；**core 是我方 `patches/core-ohos/` 幂等补丁；sdkjs/web-apps/desktop-apps 是我方 fork（`PureOffice/*` 的 ohos 分支，含 OHOS 定制提交）——三者均为修改版**，须按 §4 发行义务公开；build_tools 视为原样 |
+| 2 | 修改痕迹：`scripts/onlyoffice/patches/core-ohos/`（core）+ 三个 fork 仓的 `[OHOS:]` / `feat(ohos)` 定制提交 | 我方对 AGPL 代码的修改 | **必须连同修改版源码公开**（fork 仓 clone 即得，core 用补丁重放） |
+| 3 | 平台模块 `scripts/onlyoffice/ohos/{boot,bridge,fonts}.js`（构建期注入）、`EditorPage.ets`/`ascBridge.ets`/`x2t.ets`、构建链（`build_editors_ohos.py`/`deploy_ohos.sh`/`grunt-build.sh`） | 自有代码（作者所有） | 与 AGPL 程序组合分发，按 §5 边界处理 |
 | 4 | ~~字体 HarmonyOS Sans SC~~ → **字体 Noto Sans CJK SC**（`NotoSansCJK-SC.subset.ttf`） | **SIL OFL 1.1** | **2026-09-24 换入**（原 HarmonyOS Sans 的许可明文"不得修改字体"，而引擎只吃静态 glyf TTF ⇒ 静态化 + 子集化绕不开 ⇒ 与许可硬冲突；见 §4 D2）。换入后随包分发合规，原"唯一有实际回收风险资产"已消除 |
 | 5 | 字体 Noto Serif CJK（`NotoSerifCJK-SC.subset.ttf`） | **SIL OFL 1.1** | 随包分发合规（保留 OFL 声明即可；不得单独转卖字体） |
 | 6 | webapps 内置 jQuery / Bootstrap 等 | MIT（随官方 webapps 打包） | 随 AGPL 主链披露即可（NOTICE 列名） |
@@ -45,9 +45,17 @@
    一起分发**（外链不算分发）——正本不随包时，NOTICE 的声明是空头支票。
 
 ### L2 源码可得性公开（交付物型）——验收：第三方可重放
-1. **公开仓库**（GitHub 等）：全仓库含子模块（子模块 URL 已指向官方 GitHub，可直接公开）；
-   首次公开前把 `third_party/*` 固定为精确 commit（**已经固定**——submodule 即 pin，注意 `git submodule update --init` 会取 HEAD 已 pin 值）。
-2. **patch 重放路径**：公开后任何人有 `core`/`sdkjs` 官方 v9.4.0 代码 + `patches/` + 各 custom commit 的 `git format-patch` 即可重建我方修改版——需要在仓库 docs 写明「重建步骤 + 产物 hash 对应表」（衔接 build-reproducibility：每个 HAP 版本记录 `├ upstream commit → 产出 ascshim/HAP sha256` 到 `docs/REPRO_MAP.md`）。
+1. **公开仓库**（GitHub 等）：全仓库含子模块——`core`/`build_tools` 指向 ONLYOFFICE
+   官方，`sdkjs`/`web-apps`/`desktop-apps` 指向 **我方 fork（`PureOffice/*` 的 ohos 分支）**。
+   **三个 fork 是我方修改版的载体，必须与主仓一并公开**（AGPL §4 要求修改版源码可得，
+   仅在主仓公开补丁不足以覆盖 fork 内的定制）。首次公开前把 `third_party/*` 固定为精确
+   commit（**已经固定**——submodule 即 pin，注意 `git submodule update --init` 会取 HEAD
+   已 pin 值）；fork 仓需同时打 tag（当前 `ohos-v9.4.0.1`）以便对应版本回溯。
+2. **重放路径**：三个 fork 仓 clone 即得修改版源码；`core` 修改版 = 官方 v9.4.0 代码 +
+   `patches/core-ohos/` 幂等应用（或各 custom commit 的 `git format-patch`）。两者共同
+   覆盖全部修改——需要在仓库 docs 写明「重建步骤 + 产物 hash 对应表」（衔接
+   build-reproducibility：每个 HAP 版本记录 `├ upstream commit → 产出 HAP sha256` 到
+   `docs/REPRO_MAP.md`）。
 3. 建议 repo 内 `scripts/onlyoffice/compliance/gen_source_map.py`：一键生成「上游 commit ↔ 修改 commit ↔ 产物 hash」机器可读表（承接构建链已有的版本自动生成）。
 
 ### L3 应用内「开源许可 / 关于源码」入口（代码活）——验收：1.4 真机点开可见
@@ -80,8 +88,8 @@
 | D4 自有代码授权 | 整体 AGPL-3.0（推荐，组合后最自洽） | AGPL-3.0 |
 
 ## 5. 边界说明（法务上要站住的话术）
-- AGPL 组合作品边界：壳代码（ArkTS/ascshim/构建链）被提升为 AGPL 作品**组成部分**的可能——我方案不主张「壳不算修改」的强边界，**采用整体 AGPL-3.0 公开**（匹配 D4），避免代理争议；
-- ascshim 属「运行时注入」而非源码级修改：披露一律按「修改版」处理（超集披露，无争议损失）；
+- AGPL 组合作品边界：壳代码（ArkTS/平台模块/构建链）被提升为 AGPL 作品**组成部分**的可能——我方案不主张「壳不算修改」的强边界，**采用整体 AGPL-3.0 公开**（匹配 D4），避免代理争议；
+- 定制已固化为 **fork 源码级提交**（`PureOffice/{sdkjs,web-apps,desktop-apps}` 的 ohos 分支）而非运行时注入，故按「修改版」**完整披露**：fork 仓随主仓一并公开、NOTICE 列明各仓 commit 与定制摘要（口径不变、依据更新；超集披露，无争议损失）；
 - 网络服务（后续把编辑器部署到网关/服务端才触发 §13 严格责任；本现状本地 app 内注入链按 §4 发行义务处理已覆盖）。
 
 ## 6. 执行序（可分批交付）

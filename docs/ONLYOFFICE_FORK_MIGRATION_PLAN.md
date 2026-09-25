@@ -57,6 +57,10 @@
 ### 2.1 四层结构
 
 ```
+> **〔2026-09-20 盘点快照——迁移前状态，勿当现状读〕** 现状：L1 只剩 `core-ohos/`
+> 的 3 个 patch（sdkjs/web-apps 已改走 fork）；L2 的 ascshim 已整体删除，20 段定制
+> 全部进三个 fork 或主仓 `ohos/` 模块。见文档头部「现行子模块改动规范」。
+
 L1 submodule 补丁层   5 个 .patch（core×3 + sdkjs×1 + webapps×1），官方树工作区应用
 L2 ascshim 注入层     20 段拼接（〔v3〕修正：58_pastebtn 为方案定稿后新增）
                       + 5 占位符（make_ascshim.py PARTS）
@@ -144,10 +148,10 @@ Local/license.js 才会退回基础版对 licenseResult=null 发 licenseType=Err
 
 | 仓库 | 处置 | 理由 |
 |---|---|---|
-| **sdkjs** | fork → `github.com/hackeris/sdkjs` | 引擎侧定制大头：configs 裁剪、getEmpty/bSerFormat、打开/保存语义、字体/图片/媒体供给、滚动条触摸、焦点守卫全在引擎行为层 |
-| **web-apps** | fork → `github.com/hackeris/web-apps` | UI 层定制：ColorPaletteExt 类修复、菜单显隐、头部装饰、About/许可弹层、字体名字图、字体管理入口 |
+| **sdkjs** | fork → `github.com/PureOffice/sdkjs`（ohos 分支） | 引擎侧定制大头：configs 裁剪、getEmpty/bSerFormat、打开/保存语义、字体/图片/媒体供给、滚动条触摸、焦点守卫全在引擎行为层 |
+| **web-apps** | fork → `github.com/PureOffice/web-apps`（ohos 分支） | UI 层定制：ColorPaletteExt 类修复、菜单显隐、头部装饰、About/许可弹层、字体名字图、字体管理入口 |
 | core | **不 fork**，保留 patch 工作流 | 3 个 patch 全是构建兼容类（openssl/harfbuzz/exec-bit），与运行时行为无关、升级漂移风险极低；fork 反而引入一条「无功能收益的升级面」（〔v2〕实测 .git 175M，存储不是障碍，纯收益考量） |
-| desktop-apps | 〔v3〕**fork** → `github.com/hackeris/desktop-apps`（§7.1 拍板） | 欢迎页定制源码化：viewport/导航精简/PDF 卡/recents 面板/About 版本（替代 L3 后处理与欢迎页注入段） |
+| desktop-apps | 〔v3〕**fork** → `github.com/PureOffice/desktop-apps`（ohos 分支，§7.1 拍板） | 欢迎页定制源码化：viewport/导航精简/PDF 卡/recents 面板/About 版本（替代 L3 后处理与欢迎页注入段） |
 | build_tools | 不 fork | 现状零改动 |
 
 ### 3.2 分支模型与升级流
@@ -206,15 +210,16 @@ fork（以 sdkjs 为例，web-apps 同型）
 │ AscNative 桥 + execCommand 命令总线              │ ← 冻结契约（与 fork 桥模块配对）
 │ 构建工程：字体工程（表/精灵/XOR）、模板、装配、   │
 │   版本、裁剪、回归框架                           │
-│ 【退役】ascshim.js 与 make_ascshim.py；产品产物  │
-│   零 JS 注入（回归 smoke 走 EditorPage 外置注入  │
-│   通道，属测试设施非产品定制）                    │
+│ 平台模块：scripts/onlyoffice/ohos/{boot,bridge,  │
+│   fonts}.js（env/bridge/fonts/userfonts/images/  │
+│   media/print/paste/save/open/scroller/focus/    │
+│   doclang/theme/fullscreen 各域）——源在主仓，     │
+│   构建期注入 index.html 头部（〔实际实施〕见 §3.5）│
+│ 【退役】ascshim.js 与 make_ascshim.py（回归 smoke │
+│   走 EditorPage 外置注入通道，属测试设施非产品）  │
 ├─ third_party/sdkjs → fork ─────────────────────┤
-│ common/ohos/ 平台模块：env（AscOHOS 命名空间）、 │
-│ bridge（AscDesktopEditor 装配+方法表）、fonts、  │
-│ userfonts、images、media、print、paste、save、   │
-│ open（Local 段 OHOS 化）、scroller、focus、      │
-│ doclang、theme、fullscreen（放映语义分支）        │
+│ 官方文件内的 [OHOS:] 行为分支（引擎侧定制：       │
+│   nofocus、touch-scroll、configs、DocLang 等）   │
 ├─ third_party/web-apps → fork ───────────────────┤
 │ UI 定制：显隐/装饰/About/弹层/字体下拉/           │
 │ ColorPaletteExt 类批修/modalguard 语义守卫        │
@@ -230,7 +235,15 @@ smoke 外置注入（非产品）；ArkTS 宿主行为 → 主仓。v2 的「与
 主仓 ascshim」判据作废——「配对」的正确形态是 fork 桥模块 ↔ ascBridge.ets 的显式
 契约（方法表/命令集双端对照），不是注入层页面脚本。
 
-### 3.5 〔v3〕OHOS 平台模块设计（sdkjs fork）
+### 3.5 〔v3〕OHOS 平台模块设计
+
+> **〔实际实施，2026-09-23 已完成，与本节方案有偏差——以此为准〕**
+> 平台模块**没有**放进 `third_party/sdkjs/common/ohos/`（该目录不存在），而是放在
+> **主仓** `scripts/onlyoffice/ohos/{boot,bridge,fonts}.js`，由 `build_editors_ohos.py`
+> 在构建期注入各 app 的 `index.html` 头部（与官方脚本同处 `<head>`，时机等价）。
+> sdkjs fork 侧只保留**官方文件内的 `[OHOS:]` 行为分支**（nofocus / touch-scroll /
+> configs / DocLang 等）。下面「挂载机制」描述的是当时的方案设计，**模块清单与顺序
+> 约束仍然有效**——只是载体从 fork 换成了主仓 + 注入。
 
 **挂载机制**：`common/ohos/` 各文件进 build.py 清单（fork 直接改 configs，先例=
 sdkjs-desktop patch 的 configs 定制；或 --addon 追加，§3.3.5）。bundle 纯拼接、
@@ -346,7 +359,8 @@ core×3 保留现行工作流。
 
 ### 阶段 0：建 fork 与提交固化（无行为变化，纯结构迁移）
 
-1. `github.com/hackeris/` 建 sdkjs、web-apps、desktop-apps 三仓〔v3：desktop-apps
+1. `github.com/PureOffice/` 建 sdkjs、web-apps、desktop-apps 三仓〔**执行修正：
+   2026-09-23 最终托管于 PureOffice 组织**（下述 hackeris 系当时拟址）；v3：desktop-apps
    并入，§7.1〕，**基底 = 当前 submodule pin 的官方 commit**（sdkjs 72b0421 /
    web-apps 9c0ca538 / desktop-apps 8f452c7f，非 tag——保证定制提交前的树与
    现状逐字节同源；desktop-apps 工作区零改动，ohos 分支基底即头）
@@ -459,9 +473,10 @@ core×3 保留现行工作流。
 1. **fork 仓库数量** → **拍板：三仓**（sdkjs + web-apps + desktop-apps）。
    用户选择超出 v2 推荐两仓：desktop-apps 亦 fork，欢迎页定制同步源码化
    （阶段 1 承接，§4.2）。
-2. **fork 托管位置** → **拍板：github.com/hackeris 公开**。AGPL 对应源码在
-   fork 化后含 OHOS 定制提交，NOTICE 源码地址必须指向用户可得处——公开是
-   合规硬需求；与主仓 PureOffice 同账号。
+2. **fork 托管位置** → 当时拍板 `github.com/hackeris` 公开〔**执行修正
+   （2026-09-23）：最终落在 `github.com/PureOffice` 组织**，与主仓同组织〕。
+   AGPL 对应源码在 fork 化后含 OHOS 定制提交，NOTICE 源码地址必须指向用户
+   可得处——公开是合规硬需求。
 3. **desktop-apps 是否 fork** → **拍板：fork**（并入决策 1）。
 4. **debug/验收段归宿** → 拍板「留主仓 ascshim」；〔v3〕goal「ascshim 全部
    更换为代码定制」覆盖该选择 → **升级为 smoke 外置注入**（阶段 4）：产品

@@ -1,5 +1,11 @@
 # ONLYOFFICE 鸿蒙版 —— 产品化路线图
 
+> **〔§1 现状定位已过时，2026-09-23〕** 下面写的「单机演示版 / 用户自己的文件进不来 /
+> 保存出不去 / recents 假数据」是 **2026-09-04 的状态**，此后均已完成：系统 picker
+> 打开 + 9 种格式 + 文件管理器「打开方式」接入、保存到用户原位置与导出、recents 真数据
+> （以 `ONLYOFFICE_OHOS_FEATURE_MATRIX.md` 为准）。基座行同 FEATURE_MATRIX：三个定制仓
+> 已是 PureOffice fork。**保留本文用于对照「当时认为要做什么」**。
+
 > 版本：2026-09-04（正规化 M1-M5 完成后制定）
 > 基座：官方 sdkjs（v9.4.0 `--desktop` 构建）+ 官方 web-apps UI + ArkTS 壳（ArkWeb + native x2t + 文件沙箱）
 > 关联：[ONLYOFFICE_OHOS_FEATURE_MATRIX.md](ONLYOFFICE_OHOS_FEATURE_MATRIX.md)（当前功能矩阵）、[ONLYOFFICE_OHOS_PORT_DESIGN.md](ONLYOFFICE_OHOS_PORT_DESIGN.md)（总设计）

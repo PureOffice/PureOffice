@@ -1,7 +1,11 @@
 # ONLYOFFICE DesktopEditors 移植到鸿蒙 —— 功能支持矩阵
 
 > 版本：2026-09-12（文件格式扩展：打开 9 种格式 + 文件管理器「打开方式」接入后）
-> 基座：官方 sdkjs（v9.4.0，`--desktop` 构建，min+common 双清单经官方 loadSdk 自加载）
+> **〔基座已变更，2026-09-23〕** sdkjs / web-apps / desktop-apps 现均为 **PureOffice
+> fork 的 ohos 分支**（含 OHOS 定制提交），不再是官方基座；仅 core 仍是「官方 +
+> `patches/core-ohos/` 幂等补丁」。文中凡以「ascshim」「`desktop/src/*.js` 段」描述
+> 载体之处均已失效（换算见 `docs/README.md`）——**功能状态本身仍以本文为准**。
+> 基座（原文）：官方 sdkjs（v9.4.0，`--desktop` 构建，min+common 双清单经官方 loadSdk 自加载）
 >       + 官方 web-apps（grunt 产物）+ 官方 loginpage（桌面版欢迎页）+
 >       ArkTS 壳（ArkWeb + native x2t 转换 + 文件沙箱）。
 > 说明：每一项 = 官方桌面能力 | 当前状态 | 返回值/行为 | 升级建议。
@@ -20,7 +24,7 @@
 | 导出 / 另存为 | ✅ | 编辑页左下「导出」按钮 → 自动触发官方保存 → 系统保存对话框（`DocumentViewPicker.save`）→ 写用户选定位置 |
 | 打印（系统打印） | ✅ | 工具栏打印按钮 / 文件菜单「打印」→ 页面元文件流（`Save_End` 真实长度截断）→ x2t `bin2pdf`（随包字体目录）→ `@ohos.print` 调起系统打印界面（选打印机或"打印为 PDF"）；临时文件启动时清扫（2026-09-11 真机三格式全通） |
 | 分享 | 降级 | SDK 无 ShareKit（@ohos.share 缺失）—— 登记 P1：SDK 升级后接 `systemShare` |
-| 新建空白文档（三格式） | ✅ | create:new → 随包空模板 `empty.{docx,xlsx,pptx}`（`make_empty_templates.py` 生成，骨架取自官方素材，仓库跟踪）；官方空文档链（word 另有 `getEmpty` + bSerFormat 补丁）；**三格式默认一致：语言中文简体、字体 Arial + 宋体**（docx=`styles.xml` docDefaults、pptx=模板 165 处 `lang` 替换、xlsx=`theme1.xml`/`styles.xml` 字体、cell 语言走 ascshim 预写编辑器偏好——xlsx 格式本身无文档级语言） |
+| 新建空白文档（三格式） | ✅ | create:new → 随包空模板 `empty.{docx,xlsx,pptx}`（`make_empty_templates.py` 生成，骨架取自官方素材，仓库跟踪）；官方空文档链（word 另有 `getEmpty` + bSerFormat 补丁）；**三格式默认一致：语言中文简体、字体 Arial + 宋体**（docx=`styles.xml` docDefaults、pptx=模板 165 处 `lang` 替换、xlsx=`theme1.xml`/`styles.xml` 字体、cell 语言走引擎侧 defaultLanguage 初始化——sdkjs fork `cell/api.js:99-113` 读 `sse-spellcheck-locale` 偏好、缺省 2052；xlsx 格式本身无文档级语言） |
 | 缩放/状态栏/多视图 | ✅ | 官方 UI 原生实现（100% 起点，Factor 1.0 语义） |
 | 多页视图（新建提示） | ✅ | 官方功能（无 UI 依赖） |
 | 字体（本地 12 个 Liberation 家族） | 部分 | `__fonts_files/__fonts_infos` 注册表 + web 字形引擎；文档字体名差异 → 默认字体替换（可见字形） |
@@ -55,7 +59,7 @@
 | `GetHash` / `_GetHash` | false | | |
 | `GetSupportScaleValues` / `GetFontThumbnailHeight` | false | 无额外缩放集 | 系统缩放走设备系数 |
 | `CheckUserId` / `SetAdvancedOptions` / `ApplyAction` | false | 无内容交互 | |
-| `SetFullscreen` | true | **已接**（2026-09-11）：PPT 放映全屏——Pad 收起 tab 条 / PC 沉浸最大化（`ENTER_IMMERSIVE_DISABLE_TITLE_AND_DOCK_HOVER`），退出按进入前窗口状态精确还原 | 真机 1.5/1.6 均✅；调用被 ascshim 3.7.1 在放映期临时恢复的 `AscDesktopEditor` 触发（3.7 平时删除它） |
+| `SetFullscreen` | true | **已接**（2026-09-11）：PPT 放映全屏——Pad 收起 tab 条 / PC 沉浸最大化（`ENTER_IMMERSIVE_DISABLE_TITLE_AND_DOCK_HOVER`），退出按进入前窗口状态精确还原 | 真机 1.5/1.6 均✅；调用由 sdkjs 的 `if (undefined !== window["AscDesktopEditor"])` 门控（`slide/Drawing/Transitions.js:3998`）；该对象现由主仓 `scripts/onlyoffice/ohos/bridge.js` **常驻装配**（原「ascshim 3.7 平时删除、放映期临时恢复」的状态机已随 fork 化取消） |
 
 ## 3. 未实现（无官方UI入口或登录页未暴露）
 
