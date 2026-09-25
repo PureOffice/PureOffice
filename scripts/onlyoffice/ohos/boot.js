@@ -33,11 +33,19 @@
             var _tq = (window.location.search || '').match(/[?&]title=([^&]+)/);
             var _title = _tq ? decodeURIComponent(_tq[1]) : 'sample';
             var _dt = _ft === 'xlsx' ? 'cell' : _ft === 'pptx' ? 'slide' : 'word';
+            // 界面语言：宿主 EditorPage 以 &lang=<systemLang()> 传入（2026-09-25 起
+            //   跟随系统语言）。本页的 editorConfig.lang 与下方 goback 的 URL 都用它
+            //   ——两处若各写各的，关闭文档回欢迎页时语言会漂移。缺省 'zh-CN' 仅为
+            //   防御（宿主恒带参）。
+            var _lq = (window.location.search || '').match(/[?&]lang=([^&]+)/);
+            // 缺省 'en'：与整体回退策略一致（不在随包 46 种内 → 英文，spec §6 决策 1）。
+            // 宿主 EditorPage 恒带 &lang=（故正常路径不会走到这里），缺省值只是防御。
+            var _lang = _lq ? decodeURIComponent(_lq[1]) : 'en';
             var _cfg = {
               documentType: _dt,
               width: '100%', height: '100%',
               editorConfig: {
-                mode: 'edit', lang: 'zh-CN', createUrl: 'desktop://create.new',
+                mode: 'edit', lang: _lang, createUrl: 'desktop://create.new',
                 user: {id: 'uid-1', name: 'User'},
                 // 保存链开关：docInfo.put_SupportsOnSaveDocument(true) →
                 // asc_Save → checkSaveDocumentEvent → saveLogicDocumentToZip →
@@ -71,8 +79,9 @@
                   //（web 编辑器层唯一的官方回欢迎页机制；Desktop 菜单"关闭文件"项待桌面
                   //  字体/native 通路三项补齐后再启用 isDesktopApp）。
                   // 欢迎页语言=URL lang 参数（loginpage utils.js:547 getUrlParams 默认
-                  // {lang:'en'}）——与 EditorPage.homeUrl 同参，否则关闭后欢迎页回英文。
-                  goback: {url: 'http://localhost/onlyoffice/index.html?lang=zh-CN'},
+                  // {lang:'en'}）——回跳时带上当前页语言（_lang），否则关闭文档后欢迎页
+                  // 掉回默认语言。
+                  goback: {url: 'http://localhost/onlyoffice/index.html?lang=' + _lang},
                   // 隐藏头部左上角 ONLYOFFICE logo：官方 branding 语义
                   // Header.js:798 this.branding = this.options.customization；
                   // :886-888 branding.logo.visible===false → #header-logo.addClass('hidden')
@@ -190,7 +199,10 @@
                   _di2.put_UserInfo(_ui);
                   _di2.put_Permissions(_cfg.document.permissions);
                   _di2.put_CallbackUrl('');
-                  _di2.put_Lang('zh-CN');
+                  // CDocInfo.Lang = 文档信息里的语言（引擎侧拼写/状态栏的兜底来源）。
+                  // 此前写死 zh-CN：单一语言年代无影响，跟随系统后必须与界面语言同源，
+                  // 否则「文档自身未声明语言」的路径会拿到中文。与 _lang 同源（见上）。
+                  _di2.put_Lang(_lang);
                   _di2.put_Mode('edit');
                   _di2.put_CoEditingMode('fast');
                   // CDocsCoApi 离线 dummy 补丁（2026-09-04）：auth 离线分支（docscoapi.js:187

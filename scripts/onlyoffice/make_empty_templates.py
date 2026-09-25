@@ -59,6 +59,12 @@ DST_DIR = os.path.join(ROOT, 'entry', 'src', 'main', 'resources', 'rawfile',
 DST_W = os.path.join(DST_DIR, 'empty.docx')
 DST_X = os.path.join(DST_DIR, 'empty.xlsx')
 DST_P = os.path.join(DST_DIR, 'empty.pptx')
+# 英文套（2026-09-25 语言跟随系统）：**文档语言**（docDefaults 的 w:lang / pptx 的
+# lang 属性 / 文档属性）单独一套。界面语言非中文时宿主取这套（EditorPage.openNewFile
+# 按 systemLang 选文件名后缀）。不带后缀的原名保持中文套 = 历史路径不变。
+DST_W_EN = os.path.join(DST_DIR, 'empty.en.docx')
+DST_X_EN = os.path.join(DST_DIR, 'empty.en.xlsx')
+DST_P_EN = os.path.join(DST_DIR, 'empty.en.pptx')
 
 # —— 真空白部件内容（标准 OOXML，无微软扩展 namespace）——
 # sheet1：默认列宽（无 <cols>）、无单元格（sheetData 空）、A1 选中 ——
@@ -120,13 +126,18 @@ BLANK_PROP_APP = (
 # 字形）；w:lang 决定状态栏/拼写/默认语言（"English - United States" 消失）；
 # pBdr=0 + spacing after=200/line=276 是官方生成器的空文档默认段落格式（demo-cn
 # 原样），删掉后引擎按内置默认（spacing after=100）与 demo-cn 行为分叉。
-DOCX_STYLES = (
+def docx_styles(lang='zh-CN'):
+    """按**文档语言**生成 styles.xml（zh-CN = 中文套，en-US = 英文套）。
+
+    rFonts 与段落格式两套完全相同，只有 w:lang 随语言变——语言影响状态栏/拼写/
+    默认语言标识，字体不该跟着界面语言走（中文内容在任何界面语言下都该是宋体字形）。"""
+    return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
     '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
     '<w:docDefaults><w:rPrDefault><w:rPr>'
     '<w:rFonts w:ascii="Arial" w:eastAsia="SimSun" w:hAnsi="Arial" w:cs="Arial"/>'
     '<w:sz w:val="22"/><w:szCs w:val="22"/>'
-    '<w:lang w:val="zh-CN" w:eastAsia="zh-CN" w:bidi="ar-SA"/>'
+    '<w:lang w:val="%s" w:eastAsia="%s" w:bidi="ar-SA"/>'
     '</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>'
     '<w:pBdr><w:top w:val="none" w:sz="4" w:space="0" w:color="000000"/>'
     '<w:left w:val="none" w:sz="4" w:space="0" w:color="000000"/>'
@@ -135,7 +146,7 @@ DOCX_STYLES = (
     '<w:between w:val="none" w:sz="4" w:space="0" w:color="000000"/>'
     '</w:pBdr><w:spacing w:after="200" w:line="276" w:lineRule="auto"/>'
     '</w:pPr></w:pPrDefault></w:docDefaults></w:styles>\n'
-)
+    ) % (lang, lang)
 # 骨架 [Content_Types].xml 只声明 document.xml → 追加 styles.xml Override
 DOCX_CT = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
@@ -164,7 +175,11 @@ DOCX_DOC_RELS = (
 # 与 docx 模板 docDefaults 的 w:lang=zh-CN 不对齐。PPTX 的语言声明只出现在
 # lang="..." 属性上（run / endParaRPr / defRPr / defPPr），故纯文本级替换即可。
 PPTX_LANG_FROM = 'lang="en-US"'
-PPTX_LANG_TO = 'lang="zh-CN"'
+
+
+def pptx_lang_to(lang):
+    """骨架自带 en-US；换成目标文档语言（zh-CN / en-US…）。目标为 en-US 时等于不改。"""
+    return 'lang="%s"' % lang
 
 # —— xlsx 默认字体对齐（2026-09-12 用户决策：三模板统一）——
 # 官方 simple1.xlsx 骨架带的是 Excel 默认主题字体：minorFont latin=Calibri、
@@ -252,15 +267,17 @@ def rewrite_zip(src_path, dst_path, replaces, transform=None):
     src.close()
 
 
-def empty_xlsx():
-    rewrite_zip(SRC_XLSX, DST_X, XLSX_REPLACES, xlsx_align_font)
+def empty_xlsx(dst):
+    """xlsx 无文档级语言（引擎侧由编辑器偏好承载，格式本身没有该字段）——两套内容
+    相同，但仍按后缀出两份，宿主侧路径规则保持统一。"""
+    rewrite_zip(SRC_XLSX, dst, XLSX_REPLACES, xlsx_align_font)
 
 
-def empty_docx():
+def empty_docx(dst, lang='zh-CN'):
     """最小 docx 骨架（真机验证引擎可打开的 3 部件包）→ 补 styles.xml
-    （docDefaults 默认中文）+ Content_Types/rels 声明 → empty.docx。
+    （docDefaults = 文档语言 lang）+ Content_Types/rels 声明 → dst。
     注意：骨架 word/document.xml 保持"单空段落"不动——它已被真机验证可打开；
-    默认中文只经 docDefaults（demo-cn 同款），勿再往 document.xml 写任何内容。"""
+    文档语言只经 docDefaults（demo-cn 同款），勿再往 document.xml 写任何内容。"""
     if not os.path.isfile(SRC_DOCX):
         raise SystemExit('docx 骨架缺失: %s（来源见文件头注释）' % SRC_DOCX)
     src = zipfile.ZipFile(SRC_DOCX)
@@ -268,7 +285,7 @@ def empty_docx():
     for key in ('[Content_Types].xml', '_rels/.rels', 'word/document.xml'):
         if key not in names:
             raise SystemExit('docx 骨架缺部件 %s（骨架版本不符，须更新本脚本）' % key)
-    with zipfile.ZipFile(DST_W, 'w', zipfile.ZIP_DEFLATED) as out:
+    with zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as out:
         for item in src.infolist():
             if item.filename == '[Content_Types].xml':
                 data = DOCX_CT.encode('utf-8')
@@ -277,13 +294,13 @@ def empty_docx():
             out.writestr(item, data)
         # 新增部件（骨架中没有 → 追加写入；styles 关系放 word/_rels/document.xml.rels——
         # 包级目录仅是 package rels，挂错层级 = styles 被孤立，见 DOCX_DOC_RELS 注释）
-        out.writestr(_new_part('word/styles.xml'), DOCX_STYLES.encode('utf-8'))
+        out.writestr(_new_part('word/styles.xml'), docx_styles(lang).encode('utf-8'))
         out.writestr(_new_part('word/_rels/document.xml.rels'), DOCX_DOC_RELS.encode('utf-8'))
     src.close()
 
 
-def empty_pptx():
-    """空白主题骨架（11 版式全集）→ 清理文档属性/缩略图 → empty.pptx"""
+def empty_pptx(dst, lang='zh-CN'):
+    """空白主题骨架（11 版式全集）→ 清理文档属性/缩略图 → dst（文档语言 = lang）"""
     if not os.path.isfile(SRC_PPTX):
         raise SystemExit('pptx 骨架缺失: %s（来源见文件头注释）' % SRC_PPTX)
     src = zipfile.ZipFile(SRC_PPTX)
@@ -293,7 +310,7 @@ def empty_pptx():
     for key in _must + tuple('ppt/slideLayouts/slideLayout%d.xml' % i for i in range(1, 12)):
         if key not in names:
             raise SystemExit('pptx 骨架缺部件 %s（骨架版本不符，须更新本脚本）' % key)
-    with zipfile.ZipFile(DST_P, 'w', zipfile.ZIP_DEFLATED) as out:
+    with zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as out:
         for item in src.infolist():
             if item.filename == 'docProps/core.xml':
                 data = BLANK_PROP_CORE.encode('utf-8')
@@ -302,7 +319,7 @@ def empty_pptx():
             else:
                 data = src.read(item.filename)
                 if item.filename.endswith('.xml'):
-                    data = data.decode('utf-8').replace(PPTX_LANG_FROM, PPTX_LANG_TO).encode('utf-8')
+                    data = data.decode('utf-8').replace(PPTX_LANG_FROM, pptx_lang_to(lang)).encode('utf-8')
             out.writestr(item, data)
     src.close()
 
@@ -330,9 +347,10 @@ def check(path, asserts):
 
 if __name__ == '__main__':
     os.makedirs(DST_DIR, exist_ok=True)
-    empty_docx()
-    empty_xlsx()
-    empty_pptx()
+    # 中文套：文件名不带语言后缀（= 历史路径不变）
+    empty_docx(DST_W, 'zh-CN')
+    empty_xlsx(DST_X)
+    empty_pptx(DST_P, 'zh-CN')
     check(DST_W, [
         # 新建 word 默认中文判据：docDefaults 带 w:lang zh-CN + eastAsia=SimSun；
         # 无 run 级字体/语言覆盖（defaults 承载）；en-US 黑名单防回退
@@ -373,4 +391,22 @@ if __name__ == '__main__':
     _zp.close()
     if _left:
         raise SystemExit('empty.pptx 残留 %s：%s' % (PPTX_LANG_FROM, ', '.join(_left)))
+
+    # —— 英文套（2026-09-25 语言跟随系统）：界面语言非中文时宿主取这套 ——
+    # 只验文档语言字段：其余内容与中文套同源同生成函数，重复全量断言无信息量。
+    empty_docx(DST_W_EN, 'en-US')
+    empty_xlsx(DST_X_EN)
+    empty_pptx(DST_P_EN, 'en-US')
+    check(DST_W_EN, [
+        ('word/styles.xml', ['w:lang w:val="en-US"', 'w:eastAsia="SimSun"'],
+         ['w:val="zh-CN"']),
+        ('word/document.xml', ['<w:body>', '<w:sectPr'], ['<w:rFonts', 'w:lang']),
+    ])
+    check(DST_X_EN, [
+        ('xl/workbook.xml', ['name="Sheet1"'], []),
+        ('xl/theme/theme1.xml', ['typeface="Arial"'], ['Calibri']),
+    ])
+    check(DST_P_EN, [
+        ('ppt/presentation.xml', ['sldIdLst', 'lang="en-US"'], ['lang="zh-CN"']),
+    ])
     print('完成（模板随 HAP 打包：重新构建 HAP 后生效；重跑本脚本可再生成）')

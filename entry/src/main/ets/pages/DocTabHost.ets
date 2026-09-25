@@ -5,6 +5,7 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { loadRaw } from '../common/rawfileLoader';
 import { resourceManager } from '@kit.LocalizationKit';
 import { specOf } from '../common/formats';
+import { t } from '../common/i18n';
 
 /**
  * PC（2in1/pc）tab 条高度=37（用户 2026-09-09 拍板：与 setWindowDecorHeight
@@ -289,9 +290,9 @@ function buildHomePhone(ctx: DocTabCtx) {
 
         Row({ space: 12 }) {
           ForEach([
-            new PhoneHomeCard('docx', 'DOCX', '文档', '#446995'),
-            new PhoneHomeCard('xlsx', 'XLSX', '电子表格', '#3D8B62'),
-            new PhoneHomeCard('pptx', 'PPTX', '演示文稿', '#C4552F'),
+            new PhoneHomeCard('docx', 'DOCX', t($r('app.string.home_new_doc')), '#446995'),
+            new PhoneHomeCard('xlsx', 'XLSX', t($r('app.string.home_new_xlsx')), '#3D8B62'),
+            new PhoneHomeCard('pptx', 'PPTX', t($r('app.string.home_new_pptx')), '#C4552F'),
           ], (card: PhoneHomeCard) => {
             Column({ space: 10 }) {
               Text(card.label)
@@ -316,10 +317,10 @@ function buildHomePhone(ctx: DocTabCtx) {
 
         Column({ space: 2 }) {
           ForEach([
-            new PhoneHomeCard('open', '', '打开本地文件', '#446995'),
+            new PhoneHomeCard('open', '', t($r('app.string.home_open_local')), '#446995'),
             // 字体管理入口暂时下架（功能链保留在 EditorPage，恢复=恢复本行）：
             // new PhoneHomeCard('fontmgr', '', '字体管理', '#3D8B62'),
-            new PhoneHomeCard('about', '', '关于', '#C4552F'),
+            new PhoneHomeCard('about', '', t($r('app.string.about_title')), '#C4552F'),
           ], (item: PhoneHomeCard) => {
             Row() {
               Text(item.name)
@@ -465,13 +466,13 @@ export struct DocTabHost {
     return false;
   }
 
-  /** + 菜单项（数据驱动：系统渲染菜单，点击回调 action）。措辞取自官方中文
-   *  语言包同族词条（Controllers/LeftMenu.newDocumentTitle 去掉「未命名的」）。 */
+  /** + 菜单项（数据驱动：系统渲染菜单，点击回调 action）。措辞取自官方语言包
+   *  同族词条（Controllers/LeftMenu.newDocumentTitle 去掉「未命名的」）。 */
   private newMenuItems(): MenuElement[] {
     return [
-      { value: '文档', action: () => { this.onNewDoc('docx'); } },
-      { value: '电子表格', action: () => { this.onNewDoc('xlsx'); } },
-      { value: '演示', action: () => { this.onNewDoc('pptx'); } }
+      { value: t($r('app.string.home_new_doc')), action: () => { this.onNewDoc('docx'); } },
+      { value: t($r('app.string.home_new_xlsx')), action: () => { this.onNewDoc('xlsx'); } },
+      { value: t($r('app.string.menu_new_pptx')), action: () => { this.onNewDoc('pptx'); } }
     ];
   }
 

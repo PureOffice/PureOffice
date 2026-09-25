@@ -17,6 +17,8 @@
  * 据此选「最近使用」列表图标（res/img/generated/formats.svg 含全部符号）。
  */
 
+import { t } from './i18n';
+
 /** 格式规格 */
 export interface FormatSpec {
   /** 源扩展名（小写、不含点） */
@@ -122,7 +124,7 @@ export function pickerSuffixes(): string[] {
  * 不能原地保存的格式只能落 OOXML），单元素即预期形态（见 EditorPage.doSaveAs）。
  */
 export function pickerFilterOption(): string[] {
-  return ['支持的文件|' + pickerSuffixes().join(',')];
+  return [t($r('app.string.picker_filter_supported')) + '|' + pickerSuffixes().join(',')];
 }
 
 /** 编辑器应用页名（webapps/apps/<name>/main/index.html） */

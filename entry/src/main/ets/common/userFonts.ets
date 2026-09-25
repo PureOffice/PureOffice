@@ -17,6 +17,7 @@ import { resourceManager } from '@kit.LocalizationKit';
 import { readFileBuf, readFileBufAsync, writeFileBufAsync, u8ToStr,
   bufToB64 } from './bytes';
 import { parseSfnt, isTtcCollection } from './sfnt';
+import { t } from './i18n';
 
 export interface UserFont {
   id: string;
@@ -150,7 +151,7 @@ export async function pickFontFile(ctx: common.UIAbilityContext): Promise<string
     const opts = new picker.DocumentSelectOptions();
     opts.maxSelectNumber = 1;
     // 单元素 + 逗号分隔（多元素 = 下拉里多个选项且只默认选中第一个，用户看不到 .otf）
-    opts.fileSuffixFilters = ['字体文件|.ttf,.otf'];
+    opts.fileSuffixFilters = [t($r('app.string.picker_filter_font')) + '|.ttf,.otf'];
     const uris = await dvp.select(opts);
     return uris.length === 0 ? '' : uris[0];
   } catch (e) {
@@ -168,7 +169,7 @@ export async function importFontFile(filesDir: string,
   try {
     const ab = await readFileBufAsync(uri);
     if (ab === null) {
-      return { ok: false, msg: '读取文件失败' };
+      return { ok: false, msg: t($r('app.string.font_err_read')) };
     }
     const u8 = new Uint8Array(ab);
     const info = parseSfnt(u8);
@@ -179,19 +180,19 @@ export async function importFontFile(filesDir: string,
       return {
         ok: false,
         msg: isTtcCollection(u8)
-          ? '暂不支持字体集合（.ttc），请使用单个 .ttf / .otf'
-          : '不是有效的字体文件（仅支持 .ttf / .otf）'
+          ? t($r('app.string.font_err_ttc'))
+          : t($r('app.string.font_err_invalid'))
       };
     }
     if (info.isVariable) {
-      return { ok: false, msg: '暂不支持可变字体（Variable Font）' };
+      return { ok: false, msg: t($r('app.string.font_err_vf')) };
     }
     const fam = info.family.trim();
     if (fam.length === 0) {
-      return { ok: false, msg: '字体内部缺少家族名，无法导入' };
+      return { ok: false, msg: t($r('app.string.font_err_nofamily')) };
     }
     if (builtinRows(resMgr).indexOf(fam) >= 0) {
-      return { ok: false, msg: '字体「' + fam + '」已内置，无需导入' };
+      return { ok: false, msg: t($r('app.string.font_err_builtin'), fam) };
     }
     try {
       fs.mkdirSync(dirOf(filesDir));
@@ -200,23 +201,23 @@ export async function importFontFile(filesDir: string,
     }
     const id = await fontIdAsync(uri, u8);
     if (id.length === 0) {
-      return { ok: false, msg: '导入失败（无法计算文件指纹）' };
+      return { ok: false, msg: t($r('app.string.font_err_hash')) };
     }
     const list = listFonts(filesDir);
     for (const f of list) {
       if (f.id === id) {
-        return { ok: true, msg: '字体「' + f.family + '」之前已导入过' };
+        return { ok: true, msg: t($r('app.string.font_ok_dup'), f.family) };
       }
       if (f.family === fam) {
-        return { ok: false, msg: '字体「' + fam + '」已导入过（同名不同文件）' };
+        return { ok: false, msg: t($r('app.string.font_err_dupname'), fam) };
       }
     }
     if (list.length >= MAX_FONTS) {
-      return { ok: false, msg: '已达导入上限 ' + MAX_FONTS + ' 个' };
+      return { ok: false, msg: t($r('app.string.font_err_limit'), MAX_FONTS) };
     }
     const file = id + (info.isCff ? '.otf' : '.ttf');
     if (!(await writeFileBufAsync(dirOf(filesDir) + '/' + file, u8))) {
-      return { ok: false, msg: '写入失败（存储空间不足？）' };
+      return { ok: false, msg: t($r('app.string.font_err_write')) };
     }
     list.push({
       id: id,
@@ -227,11 +228,11 @@ export async function importFontFile(filesDir: string,
       italic: info.italic
     });
     if (!writeIndex(filesDir, list)) {
-      return { ok: false, msg: '清单写入失败' };
+      return { ok: false, msg: t($r('app.string.font_err_manifest')) };
     }
-    return { ok: true, msg: '已导入「' + fam + '」，新打开的文档即可使用' };
+    return { ok: true, msg: t($r('app.string.font_ok_imported'), fam) };
   } catch (e) {
-    return { ok: false, msg: '导入失败：' + String(e) };
+    return { ok: false, msg: t($r('app.string.font_err_import'), String(e)) };
   }
 }
 
@@ -260,19 +261,19 @@ export function removeFont(filesDir: string, id: string): ImportResult {
       }
     }
     if (hit === null) {
-      return { ok: false, msg: '字体不存在（可能已被删除）' };
+      return { ok: false, msg: t($r('app.string.font_err_notfound')) };
     }
     if (!writeIndex(filesDir, rest)) {
-      return { ok: false, msg: '删除失败（清单写入错误）' };
+      return { ok: false, msg: t($r('app.string.font_err_delmanifest')) };
     }
     try {
       fs.unlinkSync(dirOf(filesDir) + '/' + hit.file);
     } catch (e) {
       console.error('LSO_UFONT_UNLINK_ERR id=' + id + ' ' + String(e));
     }
-    return { ok: true, msg: '已删除「' + hit.family + '」' };
+    return { ok: true, msg: t($r('app.string.font_ok_deleted'), hit.family) };
   } catch (e) {
-    return { ok: false, msg: '删除失败：' + String(e) };
+    return { ok: false, msg: t($r('app.string.font_err_delete'), String(e)) };
   }
 }
 

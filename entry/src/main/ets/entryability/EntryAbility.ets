@@ -2,6 +2,7 @@ import { AbilityConstant, Want, UIAbility, abilityAccessCtrl, bundleManager, Per
 import { window } from '@kit.ArkUI';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { bindResourceManager } from '../common/i18n';
 
 /**
  * 启动参数（want.parameters）——EditorPage 读取（自动验收开关 m7accept/m7file；
@@ -77,6 +78,8 @@ export function setWindowCloseHandler(h: (() => void) | null): void {
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    // 文案资源句柄注入——必须早于任何页面构造（页面 aboutToAppear 里就会读）
+    bindResourceManager(this.context.resourceManager);
     // POC-1: 无业务初始化；仅收集启动参数（能力验证/验收开关用）
     collect(want);
   }

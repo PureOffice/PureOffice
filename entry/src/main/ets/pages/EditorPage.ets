@@ -13,6 +13,8 @@ import { appendRecent, RECENT_TYPE_DOCX, RECENT_TYPE_XLSX, RECENT_TYPE_PPTX } fr
 import { encodeUrlParam, pickFontFile, importFontFile, listFontItems, removeFont,
   MAX_FONTS, FontListItem } from '../common/userFonts';
 import { specOf, pickerSuffixes, pickerFilterOption, editorAppOf, needsSaveAsPrompt, isLossySave, checkSaveOut, openExtraFor } from '../common/formats';
+import { systemLang } from '../common/lang';
+import { t } from '../common/i18n';
 import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
 import { DocTabHost, DocTabCtx, DocTabPair } from './DocTabHost';
 
@@ -44,16 +46,17 @@ const IMAGE_SUFFIXES: string[] = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.web
 function imageSuffixesFrom(accept: string[]): string[] {
   const out: string[] = [];
   for (const a of accept) {
-    const t = a.trim().toLowerCase();
-    if (t.startsWith('.') && t.length > 1) {
-      out.push(t);
-    } else if (t.indexOf('image/') === 0) {
+    const sfx = a.trim().toLowerCase();
+    if (sfx.startsWith('.') && sfx.length > 1) {
+      out.push(sfx);
+    } else if (sfx.indexOf('image/') === 0) {
       for (const suf of IMAGE_SUFFIXES) {
         out.push(suf);
       }
     }
   }
-  return ['图片|' + (out.length > 0 ? out : IMAGE_SUFFIXES).join(',')];
+  return [t($r('app.string.picker_filter_image'))
+    + '|' + (out.length > 0 ? out : IMAGE_SUFFIXES).join(',')];
 }
 /**
  * 打印字体表（x2t bin2pdf 的 m_sFontDir 内容）——2026-09-10。
@@ -172,7 +175,7 @@ struct EditorPage {
   @State docTabs: DocTabPair[] = [];
   @State focusTab: number = 0;
   /** tab 标题平行数组（@State 元素可观察——另存为改名即时刷新 chip）；与 docTabs 同步
-   *  （index 对应；home 恒 '主页'） */
+   *  （index 对应；home 恒 t($r('app.string.tab_home'))） */
   @State docTitles: string[] = [];
   /** tab 主题色平行数组（页面 00_theme 0.10 上报：当前主题 CSS 变量
    *  --toolbar-header-<app>）——选中 chip 颜色跟随文档页当前主题色（官方桌面特性；
@@ -234,11 +237,14 @@ struct EditorPage {
   @State phoneAboutLicText: string = '';
 
   /** 官方欢迎页（loginpage）：欢迎/最近文件列表 + 新建卡片
-   *  lang=zh-CN：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
-   *  未传时回退英文——2026-09-05 用户目标「默认中文」） */
+   *  lang=systemLang()：loginpage 界面语言由 URL 参数决定（utils.inParams.lang；
+   *  缺省回退英文）。2026-09-25 起跟随系统语言（此前固定 zh-CN）。 */
   private homeUrl(): string {
+    const lang = systemLang();
+    // 语言解析结果落日志：回归判据——改系统语言后此行应随之变化（zh / zh-tw / en…）
+    this.arkLog('LSO_LANG ' + lang);
     return 'http://localhost/onlyoffice/index.html?v=' + this.pageVer
-      + '&lang=zh-CN'
+      + '&lang=' + lang
       // 注：zoom=1.2 只在文档页（editorUrl）拼——2026-09-05 用户：主界面不放大，
       // 文档页面才放大（LSO_PAGE_ZOOM 由 ascshim 00_boot 按参数设 html CSS zoom）
       + (this.m7Target.length > 0 ? '&m7open=' + encodeURIComponent(this.m7Target) : '')
@@ -269,7 +275,7 @@ struct EditorPage {
     const fileType = specU !== null ? specU.fileType : 'docx';
     const app = editorAppOf(family);
     let url = 'http://localhost/onlyoffice/webapps/apps/' + app + '/main/index.html?v=' + this.pageVer
-      + '&fileType=' + fileType + '&isDesktop=false&docType=' + fileType + '&lang=zh-CN&title=' + encodeURIComponent(title)
+      + '&fileType=' + fileType + '&isDesktop=false&docType=' + fileType + '&lang=' + systemLang() + '&title=' + encodeURIComponent(title)
       // sid=实例唯一化（2026-09-05 修复「关闭文档后再新建显示旧内容」：相同 URL 的
       // 二次导航 ArkWeb 复用引擎实例——页面事件照常（LSO_OPEN_DOCUMENT_OK 收到新模板
       // 字节 len=1086）但旧文档模型残留（真机实锤：新建「未命名的文档」显示 demo-cn 7 页
@@ -412,7 +418,7 @@ struct EditorPage {
         const fp = JSON.parse(param) as Record<string, Object>;
         const p = String(fp['path'] ?? '');
         this.arkLog('FILES_EXPLORE path=' + p);
-        promptAction.showToast({ message: '文件位置：' + p, duration: 3000 });
+        promptAction.showToast({ message: t($r('app.string.toast_file_location'), p), duration: 3000 });
       } catch (e) {
         this.arkLog('FILES_EXPLORE_ERR ' + String(e));
       }
@@ -504,16 +510,16 @@ struct EditorPage {
 
   /**
    * 新建文档默认名 —— 从官方语言包读取（rawfile webapps/apps/<app>/main/locale/
-   * zh.json，键 [DE|SSE|PE].Controllers.LeftMenu.newDocumentTitle = 官方桌面「新建」
-   * 默认名：未命名的文档/未命名的电子表格/未命名的演示）。语言文件与 UI lang 对齐
-   * （editorUrl lang=zh-CN → locale/zh.json；未来多语言换 lang 即换文件）。
-   * 兜底仅在语言包读失败/键缺失时给直写中文（正常路径零硬编码文本）。
+   * <lang>.json，键 [DE|SSE|PE].Controllers.LeftMenu.newDocumentTitle）。
+   * lang 取 systemLang()，与 editorUrl 同一短码——两边若各算一次，规则漂移会导致
+   * 「界面英文但新建文档名中文」。
+   * 兜底仅在语言包读失败/键缺失时给直写英文（正常路径零硬编码文本）。
    */
   private defaultDocName(ext: string): string {
     try {
       if (this.defaultNames === null) {
         this.defaultNames = {};
-        const lang = 'zh'; // 与 editorUrl lang=zh-CN 对齐
+        const lang = systemLang(); // 与 editorUrl 同一短码（systemLang 对页面归一化幂等）
         const apps: [string, string, string][] = [
           ['docx', 'documenteditor', 'DE'],
           ['xlsx', 'spreadsheeteditor', 'SSE'],
@@ -536,18 +542,24 @@ struct EditorPage {
     if (fromLoc !== null && fromLoc !== undefined && fromLoc.length > 0) {
       return fromLoc + '.' + ext;
     }
-    // 兜底（语言包读取失败/键缺失时保底；正常路径走上面官方词条）
-    const base = ext === 'xlsx' ? '未命名的电子表格'
-      : ext === 'pptx' ? '未命名的演示' : '未命名的文档';
+    // 兜底（语言包读取失败/键缺失时保底；正常路径走上面官方词条）——取官方 en.json
+    // 同词条字面量：整体回退策略是英文（spec §6 决策 2），此处留中文会在英文系统下
+    // 冒出中文文档名。
+    const base = ext === 'xlsx' ? 'Unnamed spreadsheet'
+      : ext === 'pptx' ? 'Unnamed presentation' : 'Unnamed document';
     return base + '.' + ext;
   }
 
   /** create:new（word）：空文档模板 → 与打开同管线注入（官方 C++ 对新建同样发 DocumentEndLoad） */
   private openNewFile(ext: string): string {
     try {
-      // 空模板（rawfile/onlyoffice/templates/empty.<ext>；docx/xlsx/pptx 均由
-      // 官方样本/结构保证合法——xlsx/pptx 生成见 scripts/onlyoffice/make_empty_templates.py）
-      const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/templates/empty.' + ext) as Uint8Array;
+      // 空模板（rawfile/onlyoffice/templates/；docx/xlsx/pptx 均由官方样本/结构保证
+      // 合法——生成见 scripts/onlyoffice/make_empty_templates.py）。
+      // 文档语言跟随界面语言（2026-09-25）：中文系统取 empty.<ext>（历史路径，
+      // docDefaults 的 w:lang=zh-CN），其余取 empty.en.<ext>（en-US）。xlsx 格式本身
+      // 无文档级语言字段，两套内容相同，仍按同一规则取以免宿主出现两套分支。
+      const tpl = systemLang().startsWith('zh') ? 'empty.' + ext : 'empty.en.' + ext;
+      const raw = this.resourceManager!.getRawFileContentSync('onlyoffice/templates/' + tpl) as Uint8Array;
       const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
       this.arkLog('CREATE_NEW empty.' + ext + ' len=' + ab.byteLength);
       // 新建（未保存）不进「最近使用」——官方桌面语义：recents=打开过的文件；
@@ -615,7 +627,7 @@ struct EditorPage {
       if (specOf(ext) === null) {
         // 未支持格式：显式提示（不再静默 return——用户须知道发生了什么）
         this.arkLog('OPEN_LOCAL_EXTBAD label=' + label + ' ext=' + ext);
-        this.showFormatNotice('暂不支持该格式：' + label);
+        this.showFormatNotice(t($r('app.string.notice_fmt_unsupported'), label));
         return;
       }
       const ab = readFileBuf(uri);
@@ -623,7 +635,7 @@ struct EditorPage {
         // 读失败（授权过期/文件已删/目录 uri）：同样要出口——本入口无前置过滤，
         // 静默会让用户以为「点了没反应」
         this.arkLog('OPEN_LOCAL_READERR uri=' + uri);
-        this.showFormatNotice('无法打开：' + label);
+        this.showFormatNotice(t($r('app.string.notice_open_failed'), label));
         return;
       }
       this.arkLog('OPEN_LOCAL_OK label=' + label + ' uri=' + uri + ' size=' + ab.byteLength);
@@ -631,7 +643,7 @@ struct EditorPage {
       this.openNewTabEntry(ab, ext, label, true, false, uri);
     } catch (e) {
       this.arkLog('OPEN_LOCAL_ERR ' + String(e));
-      this.showFormatNotice('无法打开：' + label);
+      this.showFormatNotice(t($r('app.string.notice_open_failed'), label));
     }
   }
 
@@ -677,7 +689,7 @@ struct EditorPage {
       }
       if (ext.length === 0 || specOf(ext) === null) {
         this.arkLog('OPEN_RECENT_EXTBAD label=' + label + ' ext=' + ext);
-        this.showFormatNotice('暂不支持该格式：' + label);
+        this.showFormatNotice(t($r('app.string.notice_fmt_unsupported'), label));
         return 'false';
       }
       // 读源文件字节
@@ -707,7 +719,7 @@ struct EditorPage {
       // 目标后缀：forceExt 优先（不能原地保存的格式：.doc → .docx），否则同格式
       const targetExt = (forceExt !== undefined && forceExt.length > 0) ? forceExt : ctx.state.ext;
       // 默认名：已保存文档=当前名**换目标后缀**（.doc → .docx）——原名直接带上会把
-      // docx 字节写成 .doc 名；新建=语言包中文未命名（defaultDocName）
+      // docx 字节写成 .doc 名；新建=语言包未命名（defaultDocName，随界面语言）
       let defName = '';
       if (ctx.state.name.length > 0) {
         const dn = ctx.state.name.lastIndexOf('.');
@@ -844,7 +856,7 @@ struct EditorPage {
       const rc = x2tConvertSync(x2tXmlFont(inP, outP, fontDir));
       this.arkLog('PRINT_X2T rc=0x' + (rc >>> 0).toString(16) + ' (' + rc + ')');
       if (rc !== 0) {
-        promptAction.showToast({ message: '打印失败：文档转换出错', duration: 3000 });
+        promptAction.showToast({ message: t($r('app.string.print_err_convert')), duration: 3000 });
         return 'false';
       }
       const outBuf = readFileBuf(outP);
@@ -857,7 +869,7 @@ struct EditorPage {
       const pdfOk = mk[0] === 0x25 && mk[1] === 0x50 && mk[2] === 0x44 && mk[3] === 0x46;
       this.arkLog('PRINT_PDF size=' + outBuf.byteLength + (pdfOk ? ' pdfok' : ' PDFBAD'));
       if (!pdfOk) {
-        promptAction.showToast({ message: '打印失败：PDF 生成异常', duration: 3000 });
+        promptAction.showToast({ message: t($r('app.string.print_err_pdf')), duration: 3000 });
         return 'false';
       }
       this.printPdf(ctx, outP);
@@ -902,7 +914,7 @@ struct EditorPage {
       }).catch((e: BusinessError) => {
         this.arkLog('CLIP_PASTE_ERR ' + e.code + ' ' + e.message);
         if (e.code === 201) {
-          promptAction.showToast({ message: '未授予剪贴板权限，请在系统设置中开启后重试', duration: 3000 });
+          promptAction.showToast({ message: t($r('app.string.clip_perm_denied')), duration: 3000 });
         }
       });
     } catch (e) {
@@ -1115,18 +1127,18 @@ struct EditorPage {
    */
   private fontMgrDeleteConfirm(id: string, family: string): void {
     AlertDialog.show({
-      title: '删除字体',
-      message: '将删除「' + family + '」。\n用该字体排版的文档再打开时会回退为宋体。',
+      title: t($r('app.string.font_del_title')),
+      message: t($r('app.string.font_del_msg'), family),
       autoCancel: true,
       alignment: DialogAlignment.Center,
       primaryButton: {
-        value: '取消',
+        value: t($r('app.string.btn_cancel')),
         action: () => {
           this.arkLog('FONT_MGR_DEL_CANCEL id=' + id);
         }
       },
       secondaryButton: {
-        value: '删除',
+        value: t($r('app.string.btn_delete')),
         fontColor: '#C0392B',
         action: () => {
           this.fontMgrDelete(id);
@@ -1142,7 +1154,7 @@ struct EditorPage {
     this.arkLog('FONT_MGR_DEL id=' + id + ' ok=' + r.ok + ' ' + r.msg);
     this.refreshFontRows();
     promptAction.showToast({
-      message: r.ok ? (r.msg + '，新打开的文档将不再包含该字体') : r.msg,
+      message: r.ok ? t($r('app.string.font_del_effect'), r.msg) : r.msg,
       duration: 3000
     });
   }
@@ -1160,7 +1172,7 @@ struct EditorPage {
     const aCtx = getContext(this) as common.UIAbilityContext;
     const rm = this.resourceManager;
     if (rm === undefined) {
-      promptAction.showToast({ message: '导入失败：资源未就绪', duration: 3000 });
+      promptAction.showToast({ message: t($r('app.string.font_import_notready')), duration: 3000 });
       return;
     }
     this.fontMgrBusy = true;
@@ -1170,7 +1182,7 @@ struct EditorPage {
       const uri = await pickFontFile(aCtx);
       if (uri.length === 0) {
         this.arkLog('LSO_UFONT_IMPORT ok=false msg=已取消导入');
-        promptAction.showToast({ message: '已取消导入', duration: 3000 });
+        promptAction.showToast({ message: t($r('app.string.font_import_canceled')), duration: 3000 });
         return;
       }
       this.fontMgrStage = 'import';
@@ -1190,12 +1202,12 @@ struct EditorPage {
   /** 导入按钮文案（跟着阶段走，见 fontMgrImport） */
   private fontMgrBtnText(): string {
     if (this.fontMgrStage === 'pick') {
-      return '选择字体文件…';
+      return t($r('app.string.font_import_pick'));
     }
     if (this.fontMgrStage === 'import') {
-      return '导入中…';
+      return t($r('app.string.font_import_busy'));
     }
-    return '导入字体';
+    return t($r('app.string.font_import_btn'));
   }
 
   /**
@@ -1313,7 +1325,7 @@ struct EditorPage {
       .catch((e: BusinessError) => {
         // 201 = 缺 ohos.permission.PRINT 声明；其余 = 系统打印服务不可用
         this.arkLog('PRINT_TASK_ERR ' + e.code + ' ' + e.message);
-        promptAction.showToast({ message: '无法调起系统打印', duration: 3000 });
+        promptAction.showToast({ message: t($r('app.string.print_err_launch')), duration: 3000 });
         this.cleanupPrintFiles(ctx);
       });
   }
@@ -1517,8 +1529,7 @@ struct EditorPage {
         this.fmtDialogCtx = ctx;
         this.fmtDialogOut = outBuf;
         this.fmtDialogLossy = true;
-        this.fmtDialogText = '「.' + ctx.state.ext + '」只保存文本内容，'
-          + '合并单元格/颜色/列宽等格式将丢失。';
+        this.fmtDialogText = t($r('app.string.save_text_only'), ctx.state.ext);
         this.fmtDialogOn = true;
         // 守卫「保存」在途：复用 awaitingSaveAs 语义（本段不消费 defer，确认由
         // commitSavedLocal 收尾 / 取消走 fmtDialogAction 的 clearCloseGuard）
@@ -1531,8 +1542,7 @@ struct EditorPage {
       if (userSaved && ctx.state.saveTarget !== 'none' && needsSaveAsPrompt(ctx.state.ext)) {
         this.fmtDialogCtx = ctx;
         this.fmtDialogOut = outBuf;
-        this.fmtDialogText = '「.' + ctx.state.ext + '」格式不支持保存，将以「.'
-          + extU + '」格式另存。';
+        this.fmtDialogText = t($r('app.string.save_convert_as'), ctx.state.ext, extU);
         this.fmtDialogOn = true;
         // 守卫「保存」在途：复用 awaitingSaveAs 语义（本段不消费 defer，成功由
         // doSaveAs 尾消费 / 取消走 fmtDialogAction 的 clearCloseGuard）
@@ -1613,8 +1623,7 @@ struct EditorPage {
         + 'console.error("LSO_SAVED_INDEX_RESET");'
         + '}catch(x){console.error("LSO_SAVED_INDEX_ERR "+x);}})()', 'saveReset');
       if (uriFailed) {
-        this.showFormatNotice('原文件不可写（授权已过期或只读），内容已留在应用内；'
-          + '请用「文件 → 另存为」保存到其他位置');
+        this.showFormatNotice(t($r('app.string.save_unwritable')));
       }
       // 保存成功 = 文件身份成立（官方桌面语义：保存后的文件进「最近使用」；
       // 新建在打开链已禁 recents（openNewTabEntry addRecent=false）——用户保存即补录；
@@ -1640,7 +1649,7 @@ struct EditorPage {
       // （上方已有「请另存为」告知，再弹「已保存」自相矛盾）。
       if (userSaved && !uriFailed
         && !(this.closeGuardDefer !== null && this.closeGuardDefer.ctx === ctx)) {
-        promptAction.showToast({ message: '已保存', duration: 3000 });
+        promptAction.showToast({ message: t($r('app.string.toast_saved')), duration: 3000 });
       }
       return 'true';
     } catch (e) {
@@ -1739,7 +1748,7 @@ struct EditorPage {
         failed = true;
         this.arkLog('OPEN_X2T_FAIL ext=' + extU + ' rc=0x' + rcU.toString(16));
         if (rcU === X2T_RC_DRM_UNSUPPORTED) {
-          this.showFormatNotice('该文档使用了暂不支持的加密方式，无法打开。');
+          this.showFormatNotice(t($r('app.string.enc_unsupported')));
         }
       };
       attempt(Smoke.pwd);
@@ -1993,7 +2002,7 @@ struct EditorPage {
       try {
         const logFn: (m: string) => void = ((m: string) => this.arkLog(m));
         this.p0Tabs = [
-          new P0TabPair(new P0TabCtx(1, '主页', this.homeUrl(), this.resourceManager!, this.hostFilesDir, logFn)),
+          new P0TabPair(new P0TabCtx(1, t($r('app.string.tab_home')), this.homeUrl(), this.resourceManager!, this.hostFilesDir, logFn)),
           new P0TabPair(new P0TabCtx(2, 'P0 文档', this.editorUrl('docx', 'P0 验证'), this.resourceManager!, this.hostFilesDir, logFn))
         ];
         this.arkLog('P0_TABS_INIT n=' + this.p0Tabs.length
@@ -2005,7 +2014,7 @@ struct EditorPage {
     // P1a 容器初始化：主页实例恒第一（常驻；doc 由打开/新建命令动态追加）
     if (!this.p0On) {
       try {
-        const homeCtx = new DocTabCtx(0, 'home', '主页', this.homeUrl(),
+        const homeCtx = new DocTabCtx(0, 'home', t($r('app.string.tab_home')), this.homeUrl(),
           this.resourceManager!, this.hostFilesDir,
           ((m: string) => this.arkLog(m)), ((c: DocTabCtx) => this.onInstanceReady(c)),
           ((c: DocTabCtx) => this.onPageEndCB(c)));
@@ -2027,7 +2036,7 @@ struct EditorPage {
           this.phoneAboutOpen();
         });
         this.docTabs = [new DocTabPair(homeCtx)];
-        this.docTitles = ['主页'];
+        this.docTitles = [t($r('app.string.tab_home'))];
         this.docAccents = [''];
         this.arkLog('P1A_TABS_INIT home=' + homeCtx.url);
       } catch (e) {
@@ -2754,25 +2763,25 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           })
         // 弹框卡片（居中）
         Column({ space: 4 }) {
-          Text('未保存的文档')
+          Text(t($r('app.string.guard_title')))
             .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
-          Text('文档「' + this.guardDialogName + '」有未保存的修改。\n是否保存数据再退出？')
+          Text(t($r('app.string.guard_msg'), this.guardDialogName))
             .fontSize(14).fontColor('#5A6572').textAlign(TextAlign.Center)
             .margin({ top: 12 })
           Row({ space: 12 }) {
-            Button('取消')
+            Button(t($r('app.string.btn_cancel')))
               .layoutWeight(1)
               .backgroundColor('#F7F7F7').fontColor('#2B3B4D')
               .onClick(() => {
                 this.guardDialogAction('cancel');
               })
-            Button('不保存')
+            Button(t($r('app.string.btn_dont_save')))
               .layoutWeight(1)
               .backgroundColor('#F7F7F7').fontColor('#2B3B4D')
               .onClick(() => {
                 this.guardDialogAction('discard');
               })
-            Button('保存')
+            Button(t($r('app.string.btn_save')))
               .layoutWeight(1)
               .backgroundColor('#0064E7').fontColor(Color.White)
               .onClick(() => {
@@ -2800,7 +2809,7 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
             this.fmtDialogAction('cancel');
           })
         Column({ space: 4 }) {
-          Text('格式提示')
+          Text(t($r('app.string.notice_title')))
             .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
           Text(this.fmtDialogText)
             .fontSize(14).fontColor('#5A6572').textAlign(TextAlign.Center)
@@ -2809,7 +2818,7 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
             if (this.fmtDialogCtx === null) {
               // 告知层（无保存上下文）：单按钮——此语境下「继续」无任何可执行的后续，
               // 双按钮只会让人以为点错了还能挽救（设计文档 §7 单按钮语义）
-              Button('知道了')
+              Button(t($r('app.string.btn_got_it')))
                 .layoutWeight(1)
                 .backgroundColor('#0064E7').fontColor(Color.White)
                 .onClick(() => {
@@ -2817,13 +2826,13 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
                 })
             } else {
               // 保存确认层：有后续动作（转另存），保留取消/继续二选一
-              Button('取消')
+              Button(t($r('app.string.btn_cancel')))
                 .layoutWeight(1)
                 .backgroundColor('#F7F7F7').fontColor('#2B3B4D')
                 .onClick(() => {
                   this.fmtDialogAction('cancel');
                 })
-              Button('继续')
+              Button(t($r('app.string.btn_continue')))
                 .layoutWeight(1)
                 .backgroundColor('#0064E7').fontColor(Color.White)
                 .onClick(() => {
@@ -2853,12 +2862,12 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
             this.pwdDialogAction('cancel');
           })
         Column({ space: 4 }) {
-          Text('文档受密码保护')
+          Text(t($r('app.string.pwd_title')))
             .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
           Text(this.pwdDialogMsg)
             .fontSize(14).fontColor('#5A6572').textAlign(TextAlign.Center)
             .margin({ top: 12 })
-          TextInput({ placeholder: '请输入密码', text: this.pwdValue })
+          TextInput({ placeholder: t($r('app.string.pwd_placeholder')), text: this.pwdValue })
             .type(InputType.Password)
             .width('100%')
             .margin({ top: 16 })
@@ -2869,13 +2878,13 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
               this.pwdDialogAction('ok');
             })
           Row({ space: 12 }) {
-            Button('取消')
+            Button(t($r('app.string.btn_cancel')))
               .layoutWeight(1)
               .backgroundColor('#F7F7F7').fontColor('#2B3B4D')
               .onClick(() => {
                 this.pwdDialogAction('cancel');
               })
-            Button('确定')
+            Button(t($r('app.string.btn_ok')))
               .layoutWeight(1)
               .backgroundColor('#0064E7').fontColor(Color.White)
               .onClick(() => {
@@ -2907,7 +2916,7 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           // 标题行：左标题 + 右关闭。蒙层点击也能关，但**显式出口不能省**——只靠
           // 点空白处关闭是常见疑惑点（用户会盯着卡片找关闭按钮）。
           Row() {
-            Text('字体管理')
+            Text(t($r('app.string.font_mgr_title')))
               .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
               .layoutWeight(1)
             Text('×')
@@ -2919,7 +2928,7 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           }
           .width('100%')
           if (this.fontMgrRows.length === 0) {
-            Text('还没有导入字体')
+            Text(t($r('app.string.font_mgr_empty')))
               .fontSize(14).fontColor('#5A6572')
               .margin({ top: 32, bottom: 32 })
           } else {
@@ -2932,7 +2941,7 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
                         .fontSize(15).fontColor('#2B3B4D')
                         .layoutWeight(1).maxLines(1)
                         .textOverflow({ overflow: TextOverflow.Ellipsis })
-                      Button('删除')
+                      Button(t($r('app.string.btn_delete')))
                         .fontSize(13).height(30)
                         .backgroundColor('#F7F7F7').fontColor('#C0392B')
                         .onClick(() => {
@@ -2964,7 +2973,7 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
               this.fontMgrImport();
             })
           if (this.fontMgrRows.length >= MAX_FONTS) {
-            Text('已达上限 ' + MAX_FONTS + ' 个')
+            Text(t($r('app.string.font_mgr_limit'), MAX_FONTS))
               .fontSize(12).fontColor('#7A8794')
               .margin({ top: 6 })
           }
@@ -2995,7 +3004,7 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           })
         Column({ space: 12 }) {
           Row() {
-            Text(this.phoneAboutLicKind !== '' ? this.phoneAboutLicKind : '关于')
+            Text(this.phoneAboutLicKind !== '' ? this.phoneAboutLicKind : t($r('app.string.about_title')))
               .fontSize(16).fontWeight(FontWeight.Medium).fontColor('#2B3B4D')
               .layoutWeight(1)
             Text('×')
@@ -3015,18 +3024,18 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
             Column({ space: 10 }) {
               Text('Pure Office')
                 .fontSize(20).fontWeight(FontWeight.Bold).fontColor('#2B3B4D')
-              Text('版本 ' + this.phoneAboutVer)
+              Text(t($r('app.string.about_version'), this.phoneAboutVer))
                 .fontSize(13).fontColor('#7A8794')
-              Text('基于 ONLYOFFICE DesktopEditors（AGPL-3.0）')
+              Text(t($r('app.string.about_license')))
                 .fontSize(13).fontColor('#5A6572')
                 .width('100%')
               Row({ space: 16 }) {
-                Text('许可全文')
+                Text(t($r('app.string.about_license_link')))
                   .fontSize(13).fontColor('#0064E7')
                   .onClick(() => {
                     this.phoneAboutShowLic('LICENSE');
                   })
-                Text('完整源码与第三方声明')
+                Text(t($r('app.string.about_source_link')))
                   .fontSize(13).fontColor('#0064E7')
                   .onClick(() => {
                     this.phoneAboutShowLic('NOTICE');
@@ -3125,7 +3134,9 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
       return; // 互斥：弹框在途时不再叠框
     }
     this.pwdDialogRetry = isRetry;
-    this.pwdDialogMsg = isRetry ? '密码错误，请重新输入。' : '该文档已加密，请输入打开密码。';
+    this.pwdDialogMsg = isRetry
+      ? t($r('app.string.pwd_wrong'))
+      : t($r('app.string.pwd_prompt'));
     this.pwdValue = '';
     this.pwdDialogCb = cb;
     this.pwdDialogOn = true;
