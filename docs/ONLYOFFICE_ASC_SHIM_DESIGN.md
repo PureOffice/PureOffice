@@ -1,5 +1,12 @@
 # ascshim 设计总览（web 层适配注入）
 
+> **〔2026-09-23 已退役〕ascshim 主体已删除**：20 段定制全部源码化进三个 fork
+> （见 `ONLYOFFICE_FORK_MIGRATION_PLAN.md`）；`make_ascshim.py` 与 `desktop/src/`
+> 已不存在，运行时注入产物 `ascshim.js` 也不再生成。**新增适配不要按本文方式**。
+> 仍留在构建链里的只剩 `desktop/ascdesktop_shim_raw.js` 与 `asc_methods.txt`
+> （`build_editors_ohos.py` 读这两者生成 AscDesktopEditor 相关片段）。
+> 子模块改动流程见 FORK_MIGRATION_PLAN 头部与 §3.3。
+
 > 一句话：官方 web-apps / sdkjs 我们不改源码，**运行时把壳层适配注入进去**。
 > 本文是这一层的**目录**——用来判断"该不该打开某个文件"，不是实现说明（实现细节在各段文件头部注释里）。
 

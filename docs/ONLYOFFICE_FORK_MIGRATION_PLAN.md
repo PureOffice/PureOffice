@@ -1,5 +1,16 @@
 # ONLYOFFICE Fork 化迁移方案（替代 patches + ascshim 注入层）
 
+> **〔2026-09-23 已完结：阶段 0~4 全部做完〕本文档自此转为「现行子模块改动规范」**。
+> 改子模块只有两条路，**判据 = `.gitmodules` 里的 url**：
+> - 指向 `PureOffice/*` 的（`sdkjs` / `web-apps` / `desktop-apps`）→ **fork 直提交**：
+>   子模块里改 + commit → `git -C third_party/<仓> push origin ohos` → 主仓
+>   `git add third_party/<仓>` 更新指针，与主仓改动一起提交。**不 push 则主仓指针
+>   不可复现**（别人 clone 后 `submodule update` 失败）。
+> - 指向 `ONLYOFFICE/*` 的（`core`，官方仓推不进去）→ `patches/core-ohos/*.patch`
+>   + `patch_core_ohos.sh` 幂等应用，工作区 modified 是预期态。
+>
+> 提交纪律见本文 **§3.3**。下面的 v3/v2 状态行是当时的方案版本记录，保留备查。
+
 > 状态：v3（2026-09-21）——用户拍板：**ascshim 整体退役，全部定制以源码形态进
 > fork，逐个 trick 重设计为正路实现**（v2 的「桥装配+粘合段留主仓」分类作废）｜
 > v2（2026-09-20）交叉验证修订 ｜ 前置：现行方案全景盘点（本文 §2）
