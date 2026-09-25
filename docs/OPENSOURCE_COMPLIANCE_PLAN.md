@@ -17,7 +17,7 @@
 | 4 | ~~字体 HarmonyOS Sans SC~~ → **字体 Noto Sans CJK SC**（`NotoSansCJK-SC.subset.ttf`） | **SIL OFL 1.1** | **2026-09-24 换入**（原 HarmonyOS Sans 的许可明文"不得修改字体"，而引擎只吃静态 glyf TTF ⇒ 静态化 + 子集化绕不开 ⇒ 与许可硬冲突；见 §4 D2）。换入后随包分发合规，原"唯一有实际回收风险资产"已消除 |
 | 5 | 字体 Noto Serif CJK（`NotoSerifCJK-SC.subset.ttf`） | **SIL OFL 1.1** | 随包分发合规（保留 OFL 声明即可；不得单独转卖字体） |
 | 6 | webapps 内置 jQuery / Bootstrap 等 | MIT（随官方 webapps 打包） | 随 AGPL 主链披露即可（NOTICE 列名） |
-| 7 | 本仓库 | **无 LICENSE** | 作者未定权（组合后建议 AGPL-3.0 整体授权，见 §5） |
+| 7 | 本仓库 | **AGPL-3.0**（根 `LICENSE` 已入库 2026-09-12，含 `NOTICE`） | 组合后整体授权 AGPL-3.0（§5 D4）——**原「无 LICENSE / 作者未定权」已不成立**（2026-09-25 核实） |
 
 ## 2. 义务矩阵（档位判定）
 

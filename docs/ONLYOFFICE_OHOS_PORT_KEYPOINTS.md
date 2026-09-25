@@ -15,6 +15,11 @@
 > | `44_modalguard` / `58_pastebtn` / `00_theme` | fork（web-apps / sdkjs 内的 `[OHOS:]` 提交） |
 >
 > 通用换算见 `docs/README.md`「文档里的历史文件指针」。
+>
+> **另外：文中 `file.js:行号` 的行号大多已漂移**（fork 定制持续插入/删除行，三份大文档
+> 抽样 60 处引用即有 16 处行号不符）。**行号不可信，请按方法名 / 符号名 / 函数名定位**——
+> 已核实并修正的个别处（如 `checkOOXMLSignature` 的前提错误）保留原文注记。定位命令：
+> `grep -rn "<符号名>" third_party/{sdkjs,web-apps}/`。
 > **「不可变决策」指架构选择（B 架构 / NAPI 桥 / 沙箱模型 / 双清单加载等），不含
 > 实现载体**——ascshim 运行时注入已于 2026-09-23 整体退役、由 fork 源码化替代，
 > 那是**已被推翻**的载体而非「不可推翻的决策」。
@@ -130,13 +135,13 @@ bash scripts/onlyoffice/deploy_ohos.sh --probe     # 打包+装机+重启+读探
 **打开链身份（三层 hook，缺一不可）：**
 - 实例层：`hookEditor(window.Asc.editor)` / `hookEditor(window.editor)`（800ms 轮询，两引用可能不同实例）。
 - **原型层**：`AscCommon.*EditorApi.prototype.openDocument`（遍历 `window.AscCommon` 枚举）——cell 的 `Viewport.getApi()` 实例有 **own `openDocument`**（实例层 hook 不到时由 `Object.getPrototypeOf(this)===SpreadsheetEditorApi.prototype` + `hasOwnProperty` 判定；`OELF2` 证据有 `sam=true pd2=1 own=true`）。
-- PK 检测**自行实现** `__isPK`（`AscCommon.checkOOXMLSignature` 只在 word 侧定义，cell/slide 恒 false）。
+- PK 检测：曾计划自行实现 `__isPK`。**该方案未落地**（全仓库搜不到 `__isPK`），且**原前提有误**——`AscCommon.checkOOXMLSignature` 定义在 `common/editorscommon.js`（非「只在 word 侧」），`configs/{word,cell,slide,visio}.json` 均加载该文件（2026-09-25 核实，见文首标注）。
 
-**三层闸门（cell/slide 直连打开白屏主因，`cell/api.js:3362` `_openDocumentEndCallback`）：**
+**三层闸门（cell/slide 直连打开白屏主因，`cell/api.js` 的 `_openDocumentEndCallback`（行号已随 fork 演进漂移，按方法名搜））：**
 ```
 if (isDocumentLoadComplete || !ServerIdWaitComplete || !FontLoadWaitComplete) return;
 ```
-- `ServerIdWaitComplete` 由 `asyncServerIdEndLoaded()`（apiBase:1487，dummy coauth 语义）置位。
+- `ServerIdWaitComplete` 由 `asyncServerIdEndLoaded()`（`common/apiBase.js`，dummy coauth 语义）置位。
 - `FontLoadWaitComplete` 由 `_loadFonts(fonts, cb)` 完成回调置位。
 - **页面 `__oobDocy` 已内置踢闸**（`asyncServerIdEndLoaded()` + `_loadFonts([], cb)`，均幂等）。
 - word 侧无此问题（word 的 contentReady 有旁路 `asyncImagesDocumentEndLoaded`（word/api.js:8135）。
@@ -427,7 +432,7 @@ editor main/index.html 四层上跳 = rawfile/onlyoffice/plugins.json；相对 U
 - 对话请求目标 Ollama localhost:11434（默认）——设备服务由用户部署；无服务时引擎报错可见（非链问题）。
 
 ### 17.5 部署与入口
-- 构建链 `install_ai_plugin()`（build_editors_ohos.py:455）：plugins.json（pluginsData 绝对
+- 构建链 `install_ai_plugin()`（`build_editors_ohos.py`，按函数名搜）：plugins.json（pluginsData 绝对
   URL）+ plugins/ai（官方 ai.plugin 3.2.2 发布包 702 文件）+ plugins/v1（官方 GitHub Pages
   web 版框架）——**不可用 desktop-apps/common/plugins/v1（旧坑：桌面壳无 iframe 窗口协议）**。
 - `isSupportPlugins` 提真在 ascBridge（#73，web 语义——AscDesktopEditor.isSupportPlugins 已删短路）。

@@ -242,8 +242,11 @@ smoke 外置注入（非产品）；ArkTS 宿主行为 → 主仓。v2 的「与
 > **主仓** `scripts/onlyoffice/ohos/{boot,bridge,fonts}.js`，由 `build_editors_ohos.py`
 > 在构建期注入各 app 的 `index.html` 头部（与官方脚本同处 `<head>`，时机等价）。
 > sdkjs fork 侧只保留**官方文件内的 `[OHOS:]` 行为分支**（nofocus / touch-scroll /
-> configs / DocLang 等）。下面「挂载机制」描述的是当时的方案设计，**模块清单与顺序
-> 约束仍然有效**——只是载体从 fork 换成了主仓 + 注入。
+> configs / DocLang 等）。
+> **并且实际只落了 3 个模块**（`boot` / `bridge` / `fonts`）——下表清单里的 userfonts /
+> images / media / print / paste / scroller / focus / doclang 各域**未按此拆分**，那些
+> 能力现散在 `boot.js` / `bridge.js` 内或 fork 中（2026-09-25 核实）。下面的「挂载
+> 机制」是当时的方案设计，「顺序约束」的思路仍适用，**但模块划分不要按表对照**。
 
 **挂载机制**：`common/ohos/` 各文件进 build.py 清单（fork 直接改 configs，先例=
 sdkjs-desktop patch 的 configs 定制；或 --addon 追加，§3.3.5）。bundle 纯拼接、

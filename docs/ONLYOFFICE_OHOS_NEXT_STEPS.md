@@ -4,6 +4,9 @@
 > `ONLYOFFICE_OHOS_FEATURE_MATRIX.md`（功能态）与 `docs/README.md`（复现链）为准。
 > 已知失效描述：本文「四库 / 官方 origin / ascshim」均为当时形态——现为**五库**（+desktop-apps）、
 > 其中**三库是 PureOffice fork**、ascshim 已退役（换算见 `docs/README.md`）。
+> **另：§2「现状」整段提到的 `OOHost.mark/save`、`OOHost.getModel()`、`OOHost.open(url)`
+> 等 API 全仓库不存在**（除本文外搜不到 `OOHost` 与该组 `OOH_*` 探针串，2026-09-25
+> 核实）——那是当时**拟议**的接口，不是已实现的能力。
 
 > 背景：迭代 2（xlsx/pptx 打开链）已于 2026-09-03 真机闭环：
 > **docx / xlsx / pptx 三格式「打开 → 渲染 → 编辑（mark）→ 保存」全部验证通过**

@@ -102,6 +102,19 @@ hdc -t <ip:port> shell "uitest screenCap -p /data/local/tmp/s.jpeg" && hdc -t <i
 grep -rn "<机制关键词>" scripts/onlyoffice/ohos/ third_party/web-apps/apps third_party/sdkjs 2>/dev/null
 ```
 
+### 行号与统计数字同样不可信
+
+2026-09-25 抽样核实三份大文档共 60 处引用，**16 处行号不符**——fork 的定制提交持续
+插入/删除行，一切 `file.js:行号` 都在持续漂移。统计数字同理（「88 个零依赖文件」实为 80、
+「32 个主题 pptx」实为 36、「24 个 IS_NATIVE_EDITOR 文件」实为 32）。
+
+**结论：按符号名搜，不要按行号跳。**
+```bash
+grep -rn "<方法名/符号名>" third_party/sdkjs third_party/web-apps scripts/onlyoffice/
+```
+个别已核实并修正的**断言性错误**（区别于行号漂移）在各文档内保留了「〔…核实〕」注记，
+可据此判断某处是「位置过时」还是「事实有误」。
+
 ## 文档索引
 
 | 文档 | 内容 |
