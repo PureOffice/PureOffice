@@ -1,5 +1,10 @@
 # ONLYOFFICE OHOS 移植 —— 后续工作计划（2026-09-03 定稿）
 
+> **〔历史工作计划，2026-09-03 —— 多数条目早已完成，勿当待办读〕** 最新状态以
+> `ONLYOFFICE_OHOS_FEATURE_MATRIX.md`（功能态）与 `docs/README.md`（复现链）为准。
+> 已知失效描述：本文「四库 / 官方 origin / ascshim」均为当时形态——现为**五库**（+desktop-apps）、
+> 其中**三库是 PureOffice fork**、ascshim 已退役（换算见 `docs/README.md`）。
+
 > 背景：迭代 2（xlsx/pptx 打开链）已于 2026-09-03 真机闭环：
 > **docx / xlsx / pptx 三格式「打开 → 渲染 → 编辑（mark）→ 保存」全部验证通过**
 > （xlsx cells 渲染三连修见 docs/KEYPOINTS §10 与 memory/onlyoffice-open-chain-v12）。
@@ -12,7 +17,7 @@
 **状态**：迭代 1+2 全部改动已提交（`2b8db37` 正规化 + `c3d74c2` 打开链 v12，基于 `a759995` poc1）。
 
 **已完成**：
-- [x] third_party 四库（core/sdkjs/web-apps/build_tools）→ **submodule**（官方 origin，pin release/v9.4.0）
+- [x] third_party 四库（core/sdkjs/web-apps/build_tools）→ **submodule**〔现为五库（+desktop-apps）；**仅 core/build_tools 是官方 origin**，sdkjs/web-apps/desktop-apps 已迁 PureOffice fork 的 ohos 分支〕（pin release/v9.4.0）
 - [x] core 本地修复脚本化：`scripts/onlyoffice/patches/core-ohos/*.patch` + `patch_core_ohos.sh`（幂等）；官方树恢复干净
 - [x] 构建脚本相对路径化（ROOT 推导）+ 工具链路径环境变量可覆盖（OHOS_NDK/HDC/HVIGORW/DEV）
 - [x] 产物 gitignore：rawfile/onlyoffice 运行时（163MB，pack 重生成）、`__pycache__/`、libconvertershell.so、entry/libs/、.cxx/

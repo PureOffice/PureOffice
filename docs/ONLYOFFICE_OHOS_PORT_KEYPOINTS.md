@@ -1,9 +1,20 @@
 # ONLYOFFICE OHOS 移植 —— 方案关键点（不可变决策与实测数据流）
 
-> **〔读前必看〕** 本文写于 2026-09-03（ascshim 时代），**文件指针已失效**：
-> `scripts/onlyoffice/desktop/src/*.js` 段文件、`make_ascshim.py` 均已删除，对应机制
-> 现存于 `scripts/onlyoffice/ohos/{boot,bridge,fonts}.js` 或三个 fork。换算表见
-> `docs/README.md`「文档里的历史文件指针」。
+> **〔读前必看〕** 本文写于 2026-09-03（ascshim 时代），**文中所有「ascshim X 段」的
+> 文件指针均已失效**（`desktop/src/*.js` 与 `make_ascshim.py` 已删除，全文共 12 处）。
+> 段号 → 现位置对照（逐个核实自各文件头「原 ascshim X 段」注记）：
+>
+> | 文中段号 | 现在在哪 |
+> |---|---|
+> | `09_fonts` | `scripts/onlyoffice/ohos/fonts.js` |
+> | `20_bridge` | `scripts/onlyoffice/ohos/bridge.js` |
+> | `00_boot`（自检） | 同上，`bridge.js:336` |
+> | `30_open`（3.4 启动/DI 链、3.6 plugins、goBack） | `scripts/onlyoffice/ohos/boot.js` |
+> | `40_save`（保存 / 关闭覆写） | fork：web-apps `apps/*/main/app/controller/Main.js` 等 |
+> | `49_doclang` | fork：sdkjs `cell/api.js:99-113` |
+> | `44_modalguard` / `58_pastebtn` / `00_theme` | fork（web-apps / sdkjs 内的 `[OHOS:]` 提交） |
+>
+> 通用换算见 `docs/README.md`「文档里的历史文件指针」。
 > **「不可变决策」指架构选择（B 架构 / NAPI 桥 / 沙箱模型 / 双清单加载等），不含
 > 实现载体**——ascshim 运行时注入已于 2026-09-23 整体退役、由 fork 源码化替代，
 > 那是**已被推翻**的载体而非「不可推翻的决策」。

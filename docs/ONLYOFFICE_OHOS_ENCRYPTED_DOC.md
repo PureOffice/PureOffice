@@ -91,7 +91,7 @@ x2t 失败
 | 载体 | `Common.Views.OpenDialog` 的 DRM 模式（`OpenDialog.js:77-90`）+ `asc_CDRMAdvancedOptions` | ArkTS `CustomDialog` + `TextInput(type: Password)` |
 | 触发 | 页面发 `asc_onAdvancedOptions(DRM)` 事件（`Main.js:3002-3026` 收） | 打开失败处直接弹 |
 | 回传 | `asc_setAdvancedOptions` → 桥 `SetAdvancedOptions("<m_sPassword>…")` | 直接拿到密码，不过桥 |
-| 障碍 | ① 运行时未加载 `sdkjs/*/Local/api.js`，`EncryptionWorker.asc_setAdvancedOptions` 在 `isNeedCrypt()===false` 时直接 `return false`（`editorscommon.js:12766-12777`）→ 需在 ascshim 自接；② 需实现 `SetAdvancedOptions` 桥（现返回 `'false'`，`ascBridge.ets:263-265`）；③ 事件源要自己造 | 无 |
+| 障碍 | ① 运行时未加载 `sdkjs/*/Local/api.js`，`EncryptionWorker.asc_setAdvancedOptions` 在 `isNeedCrypt()===false` 时直接 `return false`（`editorscommon.js:12766-12777`）→ 需在平台模块（`scripts/onlyoffice/ohos/`）自接；② 需实现 `SetAdvancedOptions` 桥（现返回 `'false'`，`ascBridge.ets:263-265`）；③ 事件源要自己造 | 无 |
 | 观感 | 与官方 UI 一致 | 系统风格 |
 | 成本 | 中（3 个接线点 + 重入） | 低（1 个 dialog + 重入） |
 
