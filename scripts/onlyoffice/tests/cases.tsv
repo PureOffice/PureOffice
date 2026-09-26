@@ -62,9 +62,11 @@ font-name-matrix|m7accept=1;m7file=font-name-matrix.docx|60|PROF_SNAP|FontPicker
 #   **「华文宋体」的落点由宋体行变为 STSong 行**（引擎把该中文名解析到其英文
 #   接口名；两行同指 indexR=13，渲染等价）。后者是「凭想象改判据会立刻 FAIL」
 #   的实例——单看名字无从推断，只能重采日志。
-# —— 插件/AI 链（m7ai 门控双向：开着能点、默认不点——后者防回归弹出聊天窗遮挡截图）——
-plug-ai-on|m7accept=1;m7ai=1;m7file=sample.docx|120|PLUG_AI_CHAT|PLUG_TAB_CLICKED,PLUG_AI_TOGGLE_CLICKED,PLUG_AI_TAB_CLICKED,PLUG_AI_CHAT_CLICKED|PLUG_AI_CHAT_ERR|AI 插件链全通（装配→run→AI tab→Chatbot 窗口）
-plug-ai-gated|m7accept=1;m7file=sample.docx|120|PLUG_AI_CHAT_GATED|PLUG_AI_TOGGLE_GATED,PLUG_AI_TAB_GATED,PLUG_AI_CHAT_GATED|PLUG_AI_CHAT_CLICKED,PLUG_AI_TOGGLE_CLICKED|默认态门控：只记 GATED 不点击（防聊天窗弹出）
+# —— 插件/AI 链（2026-09-26：工具栏「插件」tab 已隐藏，AI tab 为唯一入口；探针零
+#    插件菜单点击——旧 PLUG_TAB_CLICKED/PLUG_BG_CLICKED/PLUG_AI_TOGGLE_* 已删，留在禁
+#    止项里防回加。m7ai 门控只管 AI tab→Chatbot 点击链）——
+plug-ai-on|m7accept=1;m7ai=1;m7file=sample.docx|120|PLUG_AI_CHAT|PLUG_AI_TAB_EXISTS=true,PLUG_TAB_GONE=true,PLUG_AI_TAB_CLICKED,PLUG_AI_CHAT_CLICKED,PLUG_AI_CHAT|PLUG_AI_CHAT_ERR,PLUG_TAB_CLICKED,PLUG_BG_CLICKED,PLUG_AI_TOGGLE_CLICKED|插件 tab 隐藏 + AI 常驻链全通（AI tab→Chatbot 窗口）
+plug-ai-gated|m7accept=1;m7file=sample.docx|120|PLUG_AI_CHAT_GATED|PLUG_AI_TAB_EXISTS=true,PLUG_TAB_GONE=true,PLUG_AI_TAB_GATED,PLUG_AI_CHAT_GATED|PLUG_AI_CHAT_CLICKED,PLUG_AI_TAB_CLICKED,PLUG_TAB_CLICKED,PLUG_BG_CLICKED|插件菜单不可见且探针零点击（AI tab 在、不点击、聊天窗不弹）
 # —— 格式扩展（2026-09-11）：旧 Office 二进制 + 轻量文本 ——
 #   打开判据三项 = 样本名（带 " len=" 后缀——否则 sample.doc 会前缀命中 sample.docx）+ x2t 转换成功 + 各族就绪标签
 #   结束判据统一 PROF_SNAP：实采显示它最晚出现，用它做终态不会截断保存链标签

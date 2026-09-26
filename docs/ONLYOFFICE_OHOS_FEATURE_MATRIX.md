@@ -29,8 +29,8 @@
 | 多页视图（新建提示） | ✅ | 官方功能（无 UI 依赖） |
 | 字体（本地 12 个 Liberation 家族） | 部分 | `__fonts_files/__fonts_infos` 注册表 + web 字形引擎；文档字体名差异 → 默认字体替换（可见字形） |
 | 中文/俄文等语言 | ✅ | 引擎语言包 + lang=zh-CN 参数；UI 中文完整 |
-| 插件系统（web 语义） | ✅ | `isSupportPlugins` 提真（#73）；官方装配链 plugins.json server 链 → 后台插件 run → AddToolbarMenuItem/AddContextMenuItem 全通（2026-09-06 真机） |
-| AI 插件（官方 3.2.2 AGPL） | ✅ | 构建链安装（build_editors_ohos install_ai_plugin：plugins.json + plugins/ai + plugins/v1）；顶部「AI」tab/7 按钮/Settings/Chatbot 窗口全部真机验证；**对话需模型配置**（Ollama localhost 或 OpenAI 等，配置入口=无模型时 Chatbot 点击自动弹设置窗口，官方降级语义）；**联网=页面 fetch 直连（方案 A：loadRaw 对非 localhost URL 返回 null 放行走 ArkWeb 默认网络栈，2026-09-08 真机 1.4 DeepSeek models+多轮 chat 全通 ✅）** |
+| 插件系统（web 语义） | ✅ | `isSupportPlugins` 提真（#73）；官方装配链 plugins.json server 链 → 后台插件 run → AddToolbarMenuItem/AddContextMenuItem 全通（2026-09-06 真机）。**2026-09-26 起工具栏「插件」tab 隐藏**（fork refreshPluginsList 不再 trigger tab:visible:plugins——唯一显示写点；用户无安装通道，面板仅后台开关故收编） |
+| AI 插件（官方 3.2.2 AGPL） | ✅ | 构建链安装（build_editors_ohos install_ai_plugin：plugins.json + plugins/ai + plugins/v1）；顶部「AI」tab/7 按钮/Settings/Chatbot 窗口全部真机验证；**插件 tab 隐藏后 AI tab 为唯一入口**（AI 由 sdkjs 对 bundled background 插件自动 run——`asc_plugins_background_stopped` 不参与 run 门链，bundled 语义即永动；tab 由插件自注册非官方 plugins tab，不受隐藏影响）；**对话需模型配置**（Ollama localhost 或 OpenAI 等，配置入口=无模型时 Chatbot 点击自动弹设置窗口，官方降级语义）；**联网=页面 fetch 直连（方案 A：loadRaw 对非 localhost URL 返回 null 放行走 ArkWeb 默认网络栈，2026-09-08 真机 1.4 DeepSeek models+多轮 chat 全通 ✅）** |
 
 ## 2. 降级（官方已实现、本机按契约降级）
 
@@ -107,7 +107,7 @@
   - **工具栏达成根因**：cell/pptx 此前工具栏空白 = 权限链未分发（asc_onGetEditorPermissions 引擎回调仅服务器链发）→ 修复 = 直接构造 `asc_CAscEditorPermissions` + onEditorPermissions.call（详见 KEYPOINTS §11）
   - 生产形态：M7_TARGET 置空后欢迎页/编辑器无任何自动测试痕迹（recents 真数据 + 四新建卡片 + 打开 FAB，截图确认）
 - **AI 插件 + 插件链真机矩阵全通**（2026-09-06，m7accept 验收态，word（docx））✅：
-  - 装配链：plugins.json/config.json/v1 plugins.js fetch 200 → serverPlugins.plugins=arr1 → store=1（visible=true）→ 插件 tab liDisplay=inline-flex（**根因修复**：background-only 部署时 Plugins.js:485 `me.viewPlugins.backgroundBtn.show()` undefined——onResetPlugins 背景分支早退未建钮；修复=parsePlugins wrap，见 KEYPOINTS §17）
+  - 装配链：plugins.json/config.json/v1 plugins.js fetch 200 → serverPlugins.plugins=arr1 → store=1（visible=true）→ 插件 tab liDisplay=inline-flex（**根因修复**：background-only 部署时 Plugins.js:485 `me.viewPlugins.backgroundBtn.show()` undefined——onResetPlugins 背景分支早退未建钮；修复=parsePlugins wrap，见 KEYPOINTS §17。**2026-09-26 更新：该修复源码化为 71a6c702，且「插件」tab 已整体隐藏——liDisplay=none 为新常态，AI tab（自注册）为唯一入口，见 KEYPOINTS §17.5**）
   - run 链：后台插件「AI」开关点击 → pluginsMap/runnedPluginsMap 含 AI → iframe_<guid> 隐藏帧 index.html → `Asc.plugin`/`Asc.PluginWindow`/`executeMethod` 均 function（sdk-all plugin_base 注入 iframe，无需替换 v1 框架）→ Buttons.ButtonsToolbar=7
   - 工具栏：AddToolbarMenuItem → 「AI」tab（data-tab=随机 UUID！Button id 缺省 y()——探针按 caption 动态取 key）→ 面板 7 按钮（Settings/Chatbot(ask-ai 图标)/Summarization/Translation…）
   - 窗口链：Chatbot 点击 → chatWindowShow →（有模型时）PluginWindow.show → sdkjs ShowWindow → asc_onPluginWindowShow → **PluginDlg 弹窗 iframe src=plugins/ai/chat.html?lang&theme-type ✅**

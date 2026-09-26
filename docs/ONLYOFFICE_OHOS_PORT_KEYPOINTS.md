@@ -436,3 +436,23 @@ editor main/index.html 四层上跳 = rawfile/onlyoffice/plugins.json；相对 U
   URL）+ plugins/ai（官方 ai.plugin 3.2.2 发布包 702 文件）+ plugins/v1（官方 GitHub Pages
   web 版框架）——**不可用 desktop-apps/common/plugins/v1（旧坑：桌面壳无 iframe 窗口协议）**。
 - `isSupportPlugins` 提真在 ascBridge（#73，web 语义——AscDesktopEditor.isSupportPlugins 已删短路）。
+
+### 17.6 插件入口收编：「插件」tab 隐藏，AI tab 唯一入口（2026-09-26）
+- 动机：离线部署无插件安装通道，「插件」tab 对用户只剩后台插件开关，产品语义收编为
+  「AI 常驻功能」（用户决策）。
+- 实现（fork 19ff5215，一处）：`controller/Plugins.js refreshPluginsList` 不再
+  `trigger('tab:visible','plugins',…)`——该 trigger 是「插件」tab **唯一显示写点**
+  （addTab 模板 li 恒 `display:none`，靠 tab:visible → Mixtbar.setVisible 点亮，见 17.1），
+  注释即隐藏；`Gateway.pluginsReady()` 保留原位（装配完成信号）。五端共用此控制器。
+- **AI 常驻是官方既有语义，零改动**：sdkjs `register()` 对 bundled background 插件自动
+  run（`getUsedBackgroundPlugins` 把非用户安装的背景插件**无条件**并入启用列表；
+  `asc_plugins_background_stopped` 停用列表不参与 run 门链——bundled 语义即永动，
+  toggle 挡不住下次启动）；AI tab 由插件自注册（`register.js` `new Asc.ButtonToolbar` →
+  data-tab=随机 UUID），与「插件」tab 是两个东西，不受隐藏影响。
+- **双 tab 地雷（未来动 AI 插件资产前必读）**：若给 ai config.json 注入 `tab:{id:…}`
+  （官方 tab 声明机制），web 侧会再建一个 tab——与自注册 tab 叠成两个「AI」，且
+  sdkjs `run()` 对已 run 的 background 插件直接 return false，config 建的按钮是死钮。
+- 回归适配：探针不再点「插件」tab/后台插件开关（旧 PLUG_TAB_CLICKED/PLUG_BG_CLICKED/
+  PLUG_AI_TOGGLE_* 删除，标签留在 cases.tsv 禁止项防回加）；AI tab 轮询采集
+  （异步自注册，真机约 1.5-2s 出现）+ m7ai 门控点击；`PLUG_TAB_GONE=true`/
+  `PLUG_AI_TAB_EXISTS=true` 为新判据。

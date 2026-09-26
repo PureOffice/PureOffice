@@ -30,7 +30,7 @@ OHOS_DEV=... bash scripts/onlyoffice/tests/regression.sh --record --case <id>
 | 保存三格式 | `save-word` / `save-cell` / `save-slide` | x2t 转换 + 回写源文件打点（`SAVE_BIN_X2T`/`SAVE_BIN_BACK`） |
 | 字体装填 | `font-cjk` / `font-symbol` | 每个在册字体必须有 `FONT_WARM_FILLED id=<文件>`（缺流=渲染期静默回退，见 §4） |
 | 字体映射 | 同上两 case | `FONT_PICK`（请求名 → 命中行）：仿宋/楷体不得被宋体截胡、Wingdings/Symbol 必落 OpenSymbol |
-| 插件/AI 链 | `plug-ai-on` / `plug-ai-gated` | 装配→run→AI tab→Chatbot 全链打点；门控态反向断言（默认不点） |
+| 插件/AI 链 | `plug-ai-on` / `plug-ai-gated` | 「插件」tab 隐藏（`PLUG_TAB_GONE=true`）+ AI tab 自注册常驻（`PLUG_AI_TAB_EXISTS=true`，轮询采集）→ Chatbot 窗口；门控态反向断言（默认不点任何插件菜单） |
 | 格式扩展 | `open-doc` / `open-xls` / `open-ppt` / `open-rtf` / `open-txt` / `open-csv`、`save-rtf` / `save-csv` / `save-doc` / `save-doc-auto` | 新格式打开链（样本名 + x2t 转换 + 各族就绪标签）+ 原地保存 + 不可原地保存格式的提示拦截（`save-doc` 反向断言 `SAVE_BIN_BACK`/`SAVE_BIN_URI` 必须不出现；`save-doc-auto` = autosave 语义 userFlag=0，断言 `SAVE_BIN_URI` 不出现而沙箱工作副本照更新——「源文件永不被异格式字节覆盖」不变量，与 userSaved 解耦） |
 | 加密文档 | `open-enc-pwd` / `open-enc-badpwd` / `open-enc-nopwd`、`save-enc` | x2t 错误码分派：无密码 `0x8004135a` / 密码错 `0x8004135b` 均须弹密码框（后者 retry 文案、且**不得打开**），带密码 `rc=0x0` 且文档就绪。`save-enc` 断言密文产物过校验（`check=zip ok`，禁止 `BAD:ZIPBAD`——密文是 CFB 容器不是 zip）。**产物是否真为密文、编辑内容是否在**，自动层判不了（见 §2 盲区），须拉回文件用密码解密核对 |
 

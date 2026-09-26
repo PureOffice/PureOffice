@@ -361,49 +361,46 @@
           console.error('PROF_NC_HOOK_PENDING');
         }
       } catch (eo) {}
-      // —— 插件链验收：点击插件 tab → 后台插件按钮（2026-09-06 AI 接入验收；按钮
-      //     位置随布局/语言不确定，程序化点击比坐标稳——坐标依赖截图人工估距）。
-      //     PLUG_TAB_CLICKED 后本地联动 snapshot；后台按钮 id=id-toolbar-btn-background-plugin
-      //     是 addBackgroundPluginsButton（Plugins.js:281）建的唯一实例。
+      // —— AI 常驻链验收（2026-09-26 改版）：「插件」tab 已隐藏（web-apps fork：
+      //     refreshPluginsList 不再 trigger tab:visible:plugins，addTab 模板恒
+      //     display:none）。探针不再点插件 tab/后台插件开关——回归不得把插件菜单
+      //     调出来。AI tab 由官方插件自注册（register.js new Asc.ButtonToolbar →
+      //     data-tab=随机 UUID，不得按 data-tab 匹配），只能按 caption==='AI' 定位；
+      //     它随插件 iframe 加载/run/AddToolbarMenuItem 往返异步出现（真机约 1.5-2s），
+      //     故轮询取终值，不做单点采集。
       try {
-        var _tbc = document.querySelector('#toolbar-tabs a[data-tab=plugins]')
-          || document.querySelector('a[data-tab=plugins]');
-        if (_tbc) {
-          _tbc.click();
-          console.error('PLUG_TAB_CLICKED');
-          setTimeout(function() {
+        var _aiTab = null;
+        var _polls = 0;
+        var _pollAi = setInterval(function() {
+          _polls++;
+          try {
+            var _lr0 = document.querySelectorAll('li.ribtab a');
+            for (var _q0 = 0; _q0 < _lr0.length; _q0++) {
+              if (String(_lr0[_q0].textContent || '').trim() === 'AI') { _aiTab = _lr0[_q0]; break; }
+            }
+          } catch (eq0) {}
+          if (_aiTab || _polls >= 20) {
+            clearInterval(_pollAi);
+            // 「插件」tab 消失判据：元素不存在或 display:none 均算 true（元素在但
+            // 恒 display:none 是 fork 后常态；absent 兼未来 DOM 精简）
+            var _pt0 = document.querySelector('#toolbar-tabs a[data-tab=plugins]')
+              || document.querySelector('a[data-tab=plugins]');
+            console.error('PLUG_TAB_GONE=' + (!_pt0 || getComputedStyle(_pt0.parentElement).display === 'none'));
+            // 后台插件按钮（原「插件」tab 内的开关）已不可达——仅记录 DOM 终态供诊断
+            var _bg0 = document.getElementById('id-toolbar-btn-background-plugin');
+            console.error('PLUG_BG_BTN=' + (!_bg0 ? 'absent' : getComputedStyle(_bg0).display));
+            if (!_aiTab) {
+              console.error('PLUG_AI_TAB_NF');
+            } else {
+              console.error('PLUG_AI_TAB_EXISTS=true');
+              // 受 m7ai 门控：切 AI tab 会展开 AI 面板（原 PLUG_AI_TAB_CLICKED 语义上移至此）
+              if (LSO_M7AI) { _aiTab.click(); console.error('PLUG_AI_TAB_CLICKED'); }
+              else console.error('PLUG_AI_TAB_GATED');
+            }
+            // 点击后 6000ms 再走取证链：panel 按钮要等插件 iframe 加载 +
+            // AddToolbarMenuItem 往返，等待放宽不压缩（防 PLUG_AI_CHAT_BTN_NF 假 FAIL）
+            setTimeout(function() {
             try {
-              // id 在 Common.UI.Button 的 div.btn-group 上，Bootstrap dropdown 委托
-              // 只接受内部 button[data-toggle=dropdown] 的点击（2026-09-06 实测点击
-              // div 不展开菜单）——点内层按钮
-              var _bgWrap = document.getElementById('id-toolbar-btn-background-plugin');
-              var _bgc = _bgWrap && (_bgWrap.querySelector('[data-toggle=dropdown]') || _bgWrap);
-              if (_bgc) {
-                _bgc.click();
-                console.error('PLUG_BG_CLICKED');
-                setTimeout(function() {
-                  try {
-                    // 菜单状态取证：Common.UI.Button.menu dropdown 开启判定
-                    var _dd = null;
-                    var _dl = document.querySelectorAll('ul.dropdown-menu, .dropdown-menu');
-                    for (var _i = 0; _i < _dl.length; _i++) {
-                      if (/background-plugins/.test(String(_dl[_i].className))) {
-                        _dd = _dl[_i];
-                        var _disp = getComputedStyle(_dd).display;
-                        console.error('PLUG_MENU found=bg items=' + _dd.children.length + ' display=' + _disp);
-                      }
-                    }
-                    if (!_dd) { console.error('PLUG_MENU_NF'); }
-                    if (_dd) {
-                      var _txt = [];
-                      for (var _j = 0; _j < _dd.children.length; _j++) { _txt.push(String(_dd.children[_j].textContent || '').replace(/\s+/g, ' ').slice(0, 40)); }
-                      console.error('PLUG_MENU_FULL ' + _txt.join('|'));
-                      // 菜单内 AI 行的开关（.plugin-toggle：Switcher——点击即 asc_pluginRun）
-                      // 受 m7ai 门控：默认不点（点了会启用插件→AI 面板→聊天窗遮挡截图）
-                      var _tg = _dd.querySelector('.plugin-toggle');
-                      if (!_tg) console.error('PLUG_AI_TOGGLE_NF');
-                      else if (LSO_M7AI) { _tg.click(); console.error('PLUG_AI_TOGGLE_CLICKED'); }
-                      else console.error('PLUG_AI_TOGGLE_GATED');
                       // run 后现场（sdkjs 侧）：pluginsMap/runnedPluginsMap/iframe/run 门判定
                       setTimeout(function() {
                         try {
@@ -453,31 +450,12 @@
                             + ' ctrlBtns=' + _abtn.length);
                         } catch (er) { console.error('PLUG_RUN_STATE_ERR ' + String(er)); }
                       }, 3000);
-                      // 点顶级「AI」入口（若为 tab）→ AI 面板 Chatbot 按钮 → chat 窗口
-                      // （2026-09-06：addCustomControls 建 tab（LayoutManager:334 → Mixtbar
-                      // addCustomControls:778 → createTab），面板 id=tab.action；按钮
-                      // Common.UI.ButtonCustom .btn-toolbar）
-                      setTimeout(function() {
-                        try {
-                          // AI tab 的 data-tab 是随机插件 UUID（v1/plugins.js Button 基类
-                          // this.id=d===v?y():d——id 缺省生成随机 UUID；真机两轮实测
-                          // f4a534fb…→13eb0420…→1940bdb2…探针不得按 data-tab=AI 或写死
-                          // UUID；lib 实际为 textContent===AI 的 a。caption=AI 正常显示）
-                          var _ai2 = null;
-                          try {
-                            var _la2 = document.querySelectorAll('.tabs a, #tabs a, li.ribtab a');
-                            for (var _kt = 0; _kt < _la2.length; _kt++) {
-                              if (String(_la2[_kt].textContent || '').trim() === 'AI') { _ai2 = _la2[_kt]; break; }
-                            }
-                          } catch (ekt) {}
-                          // 受 m7ai 门控：默认不切 AI tab（切了会展开 AI 面板）
-                          if (!_ai2) console.error('PLUG_AI_TAB_NF');
-                          else if (LSO_M7AI) { _ai2.click(); console.error('PLUG_AI_TAB_CLICKED'); }
-                          else console.error('PLUG_AI_TAB_GATED');
-                          // iframe 内部取证（同源可访问 contentDocument）：AI 页是否
-                          // 初始化（Asc.plugin 对象 / PluginWindow/executeMethod 框架面 /
-                          // 工具栏按钮注册数——框架面齐不齐即 Chatbot 可点的前置）
-                          try {
+                      // iframe 内部取证（同源可访问 contentDocument）：AI 页是否
+                      // 初始化（Asc.plugin 对象 / PluginWindow/executeMethod 框架面 /
+                      // 工具栏按钮注册数——框架面齐不齐即 Chatbot 可点的前置）
+                      // （AI tab 查找/点击已上移到轮询段——本段由轮询命中后的
+                      // setTimeout(6000) 直入）
+                      try {
                             var _doc = _ifcDoc();
                             if (_doc) {
                               var _vw = _doc.defaultView;
@@ -642,19 +620,11 @@
                               }, 4000);
                             } catch (ec) { console.error('PLUG_AI_CHAT_CLICK_ERR ' + String(ec)); }
                           }, 1500);
-                        } catch (ea) { console.error('PLUG_AI_TAB_ERR ' + String(ea)); }
-                      }, 4500);
-                    }
-                  } catch (em) { console.error('PLUG_MENU_ERR ' + String(em)); }
-                }, 1200);
-              }
-              else console.error('PLUG_BG_BTN_NOT_FOUND');
-            } catch (eb) { console.error('PLUG_BG_CLICK_ERR ' + String(eb)); }
-          }, 2500);
-        } else {
-          console.error('PLUG_TAB_NOT_FOUND');
-        }
-      } catch (etb) { console.error('PLUG_TAB_CLICK_ERR ' + String(etb)); }
+                      } catch (echain) { console.error('PLUG_AI_CHAIN_ERR ' + String(echain)); }
+                      }, 6000);
+          }
+        }, 500);
+      } catch (etb) { console.error('PLUG_AI_CHAIN_ERR ' + String(etb)); }
 
       // —— 插件装配异常重演（2026-09-06：官方 fetch 全 200，srvPlugins=false 说明
       //     getPlugins().then(loaded → serverPlugins.plugins=loaded → mergePlugins()) 中抛错
