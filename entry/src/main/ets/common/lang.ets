@@ -8,21 +8,18 @@
  * 新建文档名中文」这类不一致的根治点。
  *
  * 为什么宿主必须先归一化、不能把系统 locale 原样塞进 URL：页面 _requireLang 只
- * 保留 ['pt-pt','zh-tw','sr-cyrl'] 三个四字母码，其余一律取语言首段——于是
- * 'zh-Hant-TW' → 'zh-hant' → 不在表内 → 'zh'，**繁体被静默降级成简体**。繁体必须
- * 在宿主侧先纠正为 'zh-tw'；判据取 script 与地区码双份（系统 locale 可能写
- * 'zh-Hant-TW'，也可能只写 'zh-TW' 不带 script）。
+ * 保留 ['pt-pt','zh-tw','sr-cyrl'] 三个四字母码，其余一律取语言首段——不归一的话
+ * 'sr-Cyrl-RS' 会丢西里尔分支。中文系（zh-Hans/Hant/TW/HK/MO）一律收敛为 'zh'
+ *（简体），zh-tw 通路在官方包上不可用（见 systemLang 内注释）。
  *
  * 回退：不在随包 46 种内时按原值传给页面，页面 fetch locale/<lang>.json 失败后回退
  * defLang —— 构建期占位符 {{DEFAULT_LANG}} 未被替换，运行时等于 'en'（英文）。
  */
 import i18n from '@ohos.i18n';
 
-/** 页面 _requireLang 保留的四字母语言码（与其 _4letterLangs 同内容同序） */
+/** 页面 _requireLang 保留的四字母语言码（与其 _4letterLangs 同内容同序）。
+ * 'zh-tw' 仅作页面行为镜像——宿主侧中文系一律归 'zh'（见 systemLang），不再产出 */
 const FOUR_LETTER: string[] = ['pt-pt', 'zh-tw', 'sr-cyrl'];
-
-/** 繁体地区码：仅在 locale 无 script 标记时作惯例推断（有 script 以 script 为准） */
-const TRAD_REGIONS: string[] = ['TW', 'HK', 'MO'];
 
 let cached: string = '';
 
@@ -40,13 +37,11 @@ export function systemLang(): string {
     const l = i18n.System.getSystemLocaleInstance();
     const script: string = l.script ?? '';
     const region: string = l.region ?? '';
-    // script 是书字变体的最强信号：Hant→繁、Hans→简，唯 script 独尊——地区判据
-    // 只在无 script 时作惯例兜底（'zh-TW' 不带 script，只能按地区推断繁体）。
-    // 若地区无视 script（曾写 `script==='Hant' || region∈…`），zh-Hans-HK
-    //（简体中文+香港地区）会被误判成繁体——BCP-47 语义 script 优先于 region，
-    // 港澳有大量简体用户。
-    if (script === 'Hant' || (script.length === 0 && TRAD_REGIONS.indexOf(region) >= 0)) {
-      cached = 'zh-tw';
+    // 中文系一律简体（'zh'），不分流繁体：zh-tw.json 与 zh.json 键集不等，
+    // DE Statusbar 的 app:ready 链会拿到 undefined hint（Button.js 的 hint[0]
+    // 无判空）抛 TypeError，加载遮罩永挂——官方语言包补齐前 zh-tw 不可用。
+    if (l.language === 'zh') {
+      cached = 'zh';
       return cached;
     }
     // 拼成 BCP-47 全串再取前两段（与页面 _requireLang 的 split 同形）。**必须带
