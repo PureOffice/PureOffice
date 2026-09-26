@@ -21,7 +21,7 @@ import i18n from '@ohos.i18n';
 /** 页面 _requireLang 保留的四字母语言码（与其 _4letterLangs 同内容同序） */
 const FOUR_LETTER: string[] = ['pt-pt', 'zh-tw', 'sr-cyrl'];
 
-/** 繁体地区码：系统 locale 可能不带 script 标记，故地区码也是判据 */
+/** 繁体地区码：仅在 locale 无 script 标记时作惯例推断（有 script 以 script 为准） */
 const TRAD_REGIONS: string[] = ['TW', 'HK', 'MO'];
 
 let cached: string = '';
@@ -40,7 +40,12 @@ export function systemLang(): string {
     const l = i18n.System.getSystemLocaleInstance();
     const script: string = l.script ?? '';
     const region: string = l.region ?? '';
-    if (script === 'Hant' || TRAD_REGIONS.indexOf(region) >= 0) {
+    // script 是书字变体的最强信号：Hant→繁、Hans→简，唯 script 独尊——地区判据
+    // 只在无 script 时作惯例兜底（'zh-TW' 不带 script，只能按地区推断繁体）。
+    // 若地区无视 script（曾写 `script==='Hant' || region∈…`），zh-Hans-HK
+    //（简体中文+香港地区）会被误判成繁体——BCP-47 语义 script 优先于 region，
+    // 港澳有大量简体用户。
+    if (script === 'Hant' || (script.length === 0 && TRAD_REGIONS.indexOf(region) >= 0)) {
       cached = 'zh-tw';
       return cached;
     }
