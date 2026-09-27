@@ -4,6 +4,7 @@ import { buffer } from '@kit.ArkTS';
 import { promptAction, window } from '@kit.ArkUI';
 import { resourceManager } from '@kit.LocalizationKit';
 import { fileIo as fs, picker, fileUri } from '@kit.CoreFileKit';
+import { harmonyShare, systemShare } from '@kit.ShareKit';
 import { x2tConvertSync, X2T_RC_NEED_PASSWORD, X2T_RC_BAD_PASSWORD, X2T_RC_DRM_UNSUPPORTED } from '../common/x2t';
 import { AscNativeBridge, AscNativeDispatch, AscCommandHandler } from '../common/ascBridge';
 import { Smoke } from '../common/smoke';
@@ -14,6 +15,7 @@ import { encodeUrlParam, pickFontFile, importFontFile, listFontItems, removeFont
   MAX_FONTS, FontListItem } from '../common/userFonts';
 import { specOf, pickerSuffixes, pickerFilterOption, editorAppOf, needsSaveAsPrompt, isLossySave, checkSaveOut, openExtraFor } from '../common/formats';
 import { systemLang } from '../common/lang';
+import { knockRegister, knockUnregister, knockSetSend } from '../common/knockShare';
 import { t } from '../common/i18n';
 import { P0TabsProbe, P0TabCtx, P0TabPair } from './P0TabsProbe';
 import { DocTabHost, DocTabCtx, DocTabPair } from './DocTabHost';
@@ -25,6 +27,13 @@ interface CloseGuardDefer {
   ctx: DocTabCtx;
   awaitingSaveAs: boolean;
   then: ((proceed: boolean) => void) | undefined;
+}
+
+/** 碰一碰发送产物（doSendTemp 成功时交 knockShareFinish 构造 SharedData） */
+interface KnockSendOut {
+  path: string;
+  name: string;
+  ext: string;
 }
 
 /** ArkTS 侧调试开关：false=仅落 web_console.txt 文件（默认）；true=另 hilog 双写 */
@@ -192,6 +201,18 @@ struct EditorPage {
   // —— 未保存关闭守卫（2026-09-09，设计 §3）——
   /** 保存动作在途（至多一个——弹框模态互斥；待 save:bin/doSaveAs 完成消费） */
   private closeGuardDefer: CloseGuardDefer | null = null;
+  // —— 碰一碰传送（设计 docs/superpowers/specs/2026-09-27-knock-share-design.md）——
+  /** 接收在途（reject 幂等防抖——receive 未回结果前再触发直接拒绝） */
+  private knockRecvBusy: boolean = false;
+  /** 发送在途：save:bin 上报路由到 doSendTemp（正常保存语义全部旁路）。
+   *  至多一个在途——进行中再碰被 onKnockShare 拒绝 */
+  private knockSendTab: DocTabCtx | null = null;
+
+  /** 主窗口 id（onPageShow 记录；发送注册跟随开/关 tab 时复用） */
+  private knockWinId: number = 0;
+  /** knockShare 回调 target（页面序列化经 save:bin 异步回来时交还系统；
+   *  系统事件对象不可跨事件持有——本状态只存在于单次发送窗口内） */
+  private knockPendingTarget: harmonyShare.SharableTarget | null = null;
   /** 守卫单弹框互斥（查询窗口期/弹框在途时不再起新询问——默认不叠框） */
   private guardBusy: boolean = false;
   /** 窗口退出队列（onBackPress：未保存 doc 逐个询问；全处置完 terminateSelf） */
@@ -359,6 +380,20 @@ struct EditorPage {
       return 'true';
     }
     if (cmd === 'save:bin') {
+      // 碰一碰发送分叉：序列化产物路由到临时导出，正常保存/守卫/recents 全旁路。
+      // target 交还后即清——系统事件对象不可跨事件持有。发送成功置「内容未落盘」：
+      // asc_Save 已让引擎按「已保存」复位未保存水位，但用户文件并未落盘。
+      if (this.knockSendTab === ctx && this.knockPendingTarget !== null) {
+        this.knockSendTab = null;
+        const so = this.doSendTemp(ctx, param);
+        if (so !== null) {
+          ctx.state.contentNotSaved = true;
+        }
+        const tgt = this.knockPendingTarget;
+        this.knockPendingTarget = null;
+        this.knockShareFinish(tgt, so);
+        return 'true';
+      }
       // userFlag=1 用户主动保存（补录 recents）/ 0 autosave（不补录——2026-09-05）
       const r = this.saveBinRaw(ctx, param, userFlag > 0);
       // 未保存关闭守卫：保存链同步完成 → 消费 defer（关 tab 或存失败不关）。
@@ -451,57 +486,139 @@ struct EditorPage {
    *  目标后缀/格式对/产物校验与 saveBinRaw 同源查 formats 表：源扩展名直接当产物后缀
    *  是死路——x2t 无 bin→doc/.xls/.ppt/.txt 通路，csv 的 TCD_XLST_BIN2CSV 又缺 switch
    *  case（方向判定失败 → 命令返回 false，用户点「另存为」无任何反应）。 */
-  private saveAsBin(ctx: DocTabCtx, param: string): string {
+  /** 另存为与碰一碰发送共用的转换内核：页面序列化流（DOCY b64）→ 目标格式字节。
+   *  临时槽前缀区分场景（另存为与发送同时在途时不互相覆盖产物槽）；
+   *  打点前缀区分来源。目标后缀/格式对/产物校验同源查 formats 表：源扩展名直接
+   *  当产物后缀是死路——x2t 无 bin→doc/.xls/.ppt/.txt 通路，csv 的 TCD_XLST_BIN2CSV
+   *  又缺 switch case（方向判定失败 → 调用方拿到 null）。失败返回 null。 */
+  private convertSaveBytes(ctx: DocTabCtx, param: string, slot: string,
+    tag: string): ArrayBuffer | null {
     try {
       const abS = b64ToBuf(param);
       if (abS === null || abS.byteLength === 0) {
-        this.arkLog('SAVE_AS_B64_BAD len=' + param.length);
-        return 'false';
+        this.arkLog(tag + '_B64_BAD len=' + param.length);
+        return null;
       }
       const srcExt = ctx.state.ext.length > 0 ? ctx.state.ext : 'docx';
       const specA = specOf(srcExt);
       const extA = specA !== null ? specA.saveExt : 'docx';
       const checkA = specA !== null ? specA.check : 'zip';
-      const inA = ctx.tabPath('saveas-in.bin');
-      const outA = ctx.tabPath('saveas-out.' + extA);
+      const inA = ctx.tabPath(slot + '-in.bin');
+      const outA = ctx.tabPath(slot + '-out.' + extA);
       if (!writeFileBuf(inA, abS)) {
-        this.arkLog('SAVE_AS_WRITE_ERR ' + inA);
-        return 'false';
+        this.arkLog(tag + '_WRITE_ERR ' + inA);
+        return null;
       }
       // 同 saveBinRaw：先删产物槽，防 x2t 未写出新产物时读回上一次的旧文件
       try {
         fs.unlinkSync(outA);
       } catch (e) {
-        // 不存在=首次另存为的正常情形
+        // 不存在=首次转换的正常情形
       }
       const pwdAs = ctx.state.pwd.length > 0
         ? '<m_sSavePassword>' + ctx.state.pwd + '</m_sSavePassword>' : '';
       const rcA = x2tConvertSync((specA !== null && specA.saveFrom > 0)
         ? x2tXml(inA, outA, specA.saveFrom, specA.saveTo, pwdAs)
         : x2tXml(inA, outA, 0, 0, pwdAs));
-      this.arkLog('SAVE_AS_X2T rc=0x' + (rcA >>> 0).toString(16) + ' tab=' + ctx.id);
+      this.arkLog(tag + '_X2T rc=0x' + (rcA >>> 0).toString(16) + ' tab=' + ctx.id);
       if (rcA !== 0) {
-        this.arkLog('SAVE_AS_X2T_FAIL');
-        return 'false';
+        this.arkLog(tag + '_X2T_FAIL');
+        return null;
       }
       const outBufA = readFileBuf(outA);
       if (outBufA === null) {
-        this.arkLog('SAVE_AS_SUBMISS ' + outA);
-        return 'false';
+        this.arkLog(tag + '_SUBMISS ' + outA);
+        return null;
       }
       const badA = checkSaveOut(new Uint8Array(outBufA), checkA);
-      this.arkLog('SAVE_AS_OUT size=' + outBufA.byteLength + ' check=' + checkA
+      this.arkLog(tag + '_OUT size=' + outBufA.byteLength + ' check=' + checkA
         + (badA === null ? ' ok' : ' BAD:' + badA));
       if (badA !== null) {
-        return 'false';
+        return null;
       }
-      // forceExt：系统保存框默认名与后缀按表定（.doc tab 另存 → sample.docx，
-      // 不传会拿源扩展名当目标名 → 名实不符）
-      this.doSaveAs(ctx, outBufA, extA);
-      return 'true';
+      return outBufA;
     } catch (e) {
-      this.arkLog('SAVE_AS_ERR ' + String(e));
+      this.arkLog(tag + '_CVT_ERR ' + String(e));
+      return null;
+    }
+  }
+
+  private saveAsBin(ctx: DocTabCtx, param: string): string {
+    const outBufA = this.convertSaveBytes(ctx, param, 'saveas', 'SAVE_AS');
+    if (outBufA === null) {
       return 'false';
+    }
+    // forceExt：系统保存框默认名与后缀按表定（.doc tab 另存 → sample.docx，
+    // 不传会拿源扩展名当目标名 → 名实不符）
+    const srcExt = ctx.state.ext.length > 0 ? ctx.state.ext : 'docx';
+    const specA = specOf(srcExt);
+    const extA = specA !== null ? specA.saveExt : 'docx';
+    this.doSaveAs(ctx, outBufA, extA);
+    return 'true';
+  }
+
+  /** 碰一碰发送（设计 §4.3）：当前文档导出**临时副本**发出去——不弹保存框、
+   *  不回写源文件、不改文件身份（'none'→'uri' 不发生）、不补 recents、不动
+   *  未保存守卫。落 <cacheDir>/knock/<名>.<ext>，启动 sweepKnockFiles 清。 */
+  private doSendTemp(ctx: DocTabCtx, param: string): KnockSendOut | null {
+    const out = this.convertSaveBytes(ctx, param, 'knocksend', 'KNOCK_SEND');
+    if (out === null) {
+      return null;
+    }
+    const srcExt = ctx.state.ext.length > 0 ? ctx.state.ext : 'docx';
+    const spec = specOf(srcExt);
+    const ext = spec !== null ? spec.saveExt : 'docx';
+    // 发送名：当前文档名（新建未命名 → defaultDocName，与另存为默认名同源）
+    let name = ctx.state.name.length > 0 ? ctx.state.name : this.defaultDocName(ext);
+    const dn = name.lastIndexOf('.');
+    name = (dn > 0 ? name.substring(0, dn) : name) + '.' + ext;
+    name = name.replace(/[\\/]/g, '_');
+    const aCtx = getContext(this) as common.UIAbilityContext;
+    const dir = aCtx.cacheDir + '/knock';
+    try {
+      fs.mkdirSync(dir);
+    } catch (e) {
+      // 已存在——正常路径
+    }
+    const dst = dir + '/' + name;
+    if (!writeFileBuf(dst, out)) {
+      this.arkLog('KNOCK_SEND_FILE_ERR ' + dst);
+      return null;
+    }
+    this.arkLog('KNOCK_SEND_FILE ' + dst + ' size=' + out.byteLength);
+    const o: KnockSendOut = { path: dst, name: name, ext: ext };
+    return o;
+  }
+
+  /** 发送收尾：产物交还系统（此后卡片/传输/进度由系统接管）。失败走
+   *  clarifyNonShare 说明原因。target 不可复用，一次交还。 */
+  private knockShareFinish(target: harmonyShare.SharableTarget, so: KnockSendOut | null): void {
+    if (so === null) {
+      this.knockClarify(target, t($r('app.string.notice_knock_export_fail')));
+      return;
+    }
+    // 发送 utd 标 general.file（接收端声明的同款预置类型——同类型 BelongsTo
+    // 匹配必然成立）：文档精确 typeId 在部分 PC 的 UDMF 类型图无效（自定义类型
+    // 配置缺失），会把接收端沙箱能力整个跳过、落华为分享默认接收
+    const data = new systemShare.SharedData({
+      utd: 'general.file',
+      uri: fileUri.getUriFromPath(so.path),
+      title: so.name,
+    });
+    target.share(data).then(() => {
+      this.arkLog('KNOCK_SHARE_OK ' + so.name);
+    }).catch((e: Object) => {
+      this.arkLog('KNOCK_SHARE_ERR ' + String(e));
+    });
+  }
+
+  /** 终止一次碰一碰分享并给出原因。clarifyNonShare 是 API 22 新增——低版本
+   *  系统无此方法会抛，忽略即可（系统按超时收场）。 */
+  private knockClarify(target: harmonyShare.SharableTarget, msg: string): void {
+    try {
+      target.clarifyNonShare({ message: msg });
+    } catch (e) {
+      this.arkLog('KNOCK_CLARIFY_ERR ' + String(e));
     }
   }
 
@@ -767,6 +884,8 @@ struct EditorPage {
       // 身份演进（saveTarget 单点）：'none' → 'uri'——页面经 save:type 同步询问即命中。
       // 不写沙箱镜像：用户数据只存用户选择的位置（重开后由打开链自动建立工作副本）。
       ctx.state.saveTarget = 'uri';
+      // 另存为落盘=真保存，清「内容未落盘」水位（同 saveBinRaw 收尾）
+      ctx.state.contentNotSaved = false;
       // tab 标题刷新（docTitles 平行数组 index 与 docTabs 一致）
       for (let i = 0; i < this.docTabs.length; i++) {
         if (this.docTabs[i].ctx === ctx) {
@@ -1765,6 +1884,8 @@ struct EditorPage {
       // 仅守卫消费路径清不够——另存为取消后用户**手动** Ctrl+S 保存成功的场景，
       // saveAborted 残留会导致下次关闭误弹框；落盘终点统一复位，幂等）
       ctx.state.saveAborted = false;
+      // 同点清「内容未落盘」水位（真落盘后文档与用户文件一致，守卫无需再兜底弹框）
+      ctx.state.contentNotSaved = false;
       // 完成提示只给用户主动保存：官方桌面语义保存完成是静默的（协同链的反馈=
       // 「正在保存」mask），而本地链是同步桥——官方 mask 建立即销毁（同一帧内），
       // 用户全程看不到任何反馈。三类不弹：autosave（官方语义，不打扰）；关闭守卫
@@ -1941,6 +2062,7 @@ struct EditorPage {
       this.focusTab = this.docTabs.length - 1;
       this.arkLog('P1B_OPEN_TAB id=' + ctx.id + ' ext=' + extU + ' bin=' + buf.byteLength
         + ' target=' + ctx.state.saveTarget + ' name=' + name);
+      this.knockSyncSend();
   }
 
   /**
@@ -2054,6 +2176,67 @@ struct EditorPage {
     }
   }
 
+  /** 启动清扫：清空碰一碰收发残留目录（接收件被拷走后即无用；发送副本系统
+   *  传输窗口短，跨进程生命周期无意义。幂等，与 sweepPrintFiles 同款兜底）。 */
+  private sweepKnockFiles(): void {
+    try {
+      const aCtx = getContext(this) as common.UIAbilityContext;
+      for (const dir of [aCtx.filesDir + '/knock', aCtx.cacheDir + '/knock']) {
+        try {
+          fs.rmdirSync(dir);
+        } catch (e) {
+          // 不存在=常态
+        }
+        fs.mkdirSync(dir);
+      }
+      this.arkLog('KNOCK_SWEEP');
+    } catch (e) {
+      this.arkLog('KNOCK_SWEEP_ERR ' + String(e));
+    }
+  }
+
+  /** 碰一碰收发注册（页面可见期才持有——后台持注册是官方样例明示的错误态）。
+   *  接收恒挂；发送按「有无打开文档」跟随（knockSetSend，见 knockShare.ets
+   *  选端语义说明）。windowId=主窗口（单窗口应用恒定）。 */
+  onPageShow(): void {
+    try {
+      const actx = getContext(this) as common.UIAbilityContext;
+      window.getLastWindow(actx).then((mw: window.Window) => {
+        const winId = mw.getWindowProperties().id;
+        this.knockWinId = winId;
+        knockRegister(winId, {
+          onReceivable: (target: harmonyShare.ReceivableTarget) => {
+            this.onKnockReceivable(target);
+          },
+          onKnock: (target: harmonyShare.SharableTarget) => {
+            this.onKnockShare(target);
+          },
+        }, (m: string) => this.arkLog(m));
+        this.knockSyncSend();
+      }).catch((e: Object) => {
+        this.arkLog('KNOCK_WIN_ERR ' + String(e));
+      });
+    } catch (e) {
+      this.arkLog('KNOCK_REG_ERR ' + String(e));
+    }
+  }
+
+  /** 发送注册跟随文档 tab 存在性（开/关 tab 时调用） */
+  private knockSyncSend(): void {
+    let hasDoc = false;
+    for (const p of this.docTabs) {
+      if (p.ctx.kind === 'doc') {
+        hasDoc = true;
+        break;
+      }
+    }
+    knockSetSend(hasDoc, this.knockWinId, (m: string) => this.arkLog(m));
+  }
+
+  onPageHide(): void {
+    knockUnregister((m: string) => this.arkLog(m));
+  }
+
   aboutToAppear(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
     this.abilityCtx = ctx;
@@ -2065,6 +2248,7 @@ struct EditorPage {
     // 在沙箱；按前缀扫一遍删除。正常关闭路径已在任务终态/tab 关闭时清过）
     this.sweepPrintFiles();
     this.sweepTabDirs();
+    this.sweepKnockFiles();
     // 打印字体后台解包（~10MB 一次性；放启动后让位首屏。首次打印若仍未就绪
     // 由 ensurePrintFonts 同步补——正确性不依赖本调用）
     setTimeout(() => {
@@ -2305,6 +2489,189 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     return null;
   }
 
+  /** 当前活跃的文档 tab（焦点在 home tab 或空态 → null） */
+  private activeDocCtx(): DocTabCtx | null {
+    if (this.focusTab < 0 || this.focusTab >= this.docTabs.length) {
+      return null;
+    }
+    const ctx = this.docTabs[this.focusTab].ctx;
+    return ctx.kind === 'doc' ? ctx : null;
+  }
+
+  /** 碰一碰接收（设计 §4.1/4.2）：图片→插入当前文档，文档→立即打开（新 tab，
+   *  无文档也可收）。receive 与 reject 二选一且在拿到数据前调用，而类型只有
+   *  onDataReceived 才知道——故无文档时也放行（文档类主路径），图片类落到
+   *  knockHandleFile 后跳过并提示。 */
+  private onKnockReceivable(target: harmonyShare.ReceivableTarget): void {
+    if (this.knockRecvBusy) {
+      target.reject(harmonyShare.ReceivableErrorCode.NO_RECEIVABLE_ERROR);
+      return;
+    }
+    const ctx = this.activeDocCtx();
+    this.knockRecvBusy = true;
+    const aCtx = getContext(this) as common.UIAbilityContext;
+    // **参数是 receiveUri——必须 file:// URI 形态**（官方样例
+    // fileUri.getUriFromPath(filesDir)；裸路径会让传输前的目录授权失败，
+    // 表现为两端 ServiceExtension 握手超时）
+    const dstDir = fileUri.getUriFromPath(aCtx.filesDir);
+    target.receive(dstDir, {
+      onDataReceived: (sharedData: systemShare.SharedData) => {
+        try {
+          const recs = sharedData.getRecords();
+          for (let i = 0; i < recs.length; i++) {
+            const u = recs[i].uri;
+            if (u !== undefined && u.length > 0) {
+              this.knockHandleFile(ctx, u);
+            }
+          }
+        } catch (e) {
+          this.arkLog('KNOCK_RECV_DATA_ERR ' + String(e));
+        }
+      },
+      onResult: (resultCode: harmonyShare.ShareResultCode) => {
+        this.arkLog('KNOCK_RECV_RESULT code=' + resultCode);
+        this.knockRecvBusy = false;
+      },
+    }).then(() => {
+      this.arkLog('KNOCK_RECV_ACCEPTED');
+    }).catch((e: Object) => {
+      // receive 拒绝（参数/状态/权限类错误走 Promise reject，不进回调）——
+      // 不打点则表现为「receive 后零回调」、系统侧等待超时
+      this.arkLog('KNOCK_RECV_ERR ' + String(e));
+      this.knockRecvBusy = false;
+    });
+  }
+
+  /** 单个接收文件分流：图片 → 插入 ctx 指向的当前文档（无文档则跳过+提示）；
+   *  文档 → 现有打开链新开 tab（未保存态，无需已有文档） */
+  private knockHandleFile(ctx: DocTabCtx | null, uri: string): void {
+    let base = uri.substring(uri.lastIndexOf('/') + 1);
+    try {
+      base = decodeURIComponent(base);
+    } catch (de) {
+      // uri 尾段编码异常：按原样用（与 handleLocalUri 同策略）
+    }
+    base = base.replace(/[\\/]/g, '_');
+    const dot = base.lastIndexOf('.');
+    const ext = dot > -1 ? base.substring(dot + 1).toLowerCase() : '';
+    if (IMAGE_SUFFIXES.indexOf('.' + ext) >= 0) {
+      if (ctx === null) {
+        // 无打开文档无处插入：明确告知（对端显示传输成功，本端不静默丢图）
+        this.arkLog('KNOCK_IMG_SKIP no-doc');
+        promptAction.showToast({
+          message: t($r('app.string.notice_knock_no_doc')), duration: 3000
+        });
+        return;
+      }
+      const ab = readFileBuf(uri);
+      if (ab === null) {
+        this.arkLog('KNOCK_IMG_READERR ' + uri);
+        return;
+      }
+      // 图片供给走 media 管道（与手动插图同机制）：文件落 tabDir/media/，引擎以
+      // `_offline_media/<name>` 相对 URL 引用（loadRaw 从 tabDir/media 供字节）。
+      // **引擎 URL 空间里没有沙箱绝对路径**——绝对路径会被拼成
+      // onlyoffice/data/storage/... 的相对请求而必然 miss（现象=空图框）。
+      const mediaDir = ctx.tabDir() + '/media';
+      try {
+        fs.mkdirSync(mediaDir);
+      } catch (e) {
+        // 已存在——正常路径
+      }
+      const dst = mediaDir + '/' + base;
+      if (!writeFileBuf(dst, ab)) {
+        this.arkLog('KNOCK_IMG_WRITE_ERR ' + dst);
+        return;
+      }
+      this.arkLog('KNOCK_IMG_READY tab=' + ctx.id + ' ' + base
+        + ' bytes=' + ab.byteLength);
+      // **不能走 asc_addImage()**：它经 ShowImageFileDialog→`<input type=file>`
+      // click，而 ArkWeb 的 file chooser 需要**用户手势上下文**——runJavaScript
+      // 注入调用会被静默忽略（无 FileSelector、无报错）。改走按 URL 直插的公开
+      // API：word/slide=AddImageUrlAction（ImageLoader 本地加载后 StartAction，
+      // 无对话框无手势依赖）；cell 无此方法，退 asc_addImageDrawingObject。
+      // 引擎 URL 引用必须**先登记 g_oDocumentUrls 映射再插图**（手动插图链同款）：
+      // 模型引用存 media/<name>（保存时 x2t 从 tabDir/media 取字节），渲染请求
+      // 走映射出的 _offline_media/<name>（loadRaw 供给）——只传渲染形态会让
+      // _offline_media/<name> 直接进模型，保存时 x2t 找不到字节（包内无图）。
+      // api 句柄：window.editor 只有 word/ppt 页面有——cell 页面必须走
+      // SSE/DE/PE→controllers.Main.api 链（守卫查询同源），否则注入静默落空
+      ctx.js('(function(){try{'
+        + 'var n=' + JSON.stringify(base) + ';'
+        + 'var ns=window.SSE||window.DE||window.PE;'
+        + 'var e=(ns&&ns.controllers&&ns.controllers.Main)?ns.controllers.Main.api:window.editor;'
+        + 'var m={};m["media/"+n]="_offline_media/"+n;'
+        + 'window.AscCommon.g_oDocumentUrls.addUrls(m);'
+        + 'if(e&&e.AddImageUrlAction){'
+        + 'e.AddImageUrlAction("_offline_media/"+n);'
+        + 'console.error("KNOCK_ADDIMG_URL ok");}'
+        + 'else if(e&&e.asc_addImageDrawingObject){'
+        + 'e.asc_addImageDrawingObject(["_offline_media/"+n]);'
+        + 'console.error("KNOCK_ADDIMG_CELL ok");}'
+        + 'else{console.error("KNOCK_ADDIMG_URL nf");}}catch(e2)'
+        + '{console.error("KNOCK_ADDIMG_URL err "+e2);}})()', 'knock');
+      return;
+    }
+    if (specOf(ext) !== null) {
+      const ab = readFileBuf(uri);
+      if (ab === null) {
+        this.arkLog('KNOCK_DOC_READERR ' + uri);
+        return;
+      }
+      this.arkLog('KNOCK_DOC_OPEN ' + base + ' size=' + ab.byteLength);
+      // 接收件=**未保存态**打开（同新建语义：saveTarget='none'、不进 recents）——
+      // 首次保存弹系统 picker 让用户选位置，不误写接收临时目录
+      this.openNewTabEntry(ab, ext, base, false, true);
+      // 打开动作不推进引擎编辑水位（点查恒「未修改」），但内容只存在于内存——
+      // 置「内容未落盘」让关闭守卫必须询问（新 ctx = 本函数刚推进的 docTabSeq）
+      const nc = this.findCtx(this.docTabSeq);
+      if (nc !== null) {
+        nc.state.contentNotSaved = true;
+      }
+      return;
+    }
+    this.arkLog('KNOCK_FILE_SKIP ext=' + ext);
+  }
+
+  /** 对端碰一碰 → 导出当前文档临时副本发送（场景 C，设计 §4.3）。页面序列化
+   *  触发 = window.editor.asc_Save()（官方公开 API；页面经 save:bin 上报，
+   *  命令入口分叉路由到 doSendTemp）。发送在途 → 说明原因终止。 */
+  private onKnockShare(target: harmonyShare.SharableTarget): void {
+    const ctx = this.activeDocCtx();
+    if (ctx === null) {
+      // 无文档 = 只接收，不发送——绝不能 clarify：clarifyNonShare 是向系统
+      // 宣告「本端不参与此次分享」，会终结整个碰撞会话，对端的分享随之取消。
+      // 静默保持接收姿态（dataReceive 已注册），由对端决定是否推送。
+      this.arkLog('KNOCK_SHARE_PASSIVE no-doc');
+      return;
+    }
+    if (this.knockSendTab !== null || this.knockPendingTarget !== null) {
+      this.knockClarify(target, t($r('app.string.notice_knock_busy')));
+      return;
+    }
+    this.knockSendTab = ctx;
+    this.knockPendingTarget = target;
+    // api 句柄：window.editor 只有 word/ppt 页面有（cell 页面不存在，取值落空）——cell 页面
+    // 必须走 SSE/DE/PE→controllers.Main.api 链（守卫查询同源）
+    ctx.js('(function(){try{'
+      + 'var ns=window.SSE||window.DE||window.PE;'
+      + 'var e=(ns&&ns.controllers&&ns.controllers.Main)?ns.controllers.Main.api:window.editor;'
+      + 'if(e&&typeof e.asc_Save==="function"){'
+      + 'e.asc_Save();console.error("KNOCK_SAVE ok");}'
+      + 'else{console.error("KNOCK_SAVE nf");}}catch(x)'
+      + '{console.error("KNOCK_SAVE err "+x);}})()', 'knock');
+    // 页面序列化无响应兜底（页面异常时不吊死系统等待窗口）
+    setTimeout(() => {
+      if (this.knockPendingTarget !== null) {
+        this.arkLog('KNOCK_SEND_TIMEOUT');
+        this.knockSendTab = null;
+        const tgt = this.knockPendingTarget;
+        this.knockPendingTarget = null;
+        this.knockShareFinish(tgt, null);
+      }
+    }, 10000);
+  }
+
   /**
    * 未保存关闭守卫（2026-09-09，docs/UNSAVED_CLOSE_GUARD_DESIGN.md §3）——
    * 所有「关闭文档」入口统一入口：关闭瞬间向页面点查官方引擎 API。句柄链（真机实证
@@ -2384,6 +2751,13 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
           // 引擎 CanSave 已被 asc_Save 复位但保存未落盘（另存为取消/失败/超时）——
           // 数据真没保存：忽略页面 '0'，按未保存弹框（2026-09-09 真机实锤场景）
           this.arkLog('CLOSE_GUARD_SAVEABORTED tab=' + ctx.id + ' v=' + v);
+          this.showCloseGuardDialog(ctx, then);
+          return;
+        }
+        if (v !== '1' && ctx.state.contentNotSaved) {
+          // 碰一碰收发导致的「内容未落盘」（发送副本复位了引擎水位/接收文档从未
+          // 有保存目标）——引擎答「未修改」也不可放行，内容丢失即不可恢复
+          this.arkLog('CLOSE_GUARD_NOTONDISK tab=' + ctx.id + ' v=' + v);
           this.showCloseGuardDialog(ctx, then);
           return;
         }
@@ -2648,6 +3022,7 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
         this.focusTab = this.focusTab - 1;
       }
       this.arkLog('P1B_CLOSE_TAB id=' + id + ' focus=' + this.focusTab);
+      this.knockSyncSend();
     } catch (e) {
       this.arkLog('P1A_CLOSE_TAB_ERR ' + String(e));
     }

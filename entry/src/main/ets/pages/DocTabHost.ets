@@ -60,6 +60,11 @@ export class DocTabState {
    *  canSave——但另存为取消/落盘失败=数据未保存、页面 CanSave 却已 false——
    *  ArkTS 侧记忆此态，守卫查询时忽略页面 '0'（真数据未落盘，必须再弹框） */
   saveAborted: boolean = false;
+  /** 碰一碰收发导致的「内容未落盘」态（引擎未保存水位已复位或从未推进，守卫
+   *  点查「未修改」时以此兜底再弹询问）：①发送临时副本——asc_Save 复位了水位，
+   *  但用户文件并未落盘；②接收的文档——打开即有内容且无保存目标，直接关闭=
+   *  内容全丢。用户真保存（saveBinRaw/doSaveAs 落盘成功）即清。 */
+  contentNotSaved: boolean = false;
   /** 密文文档密码（非空 = 该 tab 打开的是密码保护文档）。打开链解密成功后写入；
    *  保存链据此下发 m_sSavePassword，否则产物是明文——加密文档保存一次即被静默
    *  降级为明文（2026-09-12 实测：密文 docx 打开后保存产物为明文 zip）。 */

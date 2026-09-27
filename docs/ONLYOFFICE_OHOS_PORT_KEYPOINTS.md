@@ -456,3 +456,66 @@ editor main/index.html 四层上跳 = rawfile/onlyoffice/plugins.json；相对 U
   PLUG_AI_TOGGLE_* 删除，标签留在 cases.tsv 禁止项防回加）；AI tab 轮询采集
   （异步自注册，真机约 1.5-2s 出现）+ m7ai 门控点击；`PLUG_TAB_GONE=true`/
   `PLUG_AI_TAB_EXISTS=true` 为新判据。
+
+### 17.7 碰一碰传送（Share Kit knockShare，设计 specs/2026-09-27-knock-share-design.md）
+- 三场景：接收图片→插入当前文档 / 接收文档→新 tab 打开 / 当前文档→导出临时副本发送
+  （发送副本落 `<cacheDir>/knock/`，启动清扫；不回写源文件、不改文件身份、不补 recents）。
+- API 面：发送 `harmonyShare.on('knockShare')` → `SharableTarget.share(SharedData)`；
+  接收 `harmonyShare.on('dataReceive', RecvCapabilityRegistry)` → `ReceivableTarget.receive(uri, cb)`。
+  沙箱接收版本矩阵：PC/2in1 since API 20、Tablet since API 23；SDK 自带 Share Kit、**零权限**。
+  模块 `common/knockShare.ets`。**场景 A/B 已真机闭环（1.3↔1.5：发图插 docx 文档+保存可见、
+  发 docx/xlsx 新 tab 打开）**；场景 C（PC 作发送端）发送链已验证，手机接收走默认路径
+  （Phone 不在沙箱接收支持矩阵）。
+- **页面 api 句柄坑**：`window.editor` 只有 word/ppt 页面有——**cell（xlsx）页面不存在**，
+  注入调用必须走 `window.SSE||window.DE||window.PE → controllers.Main.api` 链（守卫查询
+  同源），否则静默落空（现象=碰发 xlsx 时 KNOCK_SAVE nf → 序列化超时、卡片不出现）。
+- **接收侧三条 API 硬约束（违反的共性表现=两端华为分享 ServiceExtension 同时
+  waitCheck 超时、手机端「待接收」后失败，应用侧却无任何报错）**：
+  1. `receive()` 的参数是 **receiveUri，必须 `fileUri.getUriFromPath(dir)` 的 file:// 形态**，
+     传裸路径时传输前置的目录授权失败（Share Kit 传输前获取目录授权、完成后撤销）；
+  2. `receive()` 返回 Promise——**必须接 catch**：reject（参数/状态类错误）不进回调，
+     吞掉则表现为「receive 后零回调」；
+  3. 能力声明用**顶层父类型** `{utd: MEDIA, maxSupportedCount: 5} + {utd: FILE, ...}`
+     （对齐官方 KnockFileShare 样例）；`off` 须复用 on 时的同一 capabilityRegistry 引用
+     （现造结构解除失败=后台残留回调，比不注册更糟）。
+- **插图通路=AddImageUrlAction + g_oDocumentUrls 映射**（宿主主动插图，无 UI）：
+  - **不能走 `asc_addImage()`**——它经 ShowImageFileDialog→`<input type=file>` click，
+    而 ArkWeb 的 file chooser 需要**用户手势上下文**，runJavaScript 注入调用被静默忽略
+    （无 FileSelector、无报错、文档无图）。
+  - 正路（手动插图链 media 管道的同款三步）：①图片字节落 `tabDir/media/<name>`；
+    ②`window.AscCommon.g_oDocumentUrls.addUrls({"media/<name>": "_offline_media/<name>"})`
+    登记映射——模型引用存 `media/<name>`（保存时 x2t 从 bin 目录/media 取字节），
+    渲染请求走映射出的 `_offline_media/<name>`（loadRaw 从 tabDir/media 供给）；
+    ③`window.editor.AddImageUrlAction("_offline_media/<name>")`（word/slide；
+    cell 退 `asc_addImageDrawingObject`）。
+  - 引擎 URL 空间里**没有沙箱绝对路径**：绝对路径被拼成 onlyoffice/data/storage/...
+    的页面相对请求而必然 miss（现象=文档出空图框）。
+- **发送通路=save:bin 分叉**：`asc_Save()`（经 SSE/DE/PE→controllers.Main.api 统一句柄链——
+  **`window.editor` 只有 word/ppt 页面有，cell 页面没有**）触发页面序列化 → `save:bin` 上报 →
+  命令入口判发送在途路由 `doSendTemp`（转换内核与 save:as 共用 `convertSaveBytes`，槽名/打点
+  前缀区分）。发送在途状态=双标志（ctx+target），完成或 10s 超时兜底后 `share()` /
+  `clarifyNonShare()`（API 22 新增——低版本系统调用会抛，try/catch 忽略）。
+- **系统选端语义（官方「双向分享限制」）**：手机前台有可分享内容 → 无论对端如何，
+  手机=发送端；手机无内容且 PC/2in1 前台窗口有 → PC=发送端。「有无可分享内容」对
+  系统而言=**前台窗口是否注册了 knockShare 发送能力**（碰撞回调只发给被判定的发送端，
+  接收端只走 dataReceive）。故注册必须拆分：**dataReceive 恒挂（页面可见期），
+  knockShare 跟随「有无打开文档」在开/关 tab 时动态挂/撤**（`knockSetSend`）——无文档
+  的一端若仍挂发送注册，系统会把回调判给它（它又无内容可发），传输断链（真机实证：
+  手机主界面碰 PC 编辑中的文档，两次碰撞回调全在手机端、PC 端零回调）。
+  `clarifyNonShare`（API 22 新增——低版本系统调用会抛，try/catch 忽略）是向系统宣告
+  「本端不参与此次分享」——发送回调触发而本端无文档时**只能静默**（PASSIVE），
+  clarify 会终结会话使对端分享被取消。
+- **发送 utd 固定 `general.file`（关键）**：部分 PC 的 UDMF 自定义类型配置缺失
+  （`CustomUtdStore::ReadTypeCfgs` errno=2，系统文件管理器进程同样报错），文档精确
+  typeId（org.openxmlformats.* 等）在该机类型图上 `IsValidType` 失败 → `BelongsTo`
+  无法计算 → **接收端沙箱能力被整体跳过**（指定应用直达 shareType/shareBundleName
+  metadata 亦未生效）→ 落华为分享默认接收。`general.file` 是预置类型且与接收声明
+  同类型，BelongsTo 必然成立，实测穿透。图片不经此层（预置类型），无需标注。
+- **接收与守卫水位**：`receive`/`reject` 须在拿到数据前二选一，而类型只有
+  onDataReceived 才知道——无打开文档时也放行（文档类新 tab 未保存态打开；图片类
+  跳过+toast 引导先开文档）。碰一碰收发会产生「引擎水位与磁盘不一致」：发送副本
+  （asc_Save 复位水位但不落盘）与接收文档（从未有保存目标）都置
+  `DocTabState.contentNotSaved`，关闭守卫点查「未修改」时以此兜底弹询问，真保存
+  （saveBinRaw/doSaveAs 落盘成功）即清。
+- 验证依赖双真机物理碰撞（uitest 注入不了 NFC），判据打点 `KNOCK_*` 前缀；PC（1.5）日志
+  取法见「真机日志取法」记忆（haps/entry 沙箱布局）。

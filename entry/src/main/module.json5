@@ -8,6 +8,15 @@
     "deliveryWithInstall": true,
     "installationFree": false,
     "pages": "$profile:main_pages",
+    // 碰一碰「指定应用直达」（Share Kit，KEYPOINTS §17.7）：两端配置相同
+    // shareType 时，接收优先拉起 shareBundleName 列表内已安装的应用——
+    // PureOffice↔PureOffice 互传文档直达本应用，绕开 UDMF 沙箱匹配
+    // （该匹配依赖 UDMF 类型图，类型配置缺失的设备上文档类 typeId 无效，
+    // 沙箱接收会被整体跳过、落华为分享默认接收）。
+    "metadata": [
+      { "name": "shareType", "value": "pureoffice-knock" },
+      { "name": "shareBundleName", "value": "app.fuqidian.pureoffice" }
+    ],
     "abilities": [
       {
         "name": "EntryAbility",

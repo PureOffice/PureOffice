@@ -23,7 +23,7 @@
 | 保存（Ctrl+S / 自动保存） | ✅ | `asc_Save` 官方桌面协议骨架 → `asc_nativeGetFileData`（BinaryFileWriter → DOCY/XLSY/PPTY;v10）→ x2t 按**目标后缀**自动选转换器 → save.&lt;ext&gt; + 回写源文件；编辑内容进入 `word/document.xml`（真机核验）。目标后缀由 `formats.ets` 的 `saveExt` 决定：旧二进制与 txt 存为 OOXML、rtf/csv 原地保存；不可原地保存的格式弹「格式不支持保存」→ 确认后转另存为（2026-09-12） |
 | 导出 / 另存为 | ✅ | 编辑页左下「导出」按钮 → 自动触发官方保存 → 系统保存对话框（`DocumentViewPicker.save`）→ 写用户选定位置 |
 | 打印（系统打印） | ✅ | 工具栏打印按钮 / 文件菜单「打印」→ 页面元文件流（`Save_End` 真实长度截断）→ x2t `bin2pdf`（随包字体目录）→ `@ohos.print` 调起系统打印界面（选打印机或"打印为 PDF"）；临时文件启动时清扫（2026-09-11 真机三格式全通） |
-| 分享 | 降级 | SDK 无 ShareKit（@ohos.share 缺失）—— 登记 P1：SDK 升级后接 `systemShare` |
+| 分享（碰一碰传送） | ✅ | Share Kit（`@kit.ShareKit`，SDK 已带、零权限）：接收端 `dataReceive`（图片→插入当前文档，文档→新 tab 打开）+ 发送端 `knockShare`（当前文档导出 `<cacheDir>/knock/` 临时副本发送——不回写源文件/不改身份/不补 recents）。注册挂编辑页 onPageShow/onPageHide（后台持注册是官方明示错误态）。模块 `common/knockShare.ets` + 设计 `docs/superpowers/specs/2026-09-27-knock-share-design.md`；实现要点与 API 硬约束见 KEYPOINTS §17.7。**场景 A 已真机闭环（1.3 发图 → 1.5 插入 → 保存产物 WPS 可见）**；B/C 已实现待联调（可碰配对 1.3↔1.5） |
 | 新建空白文档（三格式） | ✅ | create:new → 随包空模板 `empty.{docx,xlsx,pptx}`（`make_empty_templates.py` 生成，骨架取自官方素材，仓库跟踪）；官方空文档链（word 另有 `getEmpty` + bSerFormat 补丁）；**三格式默认一致：语言中文简体、字体 Arial + 宋体**（docx=`styles.xml` docDefaults、pptx=模板 165 处 `lang` 替换、xlsx=`theme1.xml`/`styles.xml` 字体、cell 语言走引擎侧 defaultLanguage 初始化——sdkjs fork `cell/api.js:99-113` 读 `sse-spellcheck-locale` 偏好、缺省 2052；xlsx 格式本身无文档级语言） |
 | 缩放/状态栏/多视图 | ✅ | 官方 UI 原生实现（100% 起点，Factor 1.0 语义） |
 | 多页视图（新建提示） | ✅ | 官方功能（无 UI 依赖） |
