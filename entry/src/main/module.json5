@@ -27,6 +27,14 @@
         "startWindowIcon": "$media:app_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        // 窗口旋转策略：跟随传感器四方向旋转，且受控制中心「旋转锁定」开关控制
+        // （关闭=随设备转、开启=锁定）。缺省不配置时生效值为 0（UNSPECIFIED，
+        // 由系统判定）——系统在手机上判定为不可旋转，横屏失效，且不受应用意图
+        // 控制；可旋转应用按官方口径（module.json5 文档 + 《视频类应用横竖屏切换》
+        // 最佳实践）配此值。不选 follow_desktop：其语义为「桌面可旋转才可旋转」，
+        // 直板机/折叠屏折叠态桌面不可旋转，手机仍无法横屏。PC（2in1）走自由窗口，
+        // 方向策略不生效，不受影响。
+        "orientation": "auto_rotation_restricted",
         "skills": [
           { "entities": ["entity.system.home"], "actions": ["action.system.home"] },
           // 「打开方式」候选注册：文件管理器/其他应用交付文档时发 viewData 隐式 want，
