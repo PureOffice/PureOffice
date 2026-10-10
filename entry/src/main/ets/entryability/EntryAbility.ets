@@ -189,15 +189,13 @@ export default class EntryAbility extends UIAbility {
   }
 
   /**
-   * 窗口形态（2026-09-09 用户需求，参考 ../wineohos 窗口逻辑——PAD 虚拟桌面/
-   * PC 窗口实锤代码）：
-   *  - Pad（deviceType tablet/phone）→ **系统默认形态**（不干预：状态栏/导航条可见）。
-   *    2026-09-18 用户要求不再常驻沉浸（原实现= setWindowLayoutFullScreen(true) +
-   *    隐藏状态栏/手势条，仿 wineohos「进入桌面」）；放映期仍临时沉浸，见
-   *    EditorPage.applyFsWindow。
+   * 窗口形态（参考 ../wineohos 窗口逻辑——PAD 虚拟桌面 / PC 窗口实锤代码）：
+   *  - 手机/Pad（deviceType tablet/phone）→ 窗口铺满整屏 + 隐藏导航指示条，
+   *    系统状态栏保留显示；页面侧据此内衬顶部、铺满底部（EditorPage 根部注释）。
+   *    Pad 自由多窗形态下全屏设置不生效亦不报错——退化回系统默认布局。
    *  - PC（deviceType 2in1/pc）→ 无边框沉浸：setWindowDecorVisible(false) +
    *    setWindowDecorHeight(37)——用户拍板参考 ../wineohos/.temp/HiSH
-   *    （见 PC 分支注释）；1.4 真机验收通过（tab 恒不越系统三键区=另加 150 避让）。
+   *    （见 PC 分支注释；tab 恒不越系统三键区=另加 150 避让）。
    * 判据官方枚举 deviceInfo.deviceType（String 常量；无 'pc' 时 2in1 即 PC 形态；
    * 注意它只反映硬件——同一 Pad 切 PC 桌面模式仍报 tablet，窗口形态切换判据留待
    * 窗口 mode/显示模式 API）。
@@ -224,6 +222,24 @@ export default class EntryAbility extends UIAbility {
         } else {
           hilog.warn(0x0000, 'OfficeWin', 'pc no SessionManager, decor kept');
         }
+      } else if (dt === 'phone' || dt === 'tablet') {
+        // 手机/Pad：窗口铺满整屏 + 隐藏导航指示条，屏幕底部那条（系统手势条所在）
+        // 整个交给应用——内容贴到物理底边，既无窗口底色白带，也无元素被压。
+        // 窗口全屏是这里的必要前提：不设时应用在系统栏区域没有绘制权，ArkUI
+        // 侧的安全区扩展属性一律空转（实测底部白带纹丝不动）。
+        // 与参考实现 ../wineohos DesktopAbility 的沉浸写法同款两调用，区别是
+        // **不隐藏状态栏**：顶部系统状态栏照常显示，页面按 getWindowAvoidArea
+        // 内衬其高度（EditorPage.topInset），tab 条/标题不被时间电量压住。
+        // 隐藏指示条不禁用系统上滑手势（回桌面仍可用），只是不再显示指示条。
+        // Pad 自由多窗（2in1 形态）下全屏设置不生效亦不报错——退化回系统默认
+        // 布局，无需特判。
+        mw.setWindowLayoutFullScreen(true).catch((e: BusinessError) => {
+          hilog.warn(0x0000, 'OfficeWin', 'fullscreen err ' + JSON.stringify(e));
+        });
+        mw.setSpecificSystemBarEnabled('navigationIndicator', false).catch((e: BusinessError) => {
+          hilog.warn(0x0000, 'OfficeWin', 'nav indicator err ' + JSON.stringify(e));
+        });
+        hilog.info(0x0000, 'OfficeWin', 'immersive: fullscreen + nav indicator off');
       }
     } catch (e) {
       hilog.warn(0x0000, 'OfficeWin', 'applyWindowMode err ' + JSON.stringify(e));

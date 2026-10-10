@@ -249,6 +249,11 @@ struct EditorPage {
   /** 导入阶段：'' 空闲 / 'pick' 系统选择器在途 / 'import' 读+落盘（按钮文案跟着走） */
   @State fontMgrStage: string = '';
 
+  /** 手机/Pad 窗口全屏（EntryAbility.applyWindowMode）后，顶部状态栏区域归内容
+   *  所有——页面按状态栏实际高度内衬，避免 tab 条/主页标题被时间电量压住。
+   *  PC 恒 0（自绘标题栏，不参与；顶部避让维持系统默认）。 */
+  @State topInset: number = 0;
+
   /** 手机原生主页「关于」弹层（自绘覆盖层）：合规内容与 Web 版 About 一致
    *  （品牌/版本/AGPL 行/源码与声明行——CREDIT、SOURCE_LINE 同源文案的 ArkTS 版）。
    *  licText 非空=正在查看对应文本（LICENSE/NOTICE 全文，点行进入、返回键/关闭出）。 */
@@ -2249,6 +2254,7 @@ struct EditorPage {
     this.sweepPrintFiles();
     this.sweepTabDirs();
     this.sweepKnockFiles();
+    this.applyTopInset();
     // 打印字体后台解包（~10MB 一次性；放启动后让位首屏。首次打印若仍未就绪
     // 由 ensurePrintFonts 同步补——正确性不依赖本调用）
     setTimeout(() => {
@@ -3082,9 +3088,31 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
     this.applyFsWindow(on);
   }
 
+  /** 顶部状态栏内衬（手机/Pad，见 topInset 注释）。窗口全屏后状态栏区域归内容所有，
+   *  取系统避让区高度作为页面内衬——不内衬则 tab 条/主页标题被时间电量压住。
+   *  avoidArea 给的是物理像素，按 px2vp 换算后使用。取不到时保持 0：退化表现是
+   *  顶部被状态栏覆盖，功能不受影响。 */
+  private applyTopInset(): void {
+    const dt = deviceInfo.deviceType;
+    if (dt !== 'phone' && dt !== 'tablet') {
+      return;
+    }
+    const actx = this.abilityCtx;
+    if (actx === undefined) {
+      return;
+    }
+    window.getLastWindow(actx).then((mw: window.Window) => {
+      const area = mw.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+      this.topInset = px2vp(area.topRect.height);
+      this.arkLog('TOPMARGIN px=' + area.topRect.height + ' vp=' + this.topInset);
+    }).catch((e: BusinessError) => {
+      this.arkLog('TOPMARGIN_ERR ' + e.code);
+    });
+  }
+
   /**
-   * 窗口形态随放映切换（PC：窗口级全屏；Pad：临时隐藏系统栏——两平台都须自行进出
-   * 沉浸，不再依赖 EntryAbility 的常驻沉浸）。参照 ../wineohos
+   * 窗口形态随放映切换（PC：窗口级全屏；手机/Pad：收起状态栏——窗口全屏与导航
+   * 指示条隐藏已是常驻态，见 EntryAbility.applyWindowMode）。参照 ../wineohos
    * .../VirtualDesktopAbility.ets:78-127（PC 虚拟桌面全屏）：
    *   进入 = maximize(ENTER_IMMERSIVE_DISABLE_TITLE_AND_DOCK_HOVER)——用 DISABLE_HOVER
    *     变体而非默认 ENTER_IMMERSIVE：铺满的同时鼠标贴屏幕边缘不唤出标题栏/dock
@@ -3104,18 +3132,20 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
         return;
       }
       if (dt === 'tablet' || dt === 'phone') {
-        // Pad：放映期临时隐藏系统栏（2026-09-18 用户要求 Pad 不再常驻沉浸 →
-        // EntryAbility 恢复系统默认形态，故此处须自行进出沉浸，否则放映画面
-        // 会被状态栏/导航条遮挡）。退出放映即还原系统栏。
+        // 手机/Pad 的窗口全屏与导航指示条隐藏是**常驻态**（EntryAbility.
+        // applyWindowMode），放映在这之上收起状态栏，让画面铺满整屏；退出放映
+        // 恢复状态栏显示。进入时仍显式再设一次全屏（幂等）：常驻设置若在该形态
+        // 下未生效（如自由多窗），放映仍须自己铺满，不能建立在"应该已经全屏"上；
+        // 退出时**不**置 false——那会把常驻全屏一并撤掉，底部重新露出系统栏。
+        // 导航指示条恒隐藏，不随放映还原。
         window.getLastWindow(actx).then((mw: window.Window) => {
-          mw.setWindowLayoutFullScreen(on).catch((e: BusinessError) => {
-            this.arkLog('LSO_FS_WIN pad layout err ' + e.code);
-          });
+          if (on) {
+            mw.setWindowLayoutFullScreen(true).catch((e: BusinessError) => {
+              this.arkLog('LSO_FS_WIN pad layout err ' + e.code);
+            });
+          }
           mw.setSpecificSystemBarEnabled('status', !on).catch((e: BusinessError) => {
             this.arkLog('LSO_FS_WIN pad status err ' + e.code);
-          });
-          mw.setSpecificSystemBarEnabled('navigationIndicator', !on).catch((e: BusinessError) => {
-            this.arkLog('LSO_FS_WIN pad nav err ' + e.code);
           });
         }).catch((e: BusinessError) => {
           this.arkLog('LSO_FS_WIN pad win err ' + e.code);
@@ -3564,6 +3594,14 @@ try{window.addEventListener('unhandledrejection',function(ev){console.error('UHR
         })
       }
     }
+    // 窗口全屏后的两端处理（手机/Pad，见 EntryAbility.applyWindowMode）：
+    //  - 底部：忽略该边的布局安全区，内容铺到屏幕物理底边——导航指示条已隐藏，
+    //    那块不再由窗口底色（白）填充，也没有系统条压住底部元素。
+    //  - 顶部：状态栏区域归内容所有，按状态栏实际高度内衬，否则 tab 条/主页
+    //    标题被时间电量压住。PC 恒 0；放映时状态栏收起，内衬一并归零。
+    // 只声明 BOTTOM 边 + 顶部内衬：两端各自处理，不靠隐藏系统栏制造沉浸。
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM], [LayoutSafeAreaEdge.BOTTOM])
+    .padding({ top: this.fsMode ? 0 : this.topInset })
   }
 
   /**
