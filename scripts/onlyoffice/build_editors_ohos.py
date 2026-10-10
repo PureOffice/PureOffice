@@ -421,6 +421,25 @@ def make_cjk_subset(src, out, family=None):
     return out
 
 
+def assert_print_font_list():
+    """打印解包清单（EditorPage.ets 的 PRINT_FONT_FILES）必须与 FONT_DST 落盘全集
+    一致。打印 PDF 由 x2t 从该清单解包出的字体目录建表选字（打分制按引擎解析后的
+    face 名匹配），包内有而清单缺的字体在打印产物中无源 → 打分落到不含对应字形
+    的字体 → 乱码。两份清单是手工双源，分岔过一次（包内字体扩容未同步清单，仿宋/
+    楷体打印乱码）——此断言把任何单边改动变成构建失败。反向约束同样成立：给
+    PRINT_FONT_FILES 加字体必须先进 FONT_FILES（源头唯一=FONT_FILES 决定落盘）。"""
+    ets = os.path.join(ROOT, 'entry', 'src', 'main', 'ets', 'pages', 'EditorPage.ets')
+    with open(ets, encoding='utf-8') as f:
+        m = re.search(r'PRINT_FONT_FILES: string\[\] = \[(.*?)\]', f.read(), re.S)
+    if not m:
+        raise SystemExit('PRINT_FONT_FILES 解析失败（EditorPage.ets 声明结构变更？）')
+    listed = set(re.findall(r"'([^']+\.ttf)'", m.group(1)))
+    actual = set(n for n in os.listdir(FONT_DST) if n.endswith('.ttf'))
+    if listed != actual:
+        raise SystemExit('打印字体清单与包内字体目录不一致：清单缺=%s 清单多=%s'
+                         % (sorted(actual - listed), sorted(listed - actual)))
+
+
 def rewrite_font_name(path, family):
     """重写 TTF name 表（ID1 family/ID2 subfamily/ID3 unique/ID4 full/ID6 postscript/
     ID16 typoFamily/ID17 typoSubFamily = family + Regular——引擎 wasm freetype
@@ -1141,6 +1160,7 @@ def main():
             raise SystemExit('字体预加密失败：%s' % fn)
         fonts_ok += 1
     print('  字体 → %s (%d/%d files)' % (FONT_DST, fonts_ok, len(FONT_FILES)))
+    assert_print_font_list()
 
     # 5.5 字体缩略图精灵（官方 web 语义 CThumbnailLoader 消费——字族下拉真源，
     #     详见 make_fonts_sprites 注释；缺失=404 字节当 RLE 头→createImageData

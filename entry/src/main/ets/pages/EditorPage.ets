@@ -78,15 +78,22 @@ function imageSuffixesFrom(accept: string[]): string[] {
  * 改为只用随包字体：回退集里全是含拉丁+西里尔+中文的字体（Liberation = Arial/
  * Times/Courier 的度量兼容替身）。字体本体来自 rawfile/onlyoffice/fonts。
  *
- * 解包时机：aboutToAppear 后台解包一次（~10MB 写入）；首次打印若尚未就绪则同步补。
+ * 解包时机：aboutToAppear 后台解包一次（包内字体全集一次性写入）；首次打印若
+ * 尚未就绪则同步补。
  */
+/** 打印字体清单 = rawfile/onlyoffice/fonts **全集**（一致性由构建期断言
+ *  build_editors_ohos.assert_print_font_list 保证——手工双源曾分岔，包内有而
+ *  此清单缺的字体在打印 PDF 中乱码）。x2t 按引擎解析后的 face 名精确匹配
+ *  （元文件流记录的就是 face 名），故新增包内字体只需进 rawfile 并过此清单。 */
 const PRINT_FONT_FILES: string[] = [
   'LiberationSans-Regular.ttf', 'LiberationSans-Bold.ttf',
   'LiberationSans-Italic.ttf', 'LiberationSans-BoldItalic.ttf',
   'LiberationSerif-Regular.ttf', 'LiberationSerif-Bold.ttf',
   'LiberationSerif-Italic.ttf', 'LiberationSerif-BoldItalic.ttf',
   'LiberationMono-Regular.ttf', 'LiberationMono-Bold.ttf',
-  'NotoSansCJK-SC.ttf', 'NotoSerifCJK-SC.ttf'
+  'LiberationMono-Italic.ttf', 'LiberationMono-BoldItalic.ttf',
+  'NotoSansCJK-SC.ttf', 'NotoSerifCJK-SC.ttf',
+  'FandolFang.ttf', 'FandolKai.ttf', 'OpenSymbol.ttf'
 ];
 /**
  * 字体前 32B 的 XOR 密钥（构建期 pre_xor_font 加密态，SDK 假设服务器字体已
@@ -1472,10 +1479,14 @@ struct EditorPage {
       return false;
     }
     // 注意：fs.accessSync 是**返回 boolean** 而非抛异常（2026-09-10 实测——
-    // 不能写成 try{ accessSync() }catch{}，那样"不存在"会被当成已就绪直接返回）
+    // 不能写成 try{ accessSync() }catch{}，那样"不存在"会被当成已就绪直接返回）。
+    // .ready 内容=清单指纹（PRINT_FONT_FILES 逐行）：老版标记是空文件，清单扩容
+    // （如补进仿宋/楷体）时旧标记若仍判"就绪"，新字体永远不落盘——打印继续乱码。
+    // 内容不符即重解包（幂等，多写一遍 ~几 MB 一次性成本）。
+    const manifest = PRINT_FONT_FILES.join('\n');
     let hasFlag = false;
     try {
-      hasFlag = fs.accessSync(dir + '/.ready');
+      hasFlag = fs.readTextSync(dir + '/.ready') === manifest;
     } catch (e) {
       hasFlag = false;
     }
@@ -1520,7 +1531,11 @@ struct EditorPage {
     }
     this.printFontsReady = ok === PRINT_FONT_FILES.length;
     if (this.printFontsReady) {
-      writeFileBuf(dir + '/.ready', new ArrayBuffer(0));
+      // Buffer 小对象落在共享内存池——.buffer 必须按 byteOffset/Length 精确切片，
+      // 直传会把池内未初始化字节一并写入，指纹比对自此恒假
+      const mb = buffer.from(manifest, 'utf-8');
+      writeFileBuf(dir + '/.ready',
+        mb.buffer.slice(mb.byteOffset, mb.byteOffset + mb.length) as ArrayBuffer);
     }
     this.arkLog('PRINT_FONTS_EXTRACT ' + ok + '/' + PRINT_FONT_FILES.length);
     return this.printFontsReady;
