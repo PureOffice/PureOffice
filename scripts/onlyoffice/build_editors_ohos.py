@@ -164,6 +164,11 @@ FONT_SRC_BY_FILE['OpenSymbol.ttf'] = os.path.join(ROOT, 'scripts', 'onlyoffice',
 SYSTEM_FONT_FILES = ['HYQiHeiL3.ttf',
                      'NotoSansBengaliUI-Regular.ttf',
                      'NotoSansDevanagariUI-Regular.ttf']
+# 系统桥字体的 face family 名（交集机制注册时读到的内部名，与上方一一对应）；
+# 断言层据此校验 FONT_INFOS 同名行存在（构建期无文件可验，仅注册行契约）
+SYSTEM_FONT_EXPECT = {'HYQiHeiL3.ttf': 'HYQiHei L3',
+                      'NotoSansBengaliUI-Regular.ttf': 'Noto Sans Bengali UI',
+                      'NotoSansDevanagariUI-Regular.ttf': 'Noto Sans Devanagari UI'}
 # 注入 __fonts_files / 精灵行序列引用：rawfile + system
 FONT_FILES_ALL = FONT_FILES + SYSTEM_FONT_FILES
 
@@ -438,6 +443,81 @@ def assert_print_font_list():
     if listed != actual:
         raise SystemExit('打印字体清单与包内字体目录不一致：清单缺=%s 清单多=%s'
                          % (sorted(actual - listed), sorted(listed - actual)))
+
+
+def read_font_family(path):
+    """读 TTF 内部 family 名（nameID16 优先、回退 nameID1）；解析失败返回 None
+    （断言层对该文件跳过 face 名校验——坏文件另有拷贝/加密环节拦截）。"""
+    try:
+        from fontTools.ttLib import TTFont
+        ft = TTFont(path, fontNumber=0, lazy=True)
+        n = ft['name']
+        fam = n.getDebugName(16) or n.getDebugName(1)
+        ft.close()
+        return fam
+    except Exception:
+        return None
+
+
+def assert_font_registry(families):
+    """字体注册表一致性断言。FONT_INFOS 行与字体文件之间的契约此前只活在
+    注释与人肉对齐里，各自踩过真机坑（渲染成错误字体/方块/整 run 空白，
+    均无构建期报错）；任何一条不满足 → SystemExit。
+      ① 行名唯一：行名按名进 dict（CJK 回退行号、缩略图行号按名取行），
+         重复行名时 dict 后写覆盖前写、前一行静默失效。
+      ② 下标合法性：FONT_INFOS 的数字下标是 FONT_FILES_ALL 的人肉对齐产物，
+         中间插文件即全体平移、各行静默指错文件。B/I/BI 槽禁等于 indexR：
+         引擎见槽位 != -1 即认定「有真该样式字形」而跳过合成加粗/斜体，
+         单字重族请求加粗视觉无变化（真机实证坑）。
+      ③ face 名契约：FONT_SUBSETS 重写进 TTF name 表的 family 必须有同名
+         FONT_INFOS 行——引擎渲染槽按 face 内部名与行名匹配注册，不符 →
+         整 run 空白（连拉丁字符都不绘制）；并用实际读出的 name 表验证重写
+         确已生效。
+      ④ 非重写文件的内部 family 也须有同名行（换字体时漏配行 → 同 ③）；
+         豁免 Liberation Serif/Mono：官方 web 部署原样携带，引擎拉丁路径按
+         行名取字体（FileWeb Name=行名）不依赖 face 行匹配，长期真机无恙。
+      ⑤ 系统桥字体运行时 NAPI 读取、构建期无文件可验，仅断言期望行名存在
+         （期望值=交集机制注册的 family 名）。"""
+    names = [r[0] for r in FONT_INFOS]
+    all_files = FONT_FILES + SYSTEM_FONT_FILES
+    dup = sorted({n for n in names if names.count(n) > 1})
+    if dup:
+        raise SystemExit('FONT_INFOS 重复行名（按名索引将后写覆盖前写）: %s' % dup)
+    bad = []
+    for row in FONT_INFOS:
+        nm, slots = row[0], list(zip(('R', 'B', 'I', 'BI'), row[1::2]))
+        for k, v in slots:
+            if v != -1 and not 0 <= v < len(all_files):
+                bad.append('%s.%s=%d 越界（共 %d 文件）' % (nm, k, v, len(all_files)))
+        for k, v in slots[1:]:
+            if v == slots[0][1] and v != -1:
+                bad.append('%s.%s == indexR=%d（伪真变体槽 → 合成加粗/斜体失效）'
+                           % (nm, k, v))
+    if bad:
+        raise SystemExit('FONT_INFOS 下标契约破坏:\n  ' + '\n  '.join(bad))
+    subset_fams = {fam for (_f, _s, fam) in FONT_SUBSETS.values() if fam}
+    miss = sorted(subset_fams - set(names))
+    if miss:
+        raise SystemExit('FONT_SUBSETS 重写 family 无同名 FONT_INFOS 行: %s' % miss)
+    wrong = []
+    unknown = []
+    exempt = {'Liberation Serif', 'Liberation Mono'}
+    for fn, fam in families.items():
+        if fam is None:
+            continue
+        if fn in FONT_SUBSETS and FONT_SUBSETS[fn][2]:
+            if fam != FONT_SUBSETS[fn][2]:
+                wrong.append('%s: name 表=%r，期望重写=%r' % (fn, fam, FONT_SUBSETS[fn][2]))
+        elif fam not in names and fam not in exempt:
+            unknown.append('%s: 内部 family=%r 无同名 FONT_INFOS 行' % (fn, fam))
+    if wrong:
+        raise SystemExit('face 名重写未生效:\n  ' + '\n  '.join(wrong))
+    if unknown:
+        raise SystemExit('字体内部 family 无同名行（换/加字体须在 FONT_INFOS 配同名行）:\n  '
+                         + '\n  '.join(unknown))
+    sys_miss = sorted(exp for exp in SYSTEM_FONT_EXPECT.values() if exp not in names)
+    if sys_miss:
+        raise SystemExit('系统桥字体期望行名缺失: %s' % sys_miss)
 
 
 def rewrite_font_name(path, family):
@@ -1143,6 +1223,7 @@ def main():
         shutil.rmtree(FONT_DST)
     os.makedirs(FONT_DST, exist_ok=True)
     fonts_ok = 0
+    families = {}
     for fn in FONT_FILES:
         if fn in FONT_SUBSETS:
             _full, _sub, _fam = FONT_SUBSETS[fn]
@@ -1156,10 +1237,13 @@ def main():
             raise SystemExit('字体缺失：%s（FONT_SRC_BY_FILE 未覆盖或路径失效）'
                              % src_font)
         shutil.copy2(src_font, dst_font)
+        # name 表读取须在 pre_xor_font 加密前（密文不可解析）
+        families[fn] = read_font_family(dst_font)
         if not pre_xor_font(dst_font):
             raise SystemExit('字体预加密失败：%s' % fn)
         fonts_ok += 1
     print('  字体 → %s (%d/%d files)' % (FONT_DST, fonts_ok, len(FONT_FILES)))
+    assert_font_registry(families)
     assert_print_font_list()
 
     # 5.5 字体缩略图精灵（官方 web 语义 CThumbnailLoader 消费——字族下拉真源，
