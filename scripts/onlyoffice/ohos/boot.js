@@ -258,16 +258,14 @@
                       var _perm = new window.AscCommon.asc_CAscEditorPermissions();
                       _perm.setLicenseType(window.Asc.c_oLicenseResult.Success);
                       _perm.setRights(window.Asc.c_oRights.Edit);
-                      // isLight=true = 官方「light 无协同单机」语义（2026-09-08 定案）——
-                      // 原 setIsLight(false) 是 M3 许可降级链产物，导致 asc_getIsLight()
-                      // =false → Main.js:1707 canCoAuthoring=!isLight=true → 页面按「在线
-                      // 协同」走 loadCoAuthSettings：fastCoauth=true「快速」预选+协作段
-                      // 显示、尾段 autosave 公式短路到 canCoAuthoring→1 → 设置面板「自动
-                      // 保存」误勾选（customization.autosave=false / 00_boot 预写'0' 均
-                      // 被公式架空）。true 后：canCoAuthoring=false → loadCoAuthSettings
-                      // 单机分支（fastCoauth=false, autosave=0）；Main.js:1787 light 分支
-                      // 禁 History/Review/Chat——本地单机本无这些（无服务器），正合。
-                      _perm.setIsLight(true);
+                      // isLight=false = 官方本地许可语义（Local/license.js 构造权限对象
+                      // 不设 isLight，构造默认即 false，apiCommon.js asc_CAscEditorPermissions）。
+                      // 单机协同段/自动保存不靠 isLight 压制：asc_isOffline()=true 时
+                      // loadCoAuthSettings 恒落单机分支（autosave=0，customization.autosave
+                      // 双保险），设置面板协同行因 !isOffline 恒隐藏。
+                      // isLight=true 会触发 Main.js 的 light 连坐禁 canReview——修订/审阅
+                      // 是纯本地功能（官方桌面版 isLight=false 下可用），曾被误杀。
+                      _perm.setIsLight(false);
                       _perm.setBuildVersion(_pageVer);
                       // （2026-09-05 稳定化：原 PERM_ENTER 探针 wrap 移除——诊断打点，
                       //  定位工作已完成；权限分发异常现在由页面 console 直接可见）
